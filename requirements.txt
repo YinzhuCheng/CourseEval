@@ -5,5 +5,5 @@ jinja2
 python-multipart
 redis
 rq
-passlib[bcrypt]
 email-validator
+itsdangerous

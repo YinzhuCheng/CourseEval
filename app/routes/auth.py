@@ -1,3 +1,4 @@
+from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, Form
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -42,6 +43,11 @@ def register_user(
 
     if not username or not email or not password:
         push_flash(request, "All fields are required.", "danger")
+        return RedirectResponse(url="/register", status_code=303)
+    try:
+        email = validate_email(email, check_deliverability=False).normalized
+    except EmailNotValidError:
+        push_flash(request, "Please enter a valid email address.", "danger")
         return RedirectResponse(url="/register", status_code=303)
     if password != confirm_password:
         push_flash(request, "Password confirmation does not match.", "danger")

@@ -26,4 +26,4 @@ def render_template(
     }
     if context:
         base_context.update(context)
-    return templates.TemplateResponse(template_name, base_context, status_code=status_code)
+    return templates.TemplateResponse(request, template_name, dict(base_context), status_code=status_code)
