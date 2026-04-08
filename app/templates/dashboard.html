@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Notebook Runner MVP{% endblock %}
+
+{% block extra_head %}
+{% if has_active_jobs %}
+<meta http-equiv="refresh" content="5" />
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">Your notebook jobs</h1>
+    <p class="text-muted mb-0">Track uploads, execution progress, and generated artifacts.</p>
+  </div>
+  <a class="btn btn-primary" href="/jobs/new">Upload notebook</a>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    {% if jobs %}
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Task ID</th>
+            <th>Notebook</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Started</th>
+            <th>Finished</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr>
+            <td>#{{ job.id }}</td>
+            <td>{{ job.notebook.original_filename }}</td>
+            <td>
+              <span class="badge status-badge status-{{ job.status.value }}">{{ job.status.value }}</span>
+            </td>
+            <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else "-" }}</td>
+            <td>{{ job.finished_at.strftime("%Y-%m-%d %H:%M:%S") if job.finished_at else "-" }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="/jobs/{{ job.id }}">Details</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h2 class="h5">No notebook jobs yet</h2>
+      <p class="text-muted">Upload your first .ipynb file to validate the full runner flow.</p>
+      <a class="btn btn-primary" href="/jobs/new">Create your first job</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
