@@ -74,6 +74,7 @@
                 <th>Provider</th>
                 <th>Model</th>
                 <th>Status</th>
+                <th>API Key</th>
                 <th>Last test</th>
                 <th></th>
               </tr>
@@ -85,7 +86,8 @@
                 <td>{{ config.provider_type.value }}</td>
                 <td>{{ config.model_name }}</td>
                 <td>{{ config.last_test_status.value }}</td>
-                <td>{{ config.last_tested_at.strftime("%Y-%m-%d %H:%M:%S") if config.last_tested_at else "-" }}</td>
+                <td class="small text-muted">{{ config.api_key[:4] ~ "..." ~ config.api_key[-4:] if config.api_key and config.api_key|length > 8 else ("*" * (config.api_key|length) if config.api_key else "-") }}</td>
+                <td>{{ format_datetime(config.last_tested_at) if config.last_tested_at else "-" }}</td>
                 <td class="text-end">
                   <form method="post" action="/admin/llm-configs/{{ config.id }}/test">
                     <button class="btn btn-sm btn-outline-primary" type="submit">Test</button>

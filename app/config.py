@@ -39,6 +39,7 @@ class Settings:
     sample_dir: Path
     debug: bool
     teacher_registration_code: str
+    administrator_registration_code: str
     default_locale: str
     timezone_name: str
 
@@ -67,6 +68,7 @@ def get_settings() -> Settings:
         sample_dir=BASE_DIR / "samples",
         debug=_bool_env("DEBUG", False),
         teacher_registration_code=os.getenv("TEACHER_REGISTRATION_CODE", "teacher2026"),
+        administrator_registration_code=os.getenv("ADMINISTRATOR_REGISTRATION_CODE", "administrator2026"),
         default_locale=os.getenv("DEFAULT_LOCALE", "en"),
         timezone_name=os.getenv("TIMEZONE_NAME", "Asia/Shanghai"),
     )

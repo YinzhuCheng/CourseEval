@@ -26,6 +26,7 @@ from app.constants import (
     SubmissionStatus,
 )
 from app.db import SessionLocal, utcnow
+from app.services.llm import test_llm_connectivity, generate_feedback_with_llm, generate_short_answer_evaluation
 from app.models import (
     Assignment,
     CourseMember,
@@ -50,6 +51,14 @@ class RunnerResult:
     exit_code: int
     error_message: str | None = None
     summary_json: dict | None = None
+
+
+def _resolve_llm_config_for_question(question: Question):
+    return (
+        question.llm_config
+        or question.assignment.llm_config
+        or question.assignment.course.default_llm_config
+    )
 
 
 def redis_connection() -> Redis:
@@ -496,9 +505,21 @@ def create_short_answer_submission(
         is_effective_submission=True,
     )
     db.add(submission)
+    db.flush()
+    if config and config.llm_suggestion_enabled:
+        db.add(
+            EvaluationTask(
+                submission_id=submission.id,
+                task_type=EvaluationTaskType.SHORT_ANSWER_LLM,
+                backend_type="rq",
+                status=EvaluationTaskStatus.QUEUED,
+            )
+        )
     db.commit()
     db.refresh(submission)
     update_final_grade_snapshot(db, submission)
+    if config and config.llm_suggestion_enabled:
+        enqueue_short_answer_llm(db, submission.id)
     return submission
 
 
@@ -526,6 +547,73 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
     )
     submission.status = SubmissionStatus.QUEUED
     submission.queued_at = utcnow()
+    task.backend_job_id = rq_job.id
+    task.status = EvaluationTaskStatus.QUEUED
+    db.commit()
+    return rq_job.id
+
+
+def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise ValueError("Submission not found.")
+
+    task = db.scalar(
+        select(EvaluationTask)
+        .where(
+            EvaluationTask.submission_id == submission_id,
+            EvaluationTask.task_type == EvaluationTaskType.SHORT_ANSWER_LLM,
+        )
+        .order_by(EvaluationTask.created_at.desc())
+    )
+    if task is None:
+        raise ValueError("Short-answer LLM task not found.")
+
+    rq_job = get_queue().enqueue(
+        process_short_answer_llm_evaluation,
+        submission_id,
+        task.id,
+        job_timeout=120,
+        result_ttl=86400,
+        failure_ttl=86400,
+    )
+    task.backend_job_id = rq_job.id
+    task.status = EvaluationTaskStatus.QUEUED
+    db.commit()
+    return rq_job.id
+
+
+def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise ValueError("Submission not found.")
+
+    task = db.scalar(
+        select(EvaluationTask)
+        .where(
+            EvaluationTask.submission_id == submission_id,
+            EvaluationTask.task_type == EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
+        )
+        .order_by(EvaluationTask.created_at.desc())
+    )
+    if task is None:
+        task = EvaluationTask(
+            submission_id=submission_id,
+            task_type=EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
+            backend_type="rq",
+            status=EvaluationTaskStatus.QUEUED,
+        )
+        db.add(task)
+        db.flush()
+
+    rq_job = get_queue().enqueue(
+        process_notebook_llm_feedback,
+        submission_id,
+        task.id,
+        job_timeout=120,
+        result_ttl=86400,
+        failure_ttl=86400,
+    )
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
@@ -665,6 +753,11 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
             memory_limit=memory_limit,
             cpus=cpus,
             network_disabled=network_disabled,
+            visible_tests_source=notebook_config.visible_tests_source if notebook_config else "",
+            hidden_tests_source=notebook_config.hidden_tests_source if notebook_config else "",
+            execution_weight=str(notebook_config.execution_weight if notebook_config else Decimal("0")),
+            visible_weight=str(notebook_config.visible_weight if notebook_config else Decimal("100")),
+            hidden_weight=str(notebook_config.hidden_weight if notebook_config else Decimal("0")),
         )
 
         evaluation_result = EvaluationResult(
@@ -734,6 +827,14 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
 
         db.commit()
         update_final_grade_snapshot(db, submission)
+        if (
+            submission.status in {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED_ANSWER}
+            and notebook_config
+            and notebook_config.llm_feedback_enabled
+            and _resolve_llm_config_for_question(question)
+        ):
+            with SessionLocal() as enqueue_db:
+                enqueue_notebook_llm_feedback(enqueue_db, submission.id)
     except Exception as exc:  # pragma: no cover
         logger.exception("Unexpected error while processing submission %s", submission_id)
         submission = db.get(Submission, submission_id)
@@ -762,6 +863,11 @@ def run_job_in_docker(
     memory_limit: str,
     cpus: str,
     network_disabled: bool,
+    visible_tests_source: str,
+    hidden_tests_source: str,
+    execution_weight: str,
+    visible_weight: str,
+    hidden_weight: str,
 ) -> RunnerResult:
     input_path = absolute_data_path(input_relative_path)
     output_dir = absolute_data_path(output_dir_relative_path)
@@ -817,6 +923,16 @@ def run_job_in_docker(
             "/job/output/stderr.txt",
             "--summary",
             "/job/output/summary.json",
+            "--visible-tests",
+            visible_tests_source,
+            "--hidden-tests",
+            hidden_tests_source,
+            "--execution-weight",
+            execution_weight,
+            "--visible-weight",
+            visible_weight,
+            "--hidden-weight",
+            hidden_weight,
             "--timeout",
             str(timeout_seconds),
         ]
@@ -883,6 +999,126 @@ def run_job_in_docker(
         return RunnerResult(exit_code=1, error_message=message, summary_json=summary_json)
 
     return RunnerResult(exit_code=0, summary_json=summary_json)
+
+
+def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> None:
+    db = SessionLocal()
+    try:
+        submission = db.scalar(
+            select(Submission)
+            .options(joinedload(Submission.question).joinedload(Question.short_answer_config), joinedload(Submission.assignment).joinedload(Assignment.course))
+            .where(Submission.id == submission_id)
+        )
+        task = db.get(EvaluationTask, task_id)
+        if submission is None or task is None:
+            return
+
+        llm_config = _resolve_llm_config_for_question(submission.question)
+        if llm_config is None or not llm_config.enabled:
+            task.status = EvaluationTaskStatus.FAILED
+            task.error_message = "No enabled LLM config available."
+            task.finished_at = utcnow()
+            db.commit()
+            return
+
+        task.status = EvaluationTaskStatus.RUNNING
+        task.started_at = utcnow()
+        db.commit()
+
+        result = generate_short_answer_evaluation(
+            llm_config,
+            question_title=submission.question.title,
+            question_description=submission.question.description or "",
+            rubric_text=submission.question.short_answer_config.rubric_text if submission.question.short_answer_config else "",
+            answer_text=submission.answer_text or "",
+            max_score=float(submission.question.max_score),
+        )
+        db.add(
+            Feedback(
+                submission_id=submission.id,
+                source=FeedbackSource.LLM,
+                score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
+                comment_text=result.get("comment_text"),
+            )
+        )
+        task.status = EvaluationTaskStatus.SUCCEEDED
+        task.finished_at = utcnow()
+        db.commit()
+        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
+    except Exception as exc:
+        logger.exception("Short-answer LLM evaluation failed for submission %s", submission_id)
+        task = db.get(EvaluationTask, task_id)
+        if task is not None:
+            task.status = EvaluationTaskStatus.FAILED
+            task.finished_at = utcnow()
+            task.error_message = str(exc)
+            db.commit()
+    finally:
+        db.close()
+
+
+def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
+    db = SessionLocal()
+    try:
+        submission = db.scalar(
+            select(Submission)
+            .options(
+                joinedload(Submission.question).joinedload(Question.notebook_config),
+                joinedload(Submission.assignment).joinedload(Assignment.course),
+                joinedload(Submission.evaluation_results),
+            )
+            .where(Submission.id == submission_id)
+        )
+        task = db.get(EvaluationTask, task_id)
+        if submission is None or task is None:
+            return
+
+        llm_config = _resolve_llm_config_for_question(submission.question)
+        latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
+        if llm_config is None or latest_result is None or not llm_config.enabled:
+            task.status = EvaluationTaskStatus.FAILED
+            task.error_message = "No enabled LLM config or evaluation result available."
+            task.finished_at = utcnow()
+            db.commit()
+            return
+
+        task.status = EvaluationTaskStatus.RUNNING
+        task.started_at = utcnow()
+        db.commit()
+
+        stdout_text = read_submission_artifact_text(latest_result, "stdout")
+        stderr_text = read_submission_artifact_text(latest_result, "stderr")
+        feedback_text = generate_feedback_with_llm(
+            llm_config,
+            question_title=submission.question.title,
+            question_description=submission.question.description or "",
+            summary_json=latest_result.summary_json or "{}",
+            stdout_text=stdout_text,
+            stderr_text=stderr_text,
+            auto_score=float(latest_result.auto_score or 0),
+        )
+        db.add(
+            Feedback(
+                submission_id=submission.id,
+                evaluation_result_id=latest_result.id,
+                source=FeedbackSource.LLM,
+                comment_text=feedback_text,
+            )
+        )
+        task.status = EvaluationTaskStatus.SUCCEEDED
+        task.finished_at = utcnow()
+        db.commit()
+        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
+    except Exception as exc:
+        logger.exception("Notebook LLM feedback failed for submission %s", submission_id)
+        task = db.get(EvaluationTask, task_id)
+        if task is not None:
+            task.status = EvaluationTaskStatus.FAILED
+            task.finished_at = utcnow()
+            task.error_message = str(exc)
+            db.commit()
+    finally:
+        db.close()
 
 
 def _force_remove_container(container_name: str) -> None:

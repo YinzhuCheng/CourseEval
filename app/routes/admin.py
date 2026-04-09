@@ -1,5 +1,4 @@
 import json
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Form
 from fastapi.responses import RedirectResponse
@@ -17,6 +16,7 @@ from app.constants import (
 )
 from app.db import get_db, utcnow
 from app.models import LLMConfig, RuntimeImage, User
+from app.services.llm import test_llm_connectivity
 from app.services.permissions import RedirectRequired, require_admin
 from app.web import render_template
 
@@ -182,16 +182,14 @@ def admin_test_llm_config(config_id: int, request: Request, db: Session = Depend
         push_flash(request, "LLM config not found.", "danger")
         return RedirectResponse(url="/admin/llm-configs", status_code=303)
 
-    # Lightweight connectivity smoke-test placeholder for MVP evolution.
-    if config.base_url and config.model_name and config.enabled:
-        config.last_test_status = LLMTestStatus.SUCCESS
-        config.last_test_message = "Configuration format looks valid. Live provider call is not implemented yet."
-    else:
-        config.last_test_status = LLMTestStatus.FAILED
-        config.last_test_message = "Missing required fields for provider connectivity test."
+    result = test_llm_connectivity(config)
+    config.last_test_status = LLMTestStatus.SUCCESS if result.success else LLMTestStatus.FAILED
+    config.last_test_message = result.message
+    flash_category = "success" if result.success else "danger"
+    flash_message = "LLM connectivity test succeeded." if result.success else f"LLM connectivity test failed: {result.message}"
     config.last_tested_at = utcnow()
     db.commit()
-    push_flash(request, "LLM test status updated.", "success")
+    push_flash(request, flash_message, flash_category)
     return RedirectResponse(url="/admin/llm-configs", status_code=303)
 
 

@@ -65,6 +65,12 @@
           <dt class="col-sm-6">Final score</dt>
           <dd class="col-sm-6">{{ latest_result.final_score if latest_result.final_score is not none else "-" }}</dd>
         </dl>
+        {% if latest_result.summary_json %}
+        {% set summary = latest_result.summary_json %}
+        <hr />
+        <h3 class="h6 mb-2">Evaluation summary</h3>
+        <pre class="artifact-block">{{ summary }}</pre>
+        {% endif %}
         {% else %}
         <p class="text-muted mb-0">No evaluation result available yet.</p>
         {% endif %}

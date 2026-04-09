@@ -33,12 +33,14 @@ def _register_form_data(
     email: str = "",
     account_role: str = AccountRole.STUDENT.value,
     teacher_code: str = "",
+    administrator_code: str = "",
 ) -> dict[str, str]:
     return {
         "username": username,
         "email": email,
         "account_role": account_role,
         "teacher_code": teacher_code,
+        "administrator_code": administrator_code,
     }
 
 
@@ -83,6 +85,7 @@ def register_user(
     email: str = Form(...),
     account_role: str = Form(AccountRole.STUDENT.value),
     teacher_code: str = Form(""),
+    administrator_code: str = Form(""),
     password: str = Form(...),
     confirm_password: str = Form(...),
     db: Session = Depends(get_db),
@@ -90,11 +93,13 @@ def register_user(
     username = username.strip()
     email = email.strip().lower()
     teacher_code = teacher_code.strip()
+    administrator_code = administrator_code.strip()
     form_data = _register_form_data(
         username=username,
         email=email,
         account_role=account_role,
         teacher_code=teacher_code,
+        administrator_code=administrator_code,
     )
 
     try:
@@ -123,19 +128,27 @@ def register_user(
     if selected_account_role == AccountRole.TEACHER and teacher_code != settings.teacher_registration_code:
         push_flash(request, t(request, "flash.teacher_code_invalid"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+    if selected_account_role == AccountRole.ADMINISTRATOR and not administrator_code:
+        push_flash(request, t(request, "flash.admin_code_required"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+    if (
+        selected_account_role == AccountRole.ADMINISTRATOR
+        and administrator_code != settings.administrator_registration_code
+    ):
+        push_flash(request, t(request, "flash.admin_code_invalid"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
     existing_user = db.scalar(select(User).where(or_(User.username == username, User.email == email)))
     if existing_user:
         push_flash(request, t(request, "flash.username_email_exists"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
-    is_first_user = db.scalar(select(User).limit(1)) is None
     user = User(
         username=username,
         email=email,
         password_hash=hash_password(password),
         account_role=selected_account_role,
-        platform_role=PlatformRole.ADMIN if is_first_user else PlatformRole.USER,
+        platform_role=PlatformRole.ADMIN if selected_account_role == AccountRole.ADMINISTRATOR else PlatformRole.USER,
     )
     db.add(user)
     db.commit()

@@ -22,7 +22,7 @@
           <dt class="col-sm-5">Status</dt>
           <dd class="col-sm-7"><span class="badge bg-secondary">{{ submission.status.value }}</span></dd>
           <dt class="col-sm-5">Submitted</dt>
-          <dd class="col-sm-7">{{ submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S") }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
           <dt class="col-sm-5">Question type</dt>
           <dd class="col-sm-7">{{ submission.submission_type.value }}</dd>
           <dt class="col-sm-5">Counts toward limit</dt>
@@ -49,6 +49,11 @@
           <dt class="col-sm-5">Final score</dt>
           <dd class="col-sm-7">{{ latest_result.final_score if latest_result.final_score is not none else "-" }}</dd>
         </dl>
+        {% if latest_result.summary_json %}
+        <hr />
+        <h3 class="h6 mb-2">Structured summary</h3>
+        <pre class="artifact-block">{{ latest_result.summary_json }}</pre>
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -92,7 +97,7 @@
           <div class="border rounded p-3">
             <div class="d-flex justify-content-between mb-2">
               <strong>{{ item.source.value }}</strong>
-              <span class="text-muted small">{{ item.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+              <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
             </div>
             <div class="small text-muted mb-2">
               score suggestion: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}

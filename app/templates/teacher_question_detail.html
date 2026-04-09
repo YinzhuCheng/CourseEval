@@ -62,17 +62,24 @@
                 <th>ID</th>
                 <th>Student</th>
                 <th>Status</th>
+                <th>Visible</th>
+                <th>Hidden</th>
+                <th>Auto</th>
                 <th>Submitted</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {% for submission in submissions %}
+              {% set latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None %}
               <tr>
                 <td>#{{ submission.id }}</td>
                 <td>{{ submission.user.username }}</td>
                 <td><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></td>
-                <td>{{ submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                <td>{{ latest_result.visible_score if latest_result and latest_result.visible_score is not none else "-" }}</td>
+                <td>{{ latest_result.hidden_score if latest_result and latest_result.hidden_score is not none else "-" }}</td>
+                <td>{{ latest_result.auto_score if latest_result and latest_result.auto_score is not none else "-" }}</td>
+                <td>{{ format_datetime(submission.submitted_at) }}</td>
                 <td class="text-end">
                   <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ submission.id }}">Open</a>
                 </td>

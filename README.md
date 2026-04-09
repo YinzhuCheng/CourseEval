@@ -60,7 +60,7 @@ Out of scope for this MVP:
 - Kubernetes
 - Multi-machine scheduling
 - OAuth / SMS / email verification
-- Full live LLM provider invocation
+- Advanced LLM workflow controls such as retries, moderation review, and cost accounting
 - Batch grading workflows
 - TA-specific UI refinement
 - Rich hidden-test authoring interface
@@ -236,6 +236,7 @@ Important variables:
 - `SECRET_KEY`: session signing key, change in production
 - `DEFAULT_LOCALE`: default UI language (`en` or `zh`)
 - `TEACHER_REGISTRATION_CODE`: required when a user registers as a teacher
+- `ADMINISTRATOR_REGISTRATION_CODE`: required when a user registers as an administrator
 - `DATABASE_URL`: SQLite URL
 - `REDIS_URL`: Redis connection string
 - `RUNNER_IMAGE`: Docker image tag used for notebook execution
@@ -326,14 +327,13 @@ Then fill:
 
 - username
 - email
-- account role (`student` or `teacher`)
+- account role (`student`, `teacher`, or `administrator`)
 - teacher registration code (required only for teacher accounts)
+- administrator registration code (required only for administrator accounts)
 - password
 - confirm password
 
 Registration logs you in immediately.
-
-The first registered user is also granted platform admin access.
 
 The UI language can be switched from the top-right navigation bar between English and Chinese.
 
@@ -406,14 +406,16 @@ For notebook questions:
 4. System creates `EvaluationTask`
 5. Worker automatically runs isolated Docker evaluation
 6. System writes `EvaluationResult`
-7. System updates `FinalGradeSnapshot`
+7. If enabled, worker also enqueues notebook LLM feedback generation
+8. System updates `FinalGradeSnapshot`
 
 For short-answer questions:
 
 1. Student submits text
 2. System creates `Submission`
-3. Teacher reviews manually
-4. Teacher feedback updates `FinalGradeSnapshot`
+3. If enabled, worker runs an LLM suggestion task
+4. Teacher reviews and can override the suggested score/comment
+5. Teacher feedback updates `FinalGradeSnapshot`
 
 ## Evaluation result semantics
 

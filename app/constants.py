@@ -9,6 +9,7 @@ class PlatformRole(str, Enum):
 class AccountRole(str, Enum):
     STUDENT = "student"
     TEACHER = "teacher"
+    ADMINISTRATOR = "administrator"
 
 
 class Locale(str, Enum):
