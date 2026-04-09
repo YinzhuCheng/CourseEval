@@ -1,4 +1,6 @@
 from collections.abc import Mapping
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -11,6 +13,15 @@ from app.i18n import get_locale, template_translator
 
 settings = get_settings()
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+display_timezone = ZoneInfo(settings.timezone_name)
+
+
+def format_datetime(value: datetime | None, pattern: str = "%Y-%m-%d %H:%M:%S") -> str:
+    if value is None:
+        return "-"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=display_timezone)
+    return value.astimezone(display_timezone).strftime(pattern)
 
 
 def render_template(
@@ -26,6 +37,7 @@ def render_template(
         "flashes": pop_flashes(request),
         "current_locale": get_locale(request),
         "t": template_translator(request),
+        "format_datetime": format_datetime,
     }
     base_context["can_use_teacher_features"] = is_teacher_account(base_context["current_user"])
     if context:

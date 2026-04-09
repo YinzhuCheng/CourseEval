@@ -51,6 +51,11 @@ def ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def ensure_writable_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o777)
+
+
 def write_text(path: Path, content: str, append: bool = False) -> None:
     ensure_parent_dir(path)
     mode = "a" if append else "w"
@@ -84,7 +89,7 @@ def create_job_with_upload(
     db.flush()
 
     output_dir = settings.outputs_dir / f"job-{job.id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_writable_directory(output_dir)
 
     output = JobOutput(
         job_id=job.id,
@@ -230,7 +235,7 @@ def run_job_in_docker(job: Job) -> RunnerResult:
     stdout_path = absolute_data_path(job.output.stdout_path)
     stderr_path = absolute_data_path(job.output.stderr_path)
     output_dir = executed_path.parent
-    output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_writable_directory(output_dir)
 
     for artifact_path in (executed_path, html_path, stdout_path, stderr_path):
         if artifact_path.exists():

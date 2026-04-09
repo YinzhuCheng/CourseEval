@@ -31,8 +31,8 @@
           <tr>
             <td>{{ assignment.title }}</td>
             <td><span class="badge text-bg-secondary">{{ assignment.status.value }}</span></td>
-            <td>{{ assignment.open_at.strftime("%Y-%m-%d %H:%M") if assignment.open_at else "-" }}</td>
-            <td>{{ assignment.due_at.strftime("%Y-%m-%d %H:%M") if assignment.due_at else "-" }}</td>
+            <td>{{ format_datetime(assignment.open_at, "%Y-%m-%d %H:%M") }}</td>
+            <td>{{ format_datetime(assignment.due_at, "%Y-%m-%d %H:%M") }}</td>
             <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/student/assignments/{{ assignment.id }}">View</a></td>
           </tr>
           {% endfor %}

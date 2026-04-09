@@ -97,6 +97,7 @@ class Course(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    join_code: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[CourseStatus] = mapped_column(

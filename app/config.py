@@ -40,6 +40,7 @@ class Settings:
     debug: bool
     teacher_registration_code: str
     default_locale: str
+    timezone_name: str
 
 
 @lru_cache
@@ -67,4 +68,5 @@ def get_settings() -> Settings:
         debug=_bool_env("DEBUG", False),
         teacher_registration_code=os.getenv("TEACHER_REGISTRATION_CODE", "teacher2026"),
         default_locale=os.getenv("DEFAULT_LOCALE", "en"),
+        timezone_name=os.getenv("TIMEZONE_NAME", "Asia/Shanghai"),
     )

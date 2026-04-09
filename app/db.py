@@ -66,6 +66,8 @@ def migrate_legacy_schema() -> None:
         _ensure_column("users", "updated_at", "DATETIME")
         _normalize_enum_values("users", "account_role", {"TEACHER": "teacher", "STUDENT": "student"})
         _normalize_enum_values("users", "platform_role", {"USER": "user", "ADMIN": "admin"})
+    if "courses" in inspector.get_table_names():
+        _ensure_column("courses", "join_code", "VARCHAR(32)")
 
     enum_normalizations = {
         "course_members": {

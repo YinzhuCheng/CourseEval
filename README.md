@@ -363,6 +363,12 @@ After registration, the system bootstraps a **Demo Course** for the new user to 
 - `/student/questions/{id}`
 - `/student/submissions/{id}`
 
+Student course page now also supports:
+
+- joining a course by join code
+- viewing assignment schedules in the configured UI timezone
+- notebook submission auto-queueing for automatic evaluation
+
 ### Teacher pages
 
 - `/teacher/courses`
@@ -370,6 +376,16 @@ After registration, the system bootstraps a **Demo Course** for the new user to 
 - `/teacher/assignments/{id}`
 - `/teacher/questions/{id}`
 - `/teacher/submissions/{id}`
+
+Teacher workflow currently supports:
+
+- creating courses
+- sharing a generated course join code with students
+- creating assignments
+- creating notebook / short-answer questions
+- configuring visible tests / hidden tests source text
+- configuring scoring rule and basic submission limits
+- reviewing submissions and overriding scores/comments
 
 ### Admin pages
 
@@ -388,7 +404,7 @@ For notebook questions:
 2. Student uploads `.ipynb`
 3. System creates `Submission`
 4. System creates `EvaluationTask`
-5. Worker runs isolated Docker evaluation
+5. Worker automatically runs isolated Docker evaluation
 6. System writes `EvaluationResult`
 7. System updates `FinalGradeSnapshot`
 
@@ -456,6 +472,24 @@ Each job output directory stores:
 - `executed.html`
 - `stdout.txt`
 - `stderr.txt`
+
+Submission evaluation artifacts are stored under:
+
+- `data/outputs/submissions/submission-<submission_id>/`
+
+Each submission output directory stores:
+
+- `executed.ipynb`
+- `executed.html`
+- `stdout.txt`
+- `stderr.txt`
+- `summary.json`
+
+## Timezone and language behavior
+
+- UI language can be switched globally between English and Chinese from the navigation bar
+- default language comes from `DEFAULT_LOCALE`
+- template-rendered timestamps are formatted in Asia/Shanghai (Beijing time)
 
 ## Redis usage
 

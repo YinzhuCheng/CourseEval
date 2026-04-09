@@ -99,6 +99,18 @@
   </div>
 
   <div class="col-lg-5">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ "Course join code" if current_locale == "en" else "课程加入码" }}</h2>
+        <div class="input-group">
+          <input class="form-control font-monospace" value="{{ course.join_code or '-' }}" readonly />
+        </div>
+        <p class="small text-muted mt-2 mb-0">
+          {{ "Share this code with students so they can join the course themselves." if current_locale == "en" else "把这个加入码发给学生，学生即可自行加入课程。" }}
+        </p>
+      </div>
+    </div>
+
     <div class="card shadow-sm">
       <div class="card-body">
         <h2 class="h5 mb-3">Course members</h2>

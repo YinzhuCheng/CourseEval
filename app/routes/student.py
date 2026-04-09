@@ -10,12 +10,14 @@ from app.services.courses import (
     get_assignment_for_student,
     get_course_for_student,
     get_question_for_student,
+    join_course_by_code,
     list_courses_for_student,
 )
 from app.services.permissions import RedirectRequired, require_student_access, require_user
 from app.services.submissions import (
     create_notebook_submission,
     create_short_answer_submission,
+    enqueue_submission_evaluation,
     get_submission_for_student,
     list_submissions_for_question,
     read_submission_artifact_text,
@@ -36,6 +38,21 @@ def student_courses(request: Request, db: Session = Depends(get_db)):
 
     courses = list_courses_for_student(db, user.id)
     return render_template(request, db, "student_courses.html", {"courses": courses})
+
+
+@router.post("/courses/join")
+def join_course(request: Request, join_code: str = Form(...), db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+
+    try:
+        course = join_course_by_code(db, user=user, join_code=join_code)
+        push_flash(request, f"You joined course {course.code}.", "success")
+    except ValueError as exc:
+        push_flash(request, str(exc), "danger")
+    return RedirectResponse(url="/student/courses", status_code=303)
 
 
 @router.get("/courses/{course_id}")
@@ -118,6 +135,7 @@ async def submit_notebook(
             original_filename=filename,
             notebook_bytes=file_bytes,
         )
+        enqueue_submission_evaluation(db, submission.id)
         push_flash(request, f"Submission #{submission.id} created and queued.", "success")
     except ValueError as exc:
         push_flash(request, str(exc), "danger")

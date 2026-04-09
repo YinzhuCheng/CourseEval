@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ assignment.title }} - Teacher{% endblock %}
+{% block title %}{{ assignment.title }} - {{ t("nav.teacher") }}{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -8,26 +8,28 @@
     <h1 class="h3 mb-1">{{ assignment.title }}</h1>
     <p class="text-muted mb-0">{{ assignment.course.title }} / {{ assignment.status.value }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="/teacher/courses/{{ assignment.course_id }}">Back to course</a>
+  <a class="btn btn-outline-secondary" href="/teacher/courses/{{ assignment.course_id }}">
+    {{ "返回课程" if current_locale == "zh" else "Back to course" }}
+  </a>
 </div>
 
 <div class="row g-4">
   <div class="col-lg-7">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Assignment settings</h2>
+        <h2 class="h5 mb-3">{{ "作业设置" if current_locale == "zh" else "Assignment settings" }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-4">Open at</dt>
-          <dd class="col-sm-8">{{ assignment.open_at or "-" }}</dd>
-          <dt class="col-sm-4">Due at</dt>
-          <dd class="col-sm-8">{{ assignment.due_at or "-" }}</dd>
-          <dt class="col-sm-4">Close at</dt>
-          <dd class="col-sm-8">{{ assignment.close_at or "-" }}</dd>
-          <dt class="col-sm-4">Allow late</dt>
-          <dd class="col-sm-8">{{ "Yes" if assignment.allow_late else "No" }}</dd>
-          <dt class="col-sm-4">Scoring rule</dt>
+          <dt class="col-sm-4">{{ "开放时间" if current_locale == "zh" else "Open at" }}</dt>
+          <dd class="col-sm-8">{{ format_datetime(assignment.open_at) }}</dd>
+          <dt class="col-sm-4">{{ "截止时间" if current_locale == "zh" else "Due at" }}</dt>
+          <dd class="col-sm-8">{{ format_datetime(assignment.due_at) }}</dd>
+          <dt class="col-sm-4">{{ "关闭时间" if current_locale == "zh" else "Close at" }}</dt>
+          <dd class="col-sm-8">{{ format_datetime(assignment.close_at) }}</dd>
+          <dt class="col-sm-4">{{ "允许迟交" if current_locale == "zh" else "Allow late" }}</dt>
+          <dd class="col-sm-8">{{ "是" if assignment.allow_late and current_locale == "zh" else "否" if current_locale == "zh" else "Yes" if assignment.allow_late else "No" }}</dd>
+          <dt class="col-sm-4">{{ "计分规则" if current_locale == "zh" else "Scoring rule" }}</dt>
           <dd class="col-sm-8">{{ assignment.default_scoring_rule.value }}</dd>
-          <dt class="col-sm-4">Submission limit</dt>
+          <dt class="col-sm-4">{{ "提交限制" if current_locale == "zh" else "Submission limit" }}</dt>
           <dd class="col-sm-8">
             {{ assignment.submission_limit_mode.value }}
             {% if assignment.submission_limit_value %}({{ assignment.submission_limit_value }}){% endif %}
@@ -38,16 +40,16 @@
 
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Questions</h2>
+        <h2 class="h5 mb-3">{{ "题目列表" if current_locale == "zh" else "Questions" }}</h2>
         {% if questions %}
         <div class="table-responsive">
           <table class="table align-middle">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Title</th>
-                <th>Type</th>
-                <th>Max score</th>
+                <th>{{ "标题" if current_locale == "zh" else "Title" }}</th>
+                <th>{{ "题型" if current_locale == "zh" else "Type" }}</th>
+                <th>{{ "满分" if current_locale == "zh" else "Max score" }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -58,14 +60,14 @@
                 <td>{{ question.title }}</td>
                 <td>{{ question.question_type.value }}</td>
                 <td>{{ question.max_score }}</td>
-                <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">Manage</a></td>
+                <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">{{ "管理" if current_locale == "zh" else "Manage" }}</a></td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
         {% else %}
-        <p class="text-muted mb-0">No questions yet.</p>
+        <p class="text-muted mb-0">{{ "还没有题目。" if current_locale == "zh" else "No questions yet." }}</p>
         {% endif %}
       </div>
     </div>
@@ -74,81 +76,81 @@
   <div class="col-lg-5">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Create question</h2>
+        <h2 class="h5 mb-3">{{ "创建题目" if current_locale == "zh" else "Create question" }}</h2>
         <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Title</label>
+            <label class="form-label">{{ "标题" if current_locale == "zh" else "Title" }}</label>
             <input class="form-control" name="title" required />
           </div>
           <div class="col-12">
-            <label class="form-label">Description</label>
+            <label class="form-label">{{ "描述" if current_locale == "zh" else "Description" }}</label>
             <textarea class="form-control" name="description" rows="3"></textarea>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Type</label>
+            <label class="form-label">{{ "题型" if current_locale == "zh" else "Type" }}</label>
             <select class="form-select" name="question_type">
-              <option value="notebook">Notebook</option>
-              <option value="short_answer">Short answer</option>
+              <option value="notebook">{{ "Notebook 编程题" if current_locale == "zh" else "Notebook" }}</option>
+              <option value="short_answer">{{ "简答题" if current_locale == "zh" else "Short answer" }}</option>
             </select>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Max score</label>
+            <label class="form-label">{{ "满分" if current_locale == "zh" else "Max score" }}</label>
             <input class="form-control" name="max_score" value="100" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Rule override</label>
+            <label class="form-label">{{ "计分规则覆盖" if current_locale == "zh" else "Rule override" }}</label>
             <select class="form-select" name="scoring_rule_override">
-              <option value="">Use assignment default</option>
-              <option value="latest">Latest</option>
-              <option value="highest">Highest</option>
+              <option value="">{{ "使用作业默认规则" if current_locale == "zh" else "Use assignment default" }}</option>
+              <option value="latest">{{ "最后一次" if current_locale == "zh" else "Latest" }}</option>
+              <option value="highest">{{ "最高分" if current_locale == "zh" else "Highest" }}</option>
             </select>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Notebook timeout</label>
+            <label class="form-label">{{ "Notebook 超时秒数" if current_locale == "zh" else "Notebook timeout" }}</label>
             <input class="form-control" name="time_limit_seconds" value="300" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Notebook memory MB</label>
+            <label class="form-label">{{ "Notebook 内存 MB" if current_locale == "zh" else "Notebook memory MB" }}</label>
             <input class="form-control" name="memory_limit_mb" value="1024" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Notebook CPU</label>
+            <label class="form-label">{{ "Notebook CPU" if current_locale == "zh" else "Notebook CPU" }}</label>
             <input class="form-control" name="cpu_limit" value="1" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">Execution weight</label>
+            <label class="form-label">{{ "执行成功权重" if current_locale == "zh" else "Execution weight" }}</label>
             <input class="form-control" name="execution_weight" value="0" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">Visible weight</label>
+            <label class="form-label">{{ "可见测试权重" if current_locale == "zh" else "Visible weight" }}</label>
             <input class="form-control" name="visible_weight" value="100" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">Hidden weight</label>
+            <label class="form-label">{{ "隐藏测试权重" if current_locale == "zh" else "Hidden weight" }}</label>
             <input class="form-control" name="hidden_weight" value="0" />
           </div>
           <div class="col-12">
-            <label class="form-label">Visible tests source</label>
+            <label class="form-label">{{ "可见测试代码" if current_locale == "zh" else "Visible tests source" }}</label>
             <textarea class="form-control font-monospace" name="visible_tests_source" rows="5" placeholder="assert 1 + 1 == 2"></textarea>
           </div>
           <div class="col-12">
-            <label class="form-label">Hidden tests source</label>
+            <label class="form-label">{{ "隐藏测试代码" if current_locale == "zh" else "Hidden tests source" }}</label>
             <textarea class="form-control font-monospace" name="hidden_tests_source" rows="5"></textarea>
           </div>
           <div class="col-12">
-            <label class="form-label">Short answer rubric</label>
+            <label class="form-label">{{ "简答题评分细则" if current_locale == "zh" else "Short answer rubric" }}</label>
             <textarea class="form-control" name="rubric_text" rows="3"></textarea>
           </div>
           <div class="col-md-6">
-            <label class="form-label">Short answer min length</label>
+            <label class="form-label">{{ "简答题最小长度" if current_locale == "zh" else "Short answer min length" }}</label>
             <input class="form-control" name="min_length" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Short answer max length</label>
+            <label class="form-label">{{ "简答题最大长度" if current_locale == "zh" else "Short answer max length" }}</label>
             <input class="form-control" name="max_length" />
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Create question</button>
+            <button class="btn btn-primary" type="submit">{{ "创建题目" if current_locale == "zh" else "Create question" }}</button>
           </div>
         </form>
       </div>
@@ -156,7 +158,7 @@
 
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Recent submissions</h2>
+        <h2 class="h5 mb-3">{{ "最近提交" if current_locale == "zh" else "Recent submissions" }}</h2>
         {% if submissions %}
         <div class="list-group list-group-flush">
           {% for submission in submissions %}
@@ -166,7 +168,7 @@
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">No submissions yet.</p>
+        <p class="text-muted mb-0">{{ "还没有提交。" if current_locale == "zh" else "No submissions yet." }}</p>
         {% endif %}
       </div>
     </div>

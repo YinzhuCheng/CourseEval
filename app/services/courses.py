@@ -1,3 +1,4 @@
+import secrets
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -28,6 +29,10 @@ from app.models import (
     Submission,
     User,
 )
+
+
+def generate_join_code() -> str:
+    return secrets.token_hex(3).upper()
 
 
 def list_courses_for_student(db: Session, user_id: int) -> list[Course]:
@@ -265,6 +270,7 @@ def create_course(
 ) -> Course:
     course = Course(
         code=code.strip().upper(),
+        join_code=generate_join_code(),
         title=title.strip(),
         description=description.strip() or None,
         status=CourseStatus.ACTIVE,
@@ -302,6 +308,33 @@ def create_course(
 
     db.commit()
     return get_course(db, course.id)  # type: ignore[return-value]
+
+
+def join_course_by_code(db: Session, *, user: User, join_code: str) -> Course:
+    normalized = join_code.strip().upper()
+    course = db.scalar(select(Course).where(Course.join_code == normalized))
+    if course is None:
+        raise ValueError("Course join code is invalid.")
+
+    membership = db.scalar(
+        select(CourseMember).where(
+            CourseMember.course_id == course.id,
+            CourseMember.user_id == user.id,
+        )
+    )
+    if membership is None:
+        membership = CourseMember(
+            course_id=course.id,
+            user_id=user.id,
+            role=CourseRole.STUDENT,
+            status=MembershipStatus.ACTIVE,
+        )
+        db.add(membership)
+    else:
+        membership.role = CourseRole.STUDENT
+        membership.status = MembershipStatus.ACTIVE
+    db.commit()
+    return course
 
 
 def create_assignment(
@@ -589,6 +622,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
 
     course = Course(
         code=f"DEMO-{user.id}",
+        join_code=generate_join_code(),
         title="Demo Course",
         description="Bootstrap course created automatically for first-time exploration.",
         status=CourseStatus.ACTIVE,

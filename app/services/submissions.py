@@ -72,6 +72,11 @@ def ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def ensure_writable_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o777)
+
+
 def write_text(path: Path, content: str, append: bool = False) -> None:
     ensure_parent_dir(path)
     mode = "a" if append else "w"
@@ -650,7 +655,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
         db.commit()
 
         output_dir = settings.outputs_dir / "submissions" / f"submission-{submission.id}"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        ensure_writable_directory(output_dir)
 
         result = run_job_in_docker(
             input_relative_path=submission.notebook.stored_path,
@@ -765,7 +770,7 @@ def run_job_in_docker(
     stdout_path = output_dir / "stdout.txt"
     stderr_path = output_dir / "stderr.txt"
     summary_path = output_dir / "summary.json"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_writable_directory(output_dir)
 
     for artifact_path in (executed_path, html_path, stdout_path, stderr_path, summary_path):
         if artifact_path.exists():

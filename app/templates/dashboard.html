@@ -41,9 +41,9 @@
             <td>
               <span class="badge status-badge status-{{ job.status.value }}">{{ job.status.value }}</span>
             </td>
-            <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-            <td>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else "-" }}</td>
-            <td>{{ job.finished_at.strftime("%Y-%m-%d %H:%M:%S") if job.finished_at else "-" }}</td>
+            <td>{{ format_datetime(job.created_at) }}</td>
+            <td>{{ format_datetime(job.started_at) if job.started_at else "-" }}</td>
+            <td>{{ format_datetime(job.finished_at) if job.finished_at else "-" }}</td>
             <td class="text-end">
               <a class="btn btn-sm btn-outline-primary" href="/jobs/{{ job.id }}">{{ t("dashboard.details") }}</a>
             </td>

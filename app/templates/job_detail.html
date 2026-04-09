@@ -32,13 +32,13 @@
           </dd>
 
           <dt class="col-sm-5">Created</dt>
-          <dd class="col-sm-7">{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(job.created_at) }}</dd>
 
           <dt class="col-sm-5">Started</dt>
-          <dd class="col-sm-7">{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else "-" }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(job.started_at) }}</dd>
 
           <dt class="col-sm-5">Finished</dt>
-          <dd class="col-sm-7">{{ job.finished_at.strftime("%Y-%m-%d %H:%M:%S") if job.finished_at else "-" }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(job.finished_at) }}</dd>
 
           <dt class="col-sm-5">Exit code</dt>
           <dd class="col-sm-7">{{ job.exit_code if job.exit_code is not none else "-" }}</dd>

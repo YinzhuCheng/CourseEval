@@ -29,13 +29,13 @@
           <dd class="col-sm-7"><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></dd>
 
           <dt class="col-sm-5">Submitted</dt>
-          <dd class="col-sm-7">{{ submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S") }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
 
           <dt class="col-sm-5">Started</dt>
-          <dd class="col-sm-7">{{ submission.started_at.strftime("%Y-%m-%d %H:%M:%S") if submission.started_at else "-" }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(submission.started_at) if submission.started_at else "-" }}</dd>
 
           <dt class="col-sm-5">Completed</dt>
-          <dd class="col-sm-7">{{ submission.completed_at.strftime("%Y-%m-%d %H:%M:%S") if submission.completed_at else "-" }}</dd>
+          <dd class="col-sm-7">{{ format_datetime(submission.completed_at) if submission.completed_at else "-" }}</dd>
 
           <dt class="col-sm-5">Late</dt>
           <dd class="col-sm-7">{{ "Yes" if submission.is_late else "No" }}</dd>
@@ -96,7 +96,7 @@
           <div class="list-group-item px-0">
             <div class="d-flex justify-content-between">
               <strong>{{ item.source.value }}</strong>
-              <span class="text-muted small">{{ item.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+              <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
             </div>
             <div class="small text-muted mb-1">Score suggestion: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}</div>
             <div>{{ item.comment_text or "-" }}</div>
