@@ -7,8 +7,11 @@ from starlette.responses import JSONResponse
 
 from app.config import get_settings
 from app.db import ensure_data_directories, init_database
+from app.routes.admin import router as admin_router
 from app.routes.auth import router as auth_router
 from app.routes.jobs import router as jobs_router
+from app.routes.student import router as student_router
+from app.routes.teacher import router as teacher_router
 
 
 settings = get_settings()
@@ -26,6 +29,9 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 app.include_router(auth_router)
+app.include_router(student_router)
+app.include_router(teacher_router)
+app.include_router(admin_router)
 app.include_router(jobs_router)
 
 

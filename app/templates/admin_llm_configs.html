@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Admin LLM Configs{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">Platform LLM configs</h1>
+    <p class="text-muted mb-0">Manage provider connections for scoring suggestions and feedback generation.</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/admin/system">System</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Create platform config</h2>
+        <form method="post" action="/admin/llm-configs" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Config name</label>
+            <input class="form-control" name="name" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Provider</label>
+            <select class="form-select" name="provider_type">
+              <option value="openai_compatible">OpenAI compatible</option>
+              <option value="gemini">Gemini</option>
+              <option value="claude">Claude</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Base URL</label>
+            <input class="form-control" name="base_url" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">API key</label>
+            <input class="form-control" name="api_key" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Model name</label>
+            <input class="form-control" name="model_name" required />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Timeout</label>
+            <input class="form-control" type="number" name="timeout_seconds" value="30" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Max tokens</label>
+            <input class="form-control" type="number" name="max_tokens" value="512" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Temperature</label>
+            <input class="form-control" name="temperature" value="0.2" />
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Create config</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Existing configs</h2>
+        {% if configs %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Provider</th>
+                <th>Model</th>
+                <th>Status</th>
+                <th>Last test</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for config in configs %}
+              <tr>
+                <td>{{ config.name }}</td>
+                <td>{{ config.provider_type.value }}</td>
+                <td>{{ config.model_name }}</td>
+                <td>{{ config.last_test_status.value }}</td>
+                <td>{{ config.last_tested_at.strftime("%Y-%m-%d %H:%M:%S") if config.last_tested_at else "-" }}</td>
+                <td class="text-end">
+                  <form method="post" action="/admin/llm-configs/{{ config.id }}/test">
+                    <button class="btn btn-sm btn-outline-primary" type="submit">Test</button>
+                  </form>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="6" class="small text-muted">
+                  {{ config.last_test_message or "No connectivity test has been run yet." }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No LLM configs yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

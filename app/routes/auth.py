@@ -14,8 +14,10 @@ from app.auth import (
     push_flash,
     verify_password,
 )
+from app.constants import PlatformRole
 from app.db import get_db
 from app.models import User
+from app.services.courses import bootstrap_sample_data
 from app.web import render_template
 
 
@@ -61,10 +63,17 @@ def register_user(
         push_flash(request, "Username or email is already registered.", "danger")
         return RedirectResponse(url="/register", status_code=303)
 
-    user = User(username=username, email=email, password_hash=hash_password(password))
+    is_first_user = db.scalar(select(User).limit(1)) is None
+    user = User(
+        username=username,
+        email=email,
+        password_hash=hash_password(password),
+        platform_role=PlatformRole.ADMIN if is_first_user else PlatformRole.USER,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
+    bootstrap_sample_data(db, user)
 
     login_user(request, user)
     push_flash(request, "Registration successful. Welcome!", "success")

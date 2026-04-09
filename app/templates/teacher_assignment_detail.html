@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}{{ assignment.title }} - Teacher{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ assignment.title }}</h1>
+    <p class="text-muted mb-0">{{ assignment.course.title }} / {{ assignment.status.value }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/teacher/courses/{{ assignment.course_id }}">Back to course</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Assignment settings</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Open at</dt>
+          <dd class="col-sm-8">{{ assignment.open_at or "-" }}</dd>
+          <dt class="col-sm-4">Due at</dt>
+          <dd class="col-sm-8">{{ assignment.due_at or "-" }}</dd>
+          <dt class="col-sm-4">Close at</dt>
+          <dd class="col-sm-8">{{ assignment.close_at or "-" }}</dd>
+          <dt class="col-sm-4">Allow late</dt>
+          <dd class="col-sm-8">{{ "Yes" if assignment.allow_late else "No" }}</dd>
+          <dt class="col-sm-4">Scoring rule</dt>
+          <dd class="col-sm-8">{{ assignment.default_scoring_rule.value }}</dd>
+          <dt class="col-sm-4">Submission limit</dt>
+          <dd class="col-sm-8">
+            {{ assignment.submission_limit_mode.value }}
+            {% if assignment.submission_limit_value %}({{ assignment.submission_limit_value }}){% endif %}
+          </dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Questions</h2>
+        {% if questions %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Max score</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for question in questions %}
+              <tr>
+                <td>{{ question.order_index }}</td>
+                <td>{{ question.title }}</td>
+                <td>{{ question.question_type.value }}</td>
+                <td>{{ question.max_score }}</td>
+                <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">Manage</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No questions yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Create question</h2>
+        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Title</label>
+            <input class="form-control" name="title" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="3"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Type</label>
+            <select class="form-select" name="question_type">
+              <option value="notebook">Notebook</option>
+              <option value="short_answer">Short answer</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Max score</label>
+            <input class="form-control" name="max_score" value="100" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Rule override</label>
+            <select class="form-select" name="scoring_rule_override">
+              <option value="">Use assignment default</option>
+              <option value="latest">Latest</option>
+              <option value="highest">Highest</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Notebook timeout</label>
+            <input class="form-control" name="time_limit_seconds" value="300" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Notebook memory MB</label>
+            <input class="form-control" name="memory_limit_mb" value="1024" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Notebook CPU</label>
+            <input class="form-control" name="cpu_limit" value="1" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Execution weight</label>
+            <input class="form-control" name="execution_weight" value="0" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Visible weight</label>
+            <input class="form-control" name="visible_weight" value="100" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Hidden weight</label>
+            <input class="form-control" name="hidden_weight" value="0" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Visible tests source</label>
+            <textarea class="form-control font-monospace" name="visible_tests_source" rows="5" placeholder="assert 1 + 1 == 2"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Hidden tests source</label>
+            <textarea class="form-control font-monospace" name="hidden_tests_source" rows="5"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Short answer rubric</label>
+            <textarea class="form-control" name="rubric_text" rows="3"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Short answer min length</label>
+            <input class="form-control" name="min_length" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Short answer max length</label>
+            <input class="form-control" name="max_length" />
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Create question</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Recent submissions</h2>
+        {% if submissions %}
+        <div class="list-group list-group-flush">
+          {% for submission in submissions %}
+          <a class="list-group-item list-group-item-action" href="/teacher/submissions/{{ submission.id }}">
+            #{{ submission.id }} - {{ submission.user.username }} - {{ submission.status.value }}
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No submissions yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Question - {{ question.title }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ question.title }}</h1>
+    <p class="text-muted mb-0">{{ question.assignment.course.code }} / {{ question.assignment.title }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/teacher/assignments/{{ question.assignment.id }}">Back to assignment</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Question settings</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-5">Type</dt>
+          <dd class="col-sm-7">{{ question.question_type.value }}</dd>
+          <dt class="col-sm-5">Max score</dt>
+          <dd class="col-sm-7">{{ question.max_score }}</dd>
+          <dt class="col-sm-5">Rule override</dt>
+          <dd class="col-sm-7">{{ question.scoring_rule_override.value if question.scoring_rule_override else "-" }}</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Active grade snapshots</h2>
+        {% if snapshots %}
+        <div class="list-group list-group-flush">
+          {% for snapshot in snapshots %}
+          <div class="list-group-item px-0">
+            <div class="fw-semibold">Student #{{ snapshot.student_id }}</div>
+            <div class="small text-muted">
+              score={{ snapshot.score if snapshot.score is not none else "-" }},
+              rule={{ snapshot.grading_rule_applied.value }},
+              source={{ snapshot.feedback_source.value if snapshot.feedback_source else "-" }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No effective grades yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submissions</h2>
+        {% if submissions %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Student</th>
+                <th>Status</th>
+                <th>Submitted</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for submission in submissions %}
+              <tr>
+                <td>#{{ submission.id }}</td>
+                <td>{{ submission.user.username }}</td>
+                <td><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></td>
+                <td>{{ submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ submission.id }}">Open</a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No submissions yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

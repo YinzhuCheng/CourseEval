@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}{{ question.title }} - Student{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ question.title }}</h1>
+    <p class="text-muted mb-0">{{ question.assignment.course.code }} / {{ question.assignment.title }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/student/assignments/{{ question.assignment.id }}">Back to assignment</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5">Question description</h2>
+        <p class="text-muted">{{ question.description or "No description provided." }}</p>
+        <ul class="small text-muted mb-0">
+          <li>Type: {{ question.question_type.value }}</li>
+          <li>Max score: {{ question.max_score }}</li>
+          <li>Scoring rule: {{ (question.scoring_rule_override or question.assignment.default_scoring_rule).value }}</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submit answer</h2>
+        {% if question.question_type.value == "notebook" %}
+        <form method="post" action="/student/questions/{{ question.id }}/submit-notebook" enctype="multipart/form-data" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Notebook file</label>
+            <input class="form-control" type="file" name="notebook_file" accept=".ipynb" required />
+          </div>
+          {% if question.notebook_config %}
+          <div class="col-12">
+            <div class="small text-muted">
+              Time limit {{ question.notebook_config.time_limit_seconds }}s,
+              memory {{ question.notebook_config.memory_limit_mb }} MB,
+              CPU {{ question.notebook_config.cpu_limit }},
+              network {{ "enabled" if question.notebook_config.allow_network else "disabled" }}.
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Upload notebook submission</button>
+          </div>
+        </form>
+        {% else %}
+        <form method="post" action="/student/questions/{{ question.id }}/submit-text" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Answer</label>
+            <textarea class="form-control" rows="8" name="answer_text" required></textarea>
+          </div>
+          {% if question.short_answer_config and question.short_answer_config.rubric_text %}
+          <div class="col-12">
+            <div class="alert alert-info mb-0">
+              <strong>Rubric:</strong> {{ question.short_answer_config.rubric_text }}
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Submit answer</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submission history</h2>
+        {% if submissions %}
+        <div class="list-group">
+          {% for submission in submissions %}
+          <a class="list-group-item list-group-item-action" href="/student/submissions/{{ submission.id }}">
+            <div class="d-flex justify-content-between align-items-center">
+              <strong>#{{ submission.id }}</strong>
+              <span class="badge status-badge status-{{ submission.status.value|replace('_', '-') }}">{{ submission.status.value }}</span>
+            </div>
+            <div class="small text-muted mt-1">
+              {{ submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S") }}
+            </div>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No submissions yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

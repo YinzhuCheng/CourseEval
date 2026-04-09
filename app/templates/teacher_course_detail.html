@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ course.title }} - Teacher Course{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ course.title }}</h1>
+    <p class="text-muted mb-0">{{ course.code }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/teacher/courses">Back to courses</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Assignments</h2>
+        {% if assignments %}
+        <div class="list-group mb-4">
+          {% for assignment in assignments %}
+          <a class="list-group-item list-group-item-action" href="/teacher/assignments/{{ assignment.id }}">
+            <div class="d-flex justify-content-between align-items-center">
+              <div>
+                <strong>{{ assignment.title }}</strong>
+                <div class="small text-muted">{{ assignment.status.value }} · {{ assignment.default_scoring_rule.value }}</div>
+              </div>
+              <span class="btn btn-sm btn-outline-primary">Manage</span>
+            </div>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">No assignments yet.</p>
+        {% endif %}
+
+        <h3 class="h6 mb-3">Create assignment</h3>
+        <form method="post" action="/teacher/courses/{{ course.id }}/assignments" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Title</label>
+            <input class="form-control" name="title" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="3"></textarea>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Status</label>
+            <select class="form-select" name="status">
+              <option value="draft">draft</option>
+              <option value="published">published</option>
+              <option value="closed">closed</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Scoring rule</label>
+            <select class="form-select" name="default_scoring_rule">
+              <option value="latest">latest</option>
+              <option value="highest">highest</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Limit mode</label>
+            <select class="form-select" name="submission_limit_mode">
+              <option value="unlimited">unlimited</option>
+              <option value="daily">daily</option>
+              <option value="total">total</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Open at</label>
+            <input class="form-control" name="open_at" type="datetime-local" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Due at</label>
+            <input class="form-control" name="due_at" type="datetime-local" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Close at</label>
+            <input class="form-control" name="close_at" type="datetime-local" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Allow late</label>
+            <select class="form-select" name="allow_late">
+              <option value="false">false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Submission limit value</label>
+            <input class="form-control" name="submission_limit_value" type="number" min="1" />
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Create assignment</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Course members</h2>
+        {% if members %}
+        <ul class="list-group mb-4">
+          {% for member in members %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <strong>{{ member.user.username }}</strong>
+              <div class="small text-muted">{{ member.user.email }}</div>
+            </div>
+            <span class="badge bg-secondary">{{ member.role.value }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        <h3 class="h6 mb-3">Add / update member</h3>
+        <form method="post" action="/teacher/courses/{{ course.id }}/members" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Username</label>
+            <input class="form-control" name="username" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Role</label>
+            <select class="form-select" name="role">
+              <option value="student">student</option>
+              <option value="teacher">teacher</option>
+              <option value="ta">ta</option>
+            </select>
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-outline-primary" type="submit">Save member</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

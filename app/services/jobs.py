@@ -1,7 +1,9 @@
+import json
 import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,9 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
-from app.constants import JobStatus
+from app.constants import EvaluationTaskStatus, FeedbackSource, JobStatus, QuestionType, SubmissionStatus
 from app.db import SessionLocal, utcnow
-from app.models import Job, JobOutput, Notebook
+from app.models import EvaluationResult, EvaluationTask, Feedback, FinalGradeSnapshot, Job, JobOutput, Notebook, Submission
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,9 @@ settings = get_settings()
 class RunnerResult:
     exit_code: int
     error_message: str | None = None
+    stdout_text: str | None = None
+    stderr_text: str | None = None
+    summary_json: str | None = None
 
 
 def redis_connection() -> Redis:

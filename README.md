@@ -1,36 +1,69 @@
-# Notebook Runner MVP
+# Notebook Runner MVP / Course Evaluation Platform Skeleton
 
-Notebook Runner MVP is a minimal notebook execution validation system built for a single Ubuntu 22.04 machine. It focuses on one critical flow only:
+This repository started as a minimal notebook execution validation system and has been incrementally expanded into a lightweight course-assignment evaluation platform skeleton.
 
-`register/login -> upload .ipynb -> enqueue async job -> run notebook inside Docker -> inspect status and results`
+It now supports two layers simultaneously:
 
-This project is intentionally small and practical. It is not an online notebook editor, not a teaching platform, and not a multi-node scheduler.
+1. **Legacy notebook runner flow**  
+   `register/login -> upload .ipynb -> enqueue async job -> run notebook inside Docker -> inspect status and results`
 
-## MVP scope
+2. **Course assignment workflow foundation**  
+   `course -> assignment -> question -> per-question submission -> async evaluation -> score/feedback snapshot`
 
-Included in this version:
+The project still keeps the original notebook runner chain alive so that existing deployments are not broken while the system evolves toward a fuller teaching platform.
+
+## Current scope
+
+Included in the current version:
 
 - User registration
 - User login/logout with session cookie
-- Upload `.ipynb` files
+- Legacy notebook upload and execution pages
 - Persist notebooks and jobs in SQLite
 - Queue jobs in Redis with RQ
 - Execute each notebook in an ephemeral Docker container
-- Track job states: `queued`, `running`, `success`, `failed`
+- Track legacy job states: `queued`, `running`, `success`, `failed`
 - View stdout/stderr
 - Download executed notebook and HTML export
-- Restrict users to only their own jobs and artifacts
+- Restrict users to only their own legacy jobs and artifacts
+- Course model
+- Course membership model
+- Assignment model
+- Question model for:
+  - notebook programming questions
+  - short-answer questions
+- Per-question submission model
+- Evaluation task / evaluation result model
+- Teacher feedback model
+- Final grade snapshot model
+- Student pages:
+  - my courses
+  - assignment detail
+  - question detail
+  - submission detail
+- Teacher pages:
+  - course management
+  - assignment management
+  - question detail
+  - submission grading
+- Admin pages:
+  - user role management
+  - runtime image records
+  - LLM config records
+  - system overview
 
 Out of scope for this MVP:
 
 - Online notebook editing
-- Teacher/student roles
-- Assignments, grading, courses
 - Object storage
 - PostgreSQL
 - Kubernetes
 - Multi-machine scheduling
 - OAuth / SMS / email verification
+- Full live LLM provider invocation
+- Batch grading workflows
+- TA-specific UI refinement
+- Rich hidden-test authoring interface
 
 ## Tech stack
 
@@ -90,16 +123,56 @@ Out of scope for this MVP:
 ## Key modules
 
 - `app/main.py`: FastAPI app entrypoint, middleware, startup initialization
-- `app/models.py`: `users`, `notebooks`, `jobs`, `job_outputs` schema definitions
+- `app/models.py`: legacy runner tables plus expanded course/submission/evaluation tables
 - `app/routes/auth.py`: register/login/logout pages and handlers
-- `app/routes/jobs.py`: dashboard, upload form, job detail, artifact download
-- `app/services/jobs.py`: upload persistence, RQ queueing, Docker runner orchestration, artifact handling
+- `app/routes/jobs.py`: legacy dashboard, upload form, job detail, artifact download
+- `app/routes/student.py`: student course / assignment / question / submission pages
+- `app/routes/teacher.py`: teacher management and grading pages
+- `app/routes/admin.py`: admin records and role pages
+- `app/services/jobs.py`: backward-compatible legacy job service wrapper
+- `app/services/submissions.py`: new submission/evaluation orchestration
+- `app/services/courses.py`: course/assignment/question management helpers
+- `app/services/permissions.py`: platform + course role checks
 - `worker.py`: RQ worker process
-- `runner/execute_notebook.py`: code that runs inside the container to execute/export notebook
+- `runner/execute_notebook.py`: code that runs inside the container to execute/export notebook and write structured summary
 
 ## Data model
 
-The application uses four core tables:
+The repository now contains both legacy and expanded domain tables.
+
+### Legacy runner tables
+
+- `users`
+- `notebooks`
+- `jobs`
+- `job_outputs`
+
+These are kept so existing deployments and existing `/dashboard` + `/jobs/*` flows still work.
+
+### Expanded course evaluation tables
+
+- `courses`
+- `course_members`
+- `assignments`
+- `questions`
+- `notebook_question_configs`
+- `short_answer_question_configs`
+- `runtime_images`
+- `llm_configs`
+- `submissions`
+- `evaluation_tasks`
+- `evaluation_results`
+- `feedback`
+- `final_grade_snapshots`
+
+Important semantics:
+
+- `Submission` is the business submission record
+- `EvaluationTask` is the background execution task record
+- `EvaluationResult` stores structured automatic evaluation output
+- `FinalGradeSnapshot` stores the currently effective grade for a student/question pair
+- `failed_system` submissions do **not** count toward limits
+- `failed_answer` submissions **do** count toward limits and are considered effective submissions
 
 ### `users`
 
@@ -145,11 +218,12 @@ Indexes and foreign keys are included for the main lookup paths.
 Default runtime settings target a small single machine:
 
 - Worker concurrency: 1 process
-- Notebook timeout: 300 seconds
+- Notebook timeout: 300 seconds by default
 - Docker memory limit: 1G
 - Docker CPU limit: 1 core
 - Docker network: disabled by default
 - Upload size limit: 5 MB
+- Intended machine profile: single Ubuntu 22.04 ECS, 2 vCPU / 4 GiB
 
 Note: this version does not implement a strict database-level guard that blocks a user from ever having more than one `running` job if multiple workers are started manually. The intended deployment is a single worker with concurrency 1.
 
@@ -255,7 +329,7 @@ Then fill:
 
 Registration logs you in immediately.
 
-## Uploading a notebook
+## Legacy notebook runner flow
 
 After login:
 
@@ -269,6 +343,77 @@ After login:
    - an RQ job in Redis
 
 The dashboard and detail page auto-refresh every 5 seconds while the job is active.
+
+## Course workflow pages
+
+After registration, the system bootstraps a **Demo Course** for the new user to make the expanded flow visible immediately.
+
+### Student pages
+
+- `/student/courses`
+- `/student/assignments/{id}`
+- `/student/questions/{id}`
+- `/student/submissions/{id}`
+
+### Teacher pages
+
+- `/teacher/courses`
+- `/teacher/courses/{id}`
+- `/teacher/assignments/{id}`
+- `/teacher/questions/{id}`
+- `/teacher/submissions/{id}`
+
+### Admin pages
+
+- `/admin/users`
+- `/admin/runtime-images`
+- `/admin/llm-configs`
+- `/admin/system`
+
+The first registered user becomes platform admin automatically.
+
+## Expanded submission flow
+
+For notebook questions:
+
+1. Student opens a question
+2. Student uploads `.ipynb`
+3. System creates `Submission`
+4. System creates `EvaluationTask`
+5. Worker runs isolated Docker evaluation
+6. System writes `EvaluationResult`
+7. System updates `FinalGradeSnapshot`
+
+For short-answer questions:
+
+1. Student submits text
+2. System creates `Submission`
+3. Teacher reviews manually
+4. Teacher feedback updates `FinalGradeSnapshot`
+
+## Evaluation result semantics
+
+Submission statuses:
+
+- `submitted`
+- `queued`
+- `running`
+- `completed`
+- `failed_system`
+- `failed_answer`
+
+Evaluation task statuses:
+
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+
+Score authority:
+
+1. Teacher score
+2. LLM suggestion / automatic score
+3. No score
 
 ## Minimal validation flow
 
@@ -327,15 +472,30 @@ Each notebook job is executed with a one-off `docker run` call from the worker:
 
 The host Python environment never executes user notebook code directly.
 
+The expanded submission flow still uses the same Docker-isolated execution principle; only the surrounding business objects changed from legacy `Job` to `Submission + EvaluationTask + EvaluationResult`.
+
 ## Web pages
 
-Implemented pages:
+Implemented pages include:
 
 - `/register`
 - `/login`
 - `/dashboard`
 - `/jobs/new`
 - `/jobs/{id}`
+- `/student/courses`
+- `/student/assignments/{id}`
+- `/student/questions/{id}`
+- `/student/submissions/{id}`
+- `/teacher/courses`
+- `/teacher/courses/{id}`
+- `/teacher/assignments/{id}`
+- `/teacher/questions/{id}`
+- `/teacher/submissions/{id}`
+- `/admin/users`
+- `/admin/runtime-images`
+- `/admin/llm-configs`
+- `/admin/system`
 
 ## Error handling covered
 
@@ -419,13 +579,15 @@ Example reverse proxy direction:
 
 - SQLite is suitable only for small single-node usage
 - No CSRF protection layer yet
-- No admin page
-- No notebook image allowlist/version management
+- LLM connectivity test is currently a structural smoke-test, not a live provider call
+- Runtime image records exist, but per-course runtime enforcement is still basic
 - No per-user storage quota
 - No background cleanup for old artifacts
 - No advanced sandbox hardening beyond Docker flags
 - Intended for a single worker process; not tuned for parallel execution
 - HTML output is served as generated and not sanitized beyond access control
+- Teacher and student can currently overlap through course membership simplifications
+- Queue backend is still RQ; migration to Celery is a future evolution step
 
 ## Future expansion ideas
 

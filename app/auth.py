@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
+from app.constants import PlatformRole
 from app.models import User
 
 
@@ -62,6 +63,10 @@ def get_current_user(request: Request, db: Session) -> User | None:
     if not user_id:
         return None
     return db.get(User, user_id)
+
+
+def is_admin(user: User | None) -> bool:
+    return bool(user and user.platform_role == PlatformRole.ADMIN and user.is_active)
 
 
 def login_user(request: Request, user: User) -> None:

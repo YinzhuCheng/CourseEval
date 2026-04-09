@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Admin System{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">System overview</h1>
+    <p class="text-muted mb-0">Lightweight operational view for the single-machine deployment.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="/admin/users">Users</a>
+    <a class="btn btn-outline-secondary" href="/admin/runtime-images">Runtime images</a>
+    <a class="btn btn-outline-secondary" href="/admin/llm-configs">LLM configs</a>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Quick stats</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-7">Users</dt>
+          <dd class="col-sm-5">{{ stats.users }}</dd>
+          <dt class="col-sm-7">Runtime images</dt>
+          <dd class="col-sm-5">{{ stats.runtime_images }}</dd>
+          <dt class="col-sm-7">LLM configs</dt>
+          <dd class="col-sm-5">{{ stats.llm_configs }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Raw diagnostic snapshot</h2>
+        <pre class="artifact-block">{{ raw_stats_json }}</pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
