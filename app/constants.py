@@ -6,6 +6,16 @@ class PlatformRole(str, Enum):
     ADMIN = "admin"
 
 
+class AccountRole(str, Enum):
+    STUDENT = "student"
+    TEACHER = "teacher"
+
+
+class Locale(str, Enum):
+    EN = "en"
+    ZH = "zh"
+
+
 class CourseStatus(str, Enum):
     ACTIVE = "active"
     ARCHIVED = "archived"

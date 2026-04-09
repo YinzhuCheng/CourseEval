@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
-from app.auth import get_current_user, push_flash
+from app.auth import push_flash
 from app.constants import (
     AssignmentStatus,
     CourseRole,
@@ -28,7 +28,7 @@ from app.models import (
     Submission,
 )
 from app.services.courses import get_course_for_teacher, get_question_for_teacher
-from app.services.permissions import require_course_role, require_login
+from app.services.permissions import RedirectRequired, require_course_role, require_login, require_teacher_account
 from app.services.submissions import get_submission_for_teacher, refresh_final_grade_snapshot
 from app.web import render_template
 
@@ -43,10 +43,9 @@ def _redirect(location: str) -> RedirectResponse:
 @router.get("/courses")
 def teacher_courses(request: Request, db: Session = Depends(get_db)):
     try:
-        user = require_login(request, db)
-    except PermissionError:
-        push_flash(request, "Please sign in to continue.", "warning")
-        return _redirect("/login")
+        user = require_teacher_account(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
 
     memberships = (
         db.query(CourseMember)
@@ -72,10 +71,9 @@ def create_course(
     db: Session = Depends(get_db),
 ):
     try:
-        user = require_login(request, db)
-    except PermissionError:
-        push_flash(request, "Please sign in to continue.", "warning")
-        return _redirect("/login")
+        user = require_teacher_account(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
 
     code = code.strip().upper()
     title = title.strip()
@@ -106,8 +104,10 @@ def create_course(
 @router.get("/courses/{course_id}")
 def teacher_course_detail(course_id: int, request: Request, db: Session = Depends(get_db)):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this course.", "danger")
         return _redirect("/teacher/courses")
@@ -142,8 +142,10 @@ def add_course_member(
     db: Session = Depends(get_db),
 ):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this course.", "danger")
         return _redirect("/teacher/courses")
@@ -194,8 +196,10 @@ def create_assignment(
     db: Session = Depends(get_db),
 ):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this course.", "danger")
         return _redirect("/teacher/courses")
@@ -231,7 +235,7 @@ def create_assignment(
 @router.get("/assignments/{assignment_id}")
 def teacher_assignment_detail(assignment_id: int, request: Request, db: Session = Depends(get_db)):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         assignment = (
             db.query(Assignment)
             .join(Course)
@@ -246,6 +250,8 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
         )
         if assignment is None:
             raise PermissionError
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this assignment.", "danger")
         return _redirect("/teacher/courses")
@@ -295,7 +301,7 @@ def create_question(
     db: Session = Depends(get_db),
 ):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         assignment = (
             db.query(Assignment)
             .join(Course)
@@ -310,6 +316,8 @@ def create_question(
         )
         if assignment is None:
             raise PermissionError
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this assignment.", "danger")
         return _redirect("/teacher/courses")
@@ -369,8 +377,10 @@ def create_question(
 @router.get("/questions/{question_id}")
 def teacher_question_detail(question_id: int, request: Request, db: Session = Depends(get_db)):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         question = get_question_for_teacher(db, question_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this question.", "danger")
         return _redirect("/teacher/courses")
@@ -398,8 +408,10 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
 @router.get("/submissions/{submission_id}")
 def teacher_submission_detail(submission_id: int, request: Request, db: Session = Depends(get_db)):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         submission = get_submission_for_teacher(db, submission_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this submission.", "danger")
         return _redirect("/teacher/courses")
@@ -427,8 +439,10 @@ def grade_submission(
     db: Session = Depends(get_db),
 ):
     try:
-        user = require_login(request, db)
+        user = require_teacher_account(request, db)
         submission = get_submission_for_teacher(db, submission_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
     except PermissionError:
         push_flash(request, "You do not have teacher access to this submission.", "danger")
         return _redirect("/teacher/courses")

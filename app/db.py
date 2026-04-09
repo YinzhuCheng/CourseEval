@@ -60,9 +60,11 @@ def ensure_data_directories() -> None:
 def migrate_legacy_schema() -> None:
     inspector = inspect(engine)
     if "users" in inspector.get_table_names():
+        _ensure_column("users", "account_role", "VARCHAR(20) NOT NULL DEFAULT 'teacher'")
         _ensure_column("users", "platform_role", "VARCHAR(20) NOT NULL DEFAULT 'user'")
         _ensure_column("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1")
         _ensure_column("users", "updated_at", "DATETIME")
+        _normalize_enum_values("users", "account_role", {"TEACHER": "teacher", "STUDENT": "student"})
         _normalize_enum_values("users", "platform_role", {"USER": "user", "ADMIN": "admin"})
 
     enum_normalizations = {

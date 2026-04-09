@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Notebook Runner MVP{% endblock %}
+{% block title %}{{ t("nav.runner_dashboard") }} - {{ t("site.title") }}{% endblock %}
 
 {% block extra_head %}
 {% if has_active_jobs %}
@@ -11,10 +11,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
-    <h1 class="h3 mb-1">Your notebook jobs</h1>
-    <p class="text-muted mb-0">Track uploads, execution progress, and generated artifacts.</p>
+    <h1 class="h3 mb-1">{{ t("dashboard.title") }}</h1>
+    <p class="text-muted mb-0">{{ t("dashboard.subtitle") }}</p>
   </div>
-  <a class="btn btn-primary" href="/jobs/new">Upload notebook</a>
+  <a class="btn btn-primary" href="/jobs/new">{{ t("dashboard.upload") }}</a>
 </div>
 
 <div class="card shadow-sm">
@@ -24,12 +24,12 @@
       <table class="table align-middle">
         <thead>
           <tr>
-            <th>Task ID</th>
-            <th>Notebook</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Started</th>
-            <th>Finished</th>
+            <th>{{ t("dashboard.task_id") }}</th>
+            <th>{{ t("dashboard.notebook") }}</th>
+            <th>{{ t("dashboard.status") }}</th>
+            <th>{{ t("dashboard.created") }}</th>
+            <th>{{ t("dashboard.started") }}</th>
+            <th>{{ t("dashboard.finished") }}</th>
             <th></th>
           </tr>
         </thead>
@@ -45,7 +45,7 @@
             <td>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else "-" }}</td>
             <td>{{ job.finished_at.strftime("%Y-%m-%d %H:%M:%S") if job.finished_at else "-" }}</td>
             <td class="text-end">
-              <a class="btn btn-sm btn-outline-primary" href="/jobs/{{ job.id }}">Details</a>
+              <a class="btn btn-sm btn-outline-primary" href="/jobs/{{ job.id }}">{{ t("dashboard.details") }}</a>
             </td>
           </tr>
           {% endfor %}
@@ -54,9 +54,9 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <h2 class="h5">No notebook jobs yet</h2>
-      <p class="text-muted">Upload your first .ipynb file to validate the full runner flow.</p>
-      <a class="btn btn-primary" href="/jobs/new">Create your first job</a>
+      <h2 class="h5">{{ t("dashboard.empty_title") }}</h2>
+      <p class="text-muted">{{ t("dashboard.empty_body") }}</p>
+      <a class="btn btn-primary" href="/jobs/new">{{ t("dashboard.empty_action") }}</a>
     </div>
     {% endif %}
   </div>

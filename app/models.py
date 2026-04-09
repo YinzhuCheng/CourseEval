@@ -2,6 +2,7 @@ from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, Nume
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.constants import (
+    AccountRole,
     AssignmentStatus,
     CourseRole,
     CourseStatus,
@@ -30,6 +31,12 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    account_role: Mapped[AccountRole] = mapped_column(
+        Enum(AccountRole, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=AccountRole.TEACHER,
+        index=True,
+    )
     platform_role: Mapped[PlatformRole] = mapped_column(
         Enum(PlatformRole, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,

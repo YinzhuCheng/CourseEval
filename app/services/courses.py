@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.constants import (
+    AccountRole,
     AssignmentStatus,
     CourseRole,
     CourseStatus,
@@ -597,11 +598,12 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
     db.add(course)
     db.flush()
 
+    bootstrap_role = CourseRole.TEACHER if user.account_role == AccountRole.TEACHER else CourseRole.STUDENT
     db.add(
         CourseMember(
             course_id=course.id,
             user_id=user.id,
-            role=CourseRole.TEACHER,
+            role=bootstrap_role,
             status=MembershipStatus.ACTIVE,
         )
     )

@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.constants import PlatformRole
+from app.constants import AccountRole, PlatformRole
 from app.models import User
 
 
@@ -67,6 +67,10 @@ def get_current_user(request: Request, db: Session) -> User | None:
 
 def is_admin(user: User | None) -> bool:
     return bool(user and user.platform_role == PlatformRole.ADMIN and user.is_active)
+
+
+def is_teacher_account(user: User | None) -> bool:
+    return bool(user and user.is_active and (user.account_role == AccountRole.TEACHER or is_admin(user)))
 
 
 def login_user(request: Request, user: User) -> None:

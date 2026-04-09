@@ -38,6 +38,8 @@ class Settings:
     static_dir: Path
     sample_dir: Path
     debug: bool
+    teacher_registration_code: str
+    default_locale: str
 
 
 @lru_cache
@@ -63,4 +65,6 @@ def get_settings() -> Settings:
         static_dir=BASE_DIR / "app" / "static",
         sample_dir=BASE_DIR / "samples",
         debug=_bool_env("DEBUG", False),
+        teacher_registration_code=os.getenv("TEACHER_REGISTRATION_CODE", "teacher2026"),
+        default_locale=os.getenv("DEFAULT_LOCALE", "en"),
     )

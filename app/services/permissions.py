@@ -2,8 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.auth import get_current_user, push_flash
+from app.auth import get_current_user, is_teacher_account, push_flash
 from app.constants import CourseRole, MembershipStatus, PlatformRole
+from app.i18n import t
 from app.models import Course, CourseMember, User
 
 
@@ -50,7 +51,7 @@ def can_manage_course(db: Session, course: Course, user: User | None) -> bool:
 def require_user(request: Request, db: Session) -> User:
     user = get_current_user(request, db)
     if user is None or not user.is_active:
-        push_flash(request, "Please sign in to continue.", "warning")
+        push_flash(request, t(request, "flash.auth_required"), "warning")
         raise RedirectRequired("/login")
     return user
 
@@ -65,8 +66,16 @@ def require_login(request: Request, db: Session) -> User:
 def require_admin(request: Request, db: Session) -> User:
     user = require_user(request, db)
     if not is_platform_admin(user):
-        push_flash(request, "Administrator access is required.", "danger")
+        push_flash(request, t(request, "flash.admin_required"), "danger")
         raise RedirectRequired("/dashboard")
+    return user
+
+
+def require_teacher_account(request: Request, db: Session) -> User:
+    user = require_user(request, db)
+    if not is_teacher_account(user):
+        push_flash(request, t(request, "flash.teacher_account_required"), "danger")
+        raise RedirectRequired("/student/courses")
     return user
 
 

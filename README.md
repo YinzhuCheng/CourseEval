@@ -234,6 +234,8 @@ Copy `.env.example` to `.env` and adjust values if needed.
 Important variables:
 
 - `SECRET_KEY`: session signing key, change in production
+- `DEFAULT_LOCALE`: default UI language (`en` or `zh`)
+- `TEACHER_REGISTRATION_CODE`: required when a user registers as a teacher
 - `DATABASE_URL`: SQLite URL
 - `REDIS_URL`: Redis connection string
 - `RUNNER_IMAGE`: Docker image tag used for notebook execution
@@ -324,10 +326,16 @@ Then fill:
 
 - username
 - email
+- account role (`student` or `teacher`)
+- teacher registration code (required only for teacher accounts)
 - password
 - confirm password
 
 Registration logs you in immediately.
+
+The first registered user is also granted platform admin access.
+
+The UI language can be switched from the top-right navigation bar between English and Chinese.
 
 ## Legacy notebook runner flow
 

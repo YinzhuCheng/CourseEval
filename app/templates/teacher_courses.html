@@ -1,28 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Teacher Courses - Notebook Runner MVP{% endblock %}
+{% block title %}{{ t("nav.teacher") }} - {{ t("site.title") }}{% endblock %}
 
 {% block content %}
 <div class="row g-4">
   <div class="col-lg-4">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h1 class="h4 mb-3">Create course</h1>
+        <h1 class="h4 mb-3">{{ t("teacher.courses.create_title") }}</h1>
         <form method="post" action="/teacher/courses" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Course code</label>
+            <label class="form-label">{{ t("teacher.courses.code") }}</label>
             <input class="form-control" name="code" required />
           </div>
           <div class="col-12">
-            <label class="form-label">Title</label>
+            <label class="form-label">{{ t("teacher.courses.title_label") }}</label>
             <input class="form-control" name="title" required />
           </div>
           <div class="col-12">
-            <label class="form-label">Description</label>
+            <label class="form-label">{{ t("teacher.courses.description") }}</label>
             <textarea class="form-control" name="description" rows="4"></textarea>
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Create course</button>
+            <button class="btn btn-primary" type="submit">{{ t("teacher.courses.submit") }}</button>
           </div>
         </form>
       </div>
@@ -32,20 +32,20 @@
   <div class="col-lg-8">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Your teaching courses</h2>
+        <h2 class="h5 mb-3">{{ t("teacher.courses.list_title") }}</h2>
         {% if courses %}
         <div class="list-group">
           {% for course in courses %}
           <a class="list-group-item list-group-item-action" href="/teacher/courses/{{ course.id }}">
             <div class="fw-semibold">{{ course.code }} - {{ course.title }}</div>
-            <div class="small text-muted">{{ course.description or "No description." }}</div>
+            <div class="small text-muted">{{ course.description or t("teacher.courses.no_description") }}</div>
           </a>
           {% endfor %}
         </div>
         {% else %}
         <div class="empty-state">
-          <h3 class="h6">No courses yet</h3>
-          <p class="text-muted mb-0">Create your first course from the form on the left.</p>
+          <h3 class="h6">{{ t("teacher.courses.empty_title") }}</h3>
+          <p class="text-muted mb-0">{{ t("teacher.courses.empty_body") }}</p>
         </div>
         {% endif %}
       </div>

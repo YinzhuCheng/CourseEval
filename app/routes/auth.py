@@ -14,21 +14,66 @@ from app.auth import (
     push_flash,
     verify_password,
 )
-from app.constants import PlatformRole
+from app.config import get_settings
+from app.constants import AccountRole, PlatformRole
 from app.db import get_db
+from app.i18n import set_locale, t
 from app.models import User
 from app.services.courses import bootstrap_sample_data
 from app.web import render_template
 
 
 router = APIRouter()
+settings = get_settings()
+
+
+def _register_form_data(
+    *,
+    username: str = "",
+    email: str = "",
+    account_role: str = AccountRole.STUDENT.value,
+    teacher_code: str = "",
+) -> dict[str, str]:
+    return {
+        "username": username,
+        "email": email,
+        "account_role": account_role,
+        "teacher_code": teacher_code,
+    }
+
+
+def _render_register_form(
+    request: Request,
+    db: Session,
+    *,
+    form_data: dict[str, str] | None = None,
+    status_code: int = 200,
+    register_error: bool = False,
+):
+    return render_template(
+        request,
+        db,
+        "register.html",
+        {
+            "form_data": form_data or _register_form_data(),
+            "register_error": register_error,
+        },
+        status_code=status_code,
+    )
 
 
 @router.get("/register")
 def register_page(request: Request, db: Session = Depends(get_db)):
     if get_current_user(request, db):
         return RedirectResponse(url="/dashboard", status_code=303)
-    return render_template(request, db, "register.html")
+    return _render_register_form(request, db)
+
+
+@router.get("/locale/{locale}")
+def change_locale(locale: str, request: Request):
+    set_locale(request, locale)
+    redirect_to = request.headers.get("referer") or "/"
+    return RedirectResponse(url=redirect_to, status_code=303)
 
 
 @router.post("/register")
@@ -36,38 +81,60 @@ def register_user(
     request: Request,
     username: str = Form(...),
     email: str = Form(...),
+    account_role: str = Form(AccountRole.STUDENT.value),
+    teacher_code: str = Form(""),
     password: str = Form(...),
     confirm_password: str = Form(...),
     db: Session = Depends(get_db),
 ):
     username = username.strip()
     email = email.strip().lower()
+    teacher_code = teacher_code.strip()
+    form_data = _register_form_data(
+        username=username,
+        email=email,
+        account_role=account_role,
+        teacher_code=teacher_code,
+    )
 
-    if not username or not email or not password:
-        push_flash(request, "All fields are required.", "danger")
-        return RedirectResponse(url="/register", status_code=303)
+    try:
+        selected_account_role = AccountRole(account_role)
+    except ValueError:
+        push_flash(request, t(request, "flash.all_fields_required"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+
+    if not username or not email or not password or not confirm_password:
+        push_flash(request, t(request, "flash.all_fields_required"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
     try:
         email = validate_email(email, check_deliverability=False).normalized
     except EmailNotValidError:
-        push_flash(request, "Please enter a valid email address.", "danger")
-        return RedirectResponse(url="/register", status_code=303)
+        push_flash(request, t(request, "flash.invalid_email"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
     if password != confirm_password:
-        push_flash(request, "Password confirmation does not match.", "danger")
-        return RedirectResponse(url="/register", status_code=303)
+        push_flash(request, t(request, "flash.password_mismatch"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
     if len(password) < 8:
-        push_flash(request, "Password must be at least 8 characters long.", "danger")
-        return RedirectResponse(url="/register", status_code=303)
+        push_flash(request, t(request, "flash.password_length"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+    if selected_account_role == AccountRole.TEACHER and not teacher_code:
+        push_flash(request, t(request, "flash.teacher_code_required"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+    if selected_account_role == AccountRole.TEACHER and teacher_code != settings.teacher_registration_code:
+        push_flash(request, t(request, "flash.teacher_code_invalid"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
     existing_user = db.scalar(select(User).where(or_(User.username == username, User.email == email)))
     if existing_user:
-        push_flash(request, "Username or email is already registered.", "danger")
-        return RedirectResponse(url="/register", status_code=303)
+        push_flash(request, t(request, "flash.username_email_exists"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
     is_first_user = db.scalar(select(User).limit(1)) is None
     user = User(
         username=username,
         email=email,
         password_hash=hash_password(password),
+        account_role=selected_account_role,
         platform_role=PlatformRole.ADMIN if is_first_user else PlatformRole.USER,
     )
     db.add(user)
@@ -76,7 +143,7 @@ def register_user(
     bootstrap_sample_data(db, user)
 
     login_user(request, user)
-    push_flash(request, "Registration successful. Welcome!", "success")
+    push_flash(request, t(request, "flash.registration_success"), "success")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 
@@ -96,11 +163,11 @@ def login(
 ):
     user = find_user_by_login(db, login.strip())
     if user is None or not verify_password(password, user.password_hash):
-        push_flash(request, "Invalid username/email or password.", "danger")
+        push_flash(request, t(request, "flash.invalid_login"), "danger")
         return RedirectResponse(url="/login", status_code=303)
 
     login_user(request, user)
-    push_flash(request, "Signed in successfully.", "success")
+    push_flash(request, t(request, "flash.login_success"), "success")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 
