@@ -33,6 +33,12 @@
       </div>
     </div>
 
+    {% if pending_teacher_review %}
+    <div class="alert alert-warning mt-4 mb-0">
+      This short-answer submission is waiting for a teacher confirmation before it becomes the effective grade snapshot.
+    </div>
+    {% endif %}
+
     {% if latest_result %}
     <div class="card shadow-sm mt-4">
       <div class="card-body">
@@ -61,6 +67,7 @@
     <div class="card shadow-sm mt-4">
       <div class="card-body">
         <h2 class="h5 mb-3">Teacher grading</h2>
+        {% if can_grade_submission %}
         <form method="post" action="/teacher/submissions/{{ submission.id }}/grade" class="row g-3">
           <div class="col-12">
             <label class="form-label">Teacher final score</label>
@@ -74,6 +81,9 @@
             <button class="btn btn-primary" type="submit">Save teacher feedback</button>
           </div>
         </form>
+        {% else %}
+        <p class="text-muted mb-0">TA access is read-only here. Only teachers can confirm final grades in Phase 1.</p>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -111,6 +121,22 @@
         {% endif %}
       </div>
     </div>
+
+    {% if latest_result %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">stdout</h2>
+        <pre class="artifact-block">{{ stdout_text or "No stdout captured yet." }}</pre>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">stderr</h2>
+        <pre class="artifact-block">{{ stderr_text or "No stderr captured yet." }}</pre>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

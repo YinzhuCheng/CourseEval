@@ -77,6 +77,7 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ "创建题目" if current_locale == "zh" else "Create question" }}</h2>
+        {% if can_manage_course %}
         <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" class="row g-3">
           <div class="col-12">
             <label class="form-label">{{ "标题" if current_locale == "zh" else "Title" }}</label>
@@ -168,6 +169,11 @@
             <button class="btn btn-primary" type="submit">{{ "创建题目" if current_locale == "zh" else "Create question" }}</button>
           </div>
         </form>
+        {% else %}
+        <div class="alert alert-secondary mb-0">
+          {{ "当前仅教师可以修改题目配置，TA 在 Phase 1 保持只读查看。 " if current_locale == "zh" else "Only teachers can change question configuration in Phase 1. TA access stays read-only here." }}
+        </div>
+        {% endif %}
       </div>
     </div>
 

@@ -13,6 +13,10 @@ class RedirectRequired(Exception):
         self.location = location
 
 
+COURSE_STAFF_ROLES = {CourseRole.TEACHER, CourseRole.TA}
+COURSE_MANAGEMENT_ROLES = {CourseRole.TEACHER}
+
+
 def is_platform_admin(user: User | None) -> bool:
     return user is not None and user.platform_role == PlatformRole.ADMIN and user.is_active
 
@@ -45,7 +49,16 @@ def can_manage_course(db: Session, course: Course, user: User | None) -> bool:
     if is_platform_admin(user):
         return True
     role = get_course_role(db, course.id, user.id)
-    return role in {CourseRole.TEACHER, CourseRole.TA}
+    return role in COURSE_MANAGEMENT_ROLES
+
+
+def can_staff_course(db: Session, course: Course, user: User | None) -> bool:
+    if user is None or not user.is_active:
+        return False
+    if is_platform_admin(user):
+        return True
+    role = get_course_role(db, course.id, user.id)
+    return role in COURSE_STAFF_ROLES
 
 
 def require_user(request: Request, db: Session) -> User:
@@ -87,4 +100,4 @@ def require_course_role(db: Session, user_id: int, course_id: int, allowed_roles
 
 
 def require_student_access(db: Session, user_id: int, course_id: int) -> CourseMember:
-    return require_course_role(db, user_id, course_id, {CourseRole.STUDENT, CourseRole.TEACHER, CourseRole.TA})
+    return require_course_role(db, user_id, course_id, {CourseRole.STUDENT, *COURSE_STAFF_ROLES})

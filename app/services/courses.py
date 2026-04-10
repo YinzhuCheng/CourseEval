@@ -31,6 +31,9 @@ from app.models import (
 )
 
 
+STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
+
+
 def generate_join_code() -> str:
     return secrets.token_hex(3).upper()
 
@@ -201,6 +204,43 @@ def get_assignment_for_student(db: Session, assignment_id: int, user_id: int) ->
     return db.scalar(statement)
 
 
+def get_course_for_staff(db: Session, course_id: int, user_id: int) -> Course | None:
+    statement = (
+        select(Course)
+        .options(
+            joinedload(Course.assignments).joinedload(Assignment.questions),
+            joinedload(Course.members).joinedload(CourseMember.user),
+        )
+        .join(CourseMember, CourseMember.course_id == Course.id)
+        .where(
+            Course.id == course_id,
+            CourseMember.user_id == user_id,
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    return db.scalar(statement)
+
+
+def get_assignment_for_staff(db: Session, assignment_id: int, user_id: int) -> Assignment | None:
+    statement = (
+        select(Assignment)
+        .options(
+            joinedload(Assignment.course),
+            joinedload(Assignment.questions).joinedload(Question.notebook_config),
+            joinedload(Assignment.questions).joinedload(Question.short_answer_config),
+        )
+        .join(CourseMember, CourseMember.course_id == Assignment.course_id)
+        .where(
+            Assignment.id == assignment_id,
+            CourseMember.user_id == user_id,
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    return db.scalar(statement)
+
+
 def get_course_for_teacher(db: Session, course_id: int, user_id: int) -> Course | None:
     statement = (
         select(Course)
@@ -213,6 +253,26 @@ def get_course_for_teacher(db: Session, course_id: int, user_id: int) -> Course 
             Course.id == course_id,
             CourseMember.user_id == user_id,
             CourseMember.role == CourseRole.TEACHER,
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    return db.scalar(statement)
+
+
+def get_question_for_staff(db: Session, question_id: int, user_id: int) -> Question | None:
+    statement = (
+        select(Question)
+        .options(
+            joinedload(Question.assignment).joinedload(Assignment.course),
+            joinedload(Question.notebook_config),
+            joinedload(Question.short_answer_config),
+        )
+        .join(Assignment, Assignment.id == Question.assignment_id)
+        .join(CourseMember, CourseMember.course_id == Assignment.course_id)
+        .where(
+            Question.id == question_id,
+            CourseMember.user_id == user_id,
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )

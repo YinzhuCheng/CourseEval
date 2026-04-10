@@ -69,6 +69,139 @@ def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
     return max(lower, min(value, upper))
 
 
+_HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
+_HIDDEN_STDERR_MARKER = "=== Hidden Test stderr ==="
+
+
+def _latest_feedback(submission: Submission, source: FeedbackSource) -> Feedback | None:
+    matching_feedback = [item for item in submission.feedback_items if item.source == source]
+    if not matching_feedback:
+        return None
+    return max(matching_feedback, key=lambda item: item.created_at)
+
+
+def _parsed_summary_json(evaluation_result: EvaluationResult | None) -> dict:
+    if evaluation_result is None or not evaluation_result.summary_json:
+        return {}
+    try:
+        return json.loads(evaluation_result.summary_json)
+    except json.JSONDecodeError:
+        return {}
+
+
+def submission_requires_teacher_confirmation(submission: Submission) -> bool:
+    question = submission.question
+    config = question.short_answer_config if question is not None else None
+    return bool(
+        submission.submission_type == QuestionType.SHORT_ANSWER
+        and (config is None or config.teacher_confirmation_required)
+    )
+
+
+def submission_has_teacher_feedback(submission: Submission) -> bool:
+    return _latest_feedback(submission, FeedbackSource.TEACHER) is not None
+
+
+def is_submission_pending_teacher_review(submission: Submission) -> bool:
+    return submission_requires_teacher_confirmation(submission) and not submission_has_teacher_feedback(submission)
+
+
+def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, FeedbackSource | None]:
+    teacher_feedback = _latest_feedback(submission, FeedbackSource.TEACHER)
+    if teacher_feedback is not None:
+        return (
+            Decimal(str(teacher_feedback.score_suggestion)) if teacher_feedback.score_suggestion is not None else None,
+            FeedbackSource.TEACHER,
+        )
+
+    latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
+    if latest_result is not None and latest_result.final_score is not None:
+        return Decimal(str(latest_result.final_score)), FeedbackSource.AUTO
+
+    if submission_requires_teacher_confirmation(submission):
+        return None, None
+
+    llm_feedback = _latest_feedback(submission, FeedbackSource.LLM)
+    if llm_feedback is not None and llm_feedback.score_suggestion is not None:
+        return Decimal(str(llm_feedback.score_suggestion)), FeedbackSource.LLM
+
+    auto_feedback = _latest_feedback(submission, FeedbackSource.AUTO)
+    if auto_feedback is not None and auto_feedback.score_suggestion is not None:
+        return Decimal(str(auto_feedback.score_suggestion)), FeedbackSource.AUTO
+
+    return None, None
+
+
+def build_student_result_view(submission: Submission) -> dict:
+    latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
+    summary = _parsed_summary_json(latest_result)
+    score_value, score_source = resolve_submission_score(submission)
+    hidden_message = summary.get("hidden_message")
+    hidden_checks_applied = bool(
+        summary.get("hidden_weight")
+        or (
+            hidden_message is not None
+            and str(hidden_message).strip()
+            and str(hidden_message).strip() != "No tests configured."
+        )
+    )
+    return {
+        "score": score_value,
+        "score_source": score_source,
+        "run_success": latest_result.run_success if latest_result is not None else None,
+        "visible_score": latest_result.visible_score if latest_result is not None else None,
+        "auto_score": latest_result.auto_score if latest_result is not None else None,
+        "message": summary.get("message"),
+        "visible_message": summary.get("visible_message"),
+        "failure_type": summary.get("failure_type"),
+        "hidden_checks_applied": hidden_checks_applied,
+    }
+
+
+def _strip_hidden_output_sections(content: str, markers: set[str]) -> tuple[str, bool]:
+    if not content:
+        return "", False
+
+    sanitized_lines: list[str] = []
+    skipping_hidden_block = False
+    content_changed = False
+    for line in content.splitlines():
+        normalized = line.strip()
+        if normalized in markers:
+            skipping_hidden_block = True
+            content_changed = True
+            continue
+        if skipping_hidden_block and normalized.startswith("===") and normalized.endswith("==="):
+            skipping_hidden_block = False
+        if skipping_hidden_block:
+            content_changed = True
+            continue
+        sanitized_lines.append(line)
+
+    sanitized = "\n".join(sanitized_lines).strip()
+    if content.endswith("\n") and sanitized:
+        sanitized = f"{sanitized}\n"
+    return sanitized, content_changed
+
+
+def read_student_safe_submission_artifact_text(
+    evaluation_result: EvaluationResult | None,
+    artifact_name: str,
+    max_chars: int = 200000,
+) -> str:
+    content = read_submission_artifact_text(evaluation_result, artifact_name, max_chars=max_chars)
+    if artifact_name == "stdout":
+        sanitized, changed = _strip_hidden_output_sections(content, {_HIDDEN_STDOUT_MARKER})
+    elif artifact_name == "stderr":
+        sanitized, changed = _strip_hidden_output_sections(content, {_HIDDEN_STDERR_MARKER})
+    else:
+        return content
+
+    if changed and not sanitized:
+        return "Hidden test details are not shown in the student view.\n"
+    return sanitized
+
+
 def _recompute_notebook_final_score(submission: Submission, latest_result: EvaluationResult) -> Decimal:
     auto_score = Decimal(str(latest_result.auto_score or 0))
     notebook_config = submission.question.notebook_config if submission.question else None
@@ -505,6 +638,7 @@ def create_short_answer_submission(
         raise ValueError(message or "Submission limit reached.")
 
     config = question.short_answer_config
+    teacher_confirmation_required = True if config is None else config.teacher_confirmation_required
     cleaned = answer_text.strip()
     if not cleaned:
         raise ValueError("Answer cannot be empty.")
@@ -519,13 +653,13 @@ def create_short_answer_submission(
         question_id=question.id,
         user_id=user_id,
         submission_type=QuestionType.SHORT_ANSWER,
-        status=SubmissionStatus.COMPLETED,
+        status=SubmissionStatus.SUBMITTED if teacher_confirmation_required else SubmissionStatus.COMPLETED,
         answer_text=cleaned,
         submitted_at=utcnow(),
-        completed_at=utcnow(),
+        completed_at=None if teacher_confirmation_required else utcnow(),
         is_late=_is_late(question),
         counts_toward_limit=True,
-        is_effective_submission=True,
+        is_effective_submission=not teacher_confirmation_required,
     )
     db.add(submission)
     db.flush()
@@ -540,7 +674,8 @@ def create_short_answer_submission(
         )
     db.commit()
     db.refresh(submission)
-    update_final_grade_snapshot(db, submission)
+    if not teacher_confirmation_required:
+        update_final_grade_snapshot(db, submission)
     if config and config.llm_suggestion_enabled:
         enqueue_short_answer_llm(db, submission.id)
     return submission
@@ -1069,7 +1204,8 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()
-        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
+        if not submission_requires_teacher_confirmation(submission):
+            refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Short-answer LLM evaluation failed for submission %s", submission_id)
         task = db.get(EvaluationTask, task_id)
@@ -1191,16 +1327,8 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
     feedback_source = None
 
     def score_for(item: Submission) -> Decimal:
-        teacher_scores = [feedback.score_suggestion for feedback in item.feedback_items if feedback.source == FeedbackSource.TEACHER]
-        if teacher_scores:
-            return Decimal(str(teacher_scores[-1] or 0))
-        result = item.evaluation_results[-1] if item.evaluation_results else None
-        if result and result.final_score is not None:
-            return Decimal(str(result.final_score))
-        llm_scores = [feedback.score_suggestion for feedback in item.feedback_items if feedback.source == FeedbackSource.LLM]
-        if llm_scores:
-            return Decimal(str(llm_scores[-1] or 0))
-        return Decimal("0")
+        resolved_score, _ = resolve_submission_score(item)
+        return resolved_score if resolved_score is not None else Decimal("0")
 
     for item in submissions:
         current_score = score_for(item)
@@ -1217,15 +1345,7 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
             effective_score = current_score
 
     if effective is not None:
-        teacher_feedback = [feedback for feedback in effective.feedback_items if feedback.source == FeedbackSource.TEACHER]
-        llm_feedback = [feedback for feedback in effective.feedback_items if feedback.source == FeedbackSource.LLM]
-        auto_feedback = [feedback for feedback in effective.feedback_items if feedback.source == FeedbackSource.AUTO]
-        if teacher_feedback:
-            feedback_source = FeedbackSource.TEACHER
-        elif llm_feedback:
-            feedback_source = FeedbackSource.LLM
-        elif auto_feedback:
-            feedback_source = FeedbackSource.AUTO
+        _, feedback_source = resolve_submission_score(effective)
 
     snapshot = db.scalar(
         select(FinalGradeSnapshot).where(

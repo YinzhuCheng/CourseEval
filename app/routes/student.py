@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -15,12 +15,14 @@ from app.services.courses import (
 )
 from app.services.permissions import RedirectRequired, require_student_access, require_user
 from app.services.submissions import (
+    build_student_result_view,
     create_notebook_submission,
     create_short_answer_submission,
     enqueue_submission_evaluation,
     get_submission_for_student,
+    is_submission_pending_teacher_review,
     list_submissions_for_question,
-    read_submission_artifact_text,
+    read_student_safe_submission_artifact_text,
     resolve_submission_artifact_path,
 )
 from app.web import render_template
@@ -168,7 +170,14 @@ def submit_short_answer(
             question=question,
             answer_text=answer_text,
         )
-        push_flash(request, f"Submission #{submission.id} saved.", "success")
+        if is_submission_pending_teacher_review(submission):
+            push_flash(
+                request,
+                f"Submission #{submission.id} saved and is waiting for teacher review before it affects your final grade.",
+                "success",
+            )
+        else:
+            push_flash(request, f"Submission #{submission.id} saved.", "success")
     except ValueError as exc:
         push_flash(request, str(exc), "danger")
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
@@ -188,6 +197,7 @@ def student_submission_detail(submission_id: int, request: Request, db: Session 
 
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
     feedback = sorted(submission.feedback_items, key=lambda item: item.created_at)
+    pending_teacher_review = is_submission_pending_teacher_review(submission)
     return render_template(
         request,
         db,
@@ -195,9 +205,11 @@ def student_submission_detail(submission_id: int, request: Request, db: Session 
         {
             "submission": submission,
             "latest_result": latest_result,
+            "result_view": build_student_result_view(submission),
             "feedback_items": feedback,
-            "stdout_text": read_submission_artifact_text(latest_result, "stdout") if latest_result else "",
-            "stderr_text": read_submission_artifact_text(latest_result, "stderr") if latest_result else "",
+            "pending_teacher_review": pending_teacher_review,
+            "stdout_text": read_student_safe_submission_artifact_text(latest_result, "stdout") if latest_result else "",
+            "stderr_text": read_student_safe_submission_artifact_text(latest_result, "stderr") if latest_result else "",
         },
     )
 
@@ -223,6 +235,14 @@ def student_submission_artifact(
     if latest_result is None:
         push_flash(request, "No evaluation result available yet.", "warning")
         return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
+
+    if artifact_name in {"stdout", "stderr"}:
+        content = read_student_safe_submission_artifact_text(latest_result, artifact_name)
+        filename = f"submission-{submission_id}-{artifact_name}.txt"
+        return PlainTextResponse(
+            content,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     try:
         artifact_path = resolve_submission_artifact_path(latest_result, artifact_name)

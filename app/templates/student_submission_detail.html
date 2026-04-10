@@ -46,33 +46,63 @@
           <dt class="col-sm-5">Effective</dt>
           <dd class="col-sm-7">{{ "Yes" if submission.is_effective_submission else "No" }}</dd>
         </dl>
+        {% if pending_teacher_review %}
+        <div class="alert alert-warning mt-3 mb-0">
+          This short-answer submission is saved, but it will not affect your final grade until a teacher confirms the score.
+        </div>
+        {% elif submission.status.value == "queued" %}
+        <div class="alert alert-info mt-3 mb-0">Automatic evaluation has been queued.</div>
+        {% elif submission.status.value == "running" %}
+        <div class="alert alert-info mt-3 mb-0">Automatic evaluation is running.</div>
+        {% elif submission.status.value == "failed_system" %}
+        <div class="alert alert-danger mt-3 mb-0">The system could not complete this evaluation, so the attempt does not count against your limit.</div>
+        {% elif submission.status.value == "failed_answer" %}
+        <div class="alert alert-warning mt-3 mb-0">Execution or tests failed for this submission, so the attempt counts as an answer attempt.</div>
+        {% endif %}
       </div>
     </div>
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
         <h2 class="h5 mb-3">Scores</h2>
-        {% if latest_result %}
         <dl class="row mb-0">
+          <dt class="col-sm-6">Current score</dt>
+          <dd class="col-sm-6">
+            {% if result_view.score is not none %}
+            {{ result_view.score }}
+            {% else %}
+            {{ "Awaiting teacher review" if pending_teacher_review else "-" }}
+            {% endif %}
+          </dd>
+          <dt class="col-sm-6">Score source</dt>
+          <dd class="col-sm-6">{{ result_view.score_source.value if result_view.score_source else "-" }}</dd>
+          {% if result_view.run_success is not none %}
           <dt class="col-sm-6">Run success</dt>
-          <dd class="col-sm-6">{{ "Yes" if latest_result.run_success else "No" }}</dd>
+          <dd class="col-sm-6">{{ "Yes" if result_view.run_success else "No" }}</dd>
+          {% endif %}
+          {% if result_view.visible_score is not none %}
           <dt class="col-sm-6">Visible score</dt>
-          <dd class="col-sm-6">{{ latest_result.visible_score if latest_result.visible_score is not none else "-" }}</dd>
-          <dt class="col-sm-6">Hidden score</dt>
-          <dd class="col-sm-6">{{ latest_result.hidden_score if latest_result.hidden_score is not none else "-" }}</dd>
-          <dt class="col-sm-6">Auto score</dt>
-          <dd class="col-sm-6">{{ latest_result.auto_score if latest_result.auto_score is not none else "-" }}</dd>
-          <dt class="col-sm-6">Final score</dt>
-          <dd class="col-sm-6">{{ latest_result.final_score if latest_result.final_score is not none else "-" }}</dd>
+          <dd class="col-sm-6">{{ result_view.visible_score }}</dd>
+          {% endif %}
+          {% if result_view.auto_score is not none %}
+          <dt class="col-sm-6">Automatic score</dt>
+          <dd class="col-sm-6">{{ result_view.auto_score }}</dd>
+          {% endif %}
         </dl>
-        {% if latest_result.summary_json %}
-        {% set summary = latest_result.summary_json %}
+        {% if result_view.message or result_view.visible_message or result_view.hidden_checks_applied %}
         <hr />
         <h3 class="h6 mb-2">Evaluation summary</h3>
-        <pre class="artifact-block">{{ summary }}</pre>
-        {% endif %}
-        {% else %}
-        <p class="text-muted mb-0">No evaluation result available yet.</p>
+        <ul class="small text-muted mb-0">
+          {% if result_view.message %}
+          <li>{{ result_view.message }}</li>
+          {% endif %}
+          {% if result_view.visible_message %}
+          <li>Visible checks: {{ result_view.visible_message }}</li>
+          {% endif %}
+          {% if result_view.hidden_checks_applied %}
+          <li>Additional hidden checks were run, but their detailed breakdown is only visible to course staff.</li>
+          {% endif %}
+        </ul>
         {% endif %}
       </div>
     </div>
@@ -93,6 +123,12 @@
   </div>
 
   <div class="col-lg-8">
+    {% if pending_teacher_review %}
+    <div class="alert alert-warning">
+      Your answer is in the manual review queue. LLM suggestions may appear below, but the final grade only becomes effective after teacher confirmation.
+    </div>
+    {% endif %}
+
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">Feedback</h2>
@@ -124,6 +160,7 @@
     </div>
     {% endif %}
 
+    {% if latest_result %}
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">stdout</h2>
@@ -137,6 +174,7 @@
         <pre class="artifact-block">{{ stderr_text or "No stderr captured yet." }}</pre>
       </div>
     </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

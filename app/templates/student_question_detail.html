@@ -54,6 +54,13 @@
             <label class="form-label">Answer</label>
             <textarea class="form-control" rows="8" name="answer_text" required></textarea>
           </div>
+          {% if question.short_answer_config and question.short_answer_config.teacher_confirmation_required %}
+          <div class="col-12">
+            <div class="alert alert-warning mb-0">
+              Your submission will be saved immediately, but the score only becomes effective after a teacher confirms the final grade.
+            </div>
+          </div>
+          {% endif %}
           {% if question.short_answer_config and question.short_answer_config.rubric_text %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
