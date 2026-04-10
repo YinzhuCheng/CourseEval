@@ -379,6 +379,8 @@ class NotebookQuestionConfig(Base):
     execution_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     visible_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=100, nullable=False)
     hidden_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
+    llm_score_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
+    llm_scoring_rubric: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_feedback_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)

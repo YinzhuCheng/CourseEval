@@ -89,6 +89,42 @@ def generate_feedback_with_llm(
     return generate_text(config, prompt, system_prompt).content
 
 
+def generate_notebook_evaluation_with_llm(
+    config: LLMConfig,
+    *,
+    question_title: str,
+    question_description: str,
+    rubric_text: str,
+    summary_json: str,
+    stdout_text: str,
+    stderr_text: str,
+    max_llm_score: float,
+) -> dict:
+    system_prompt = (
+        "You are grading a notebook programming submission. Return JSON only with keys "
+        "`score_suggestion` and `comment_text`. "
+        "score_suggestion must be a number between 0 and the provided maximum score."
+    )
+    prompt = (
+        f"Question title: {question_title}\n"
+        f"Question description:\n{question_description}\n\n"
+        f"Notebook grading rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
+        f"Maximum LLM score: {max_llm_score}\n\n"
+        f"Evaluation summary JSON:\n{summary_json}\n\n"
+        f"stdout:\n{stdout_text[:8000]}\n\n"
+        f"stderr:\n{stderr_text[:8000]}\n\n"
+        "Return valid JSON only."
+    )
+    raw = generate_text(config, prompt, system_prompt).content
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LLM did not return valid JSON: {raw}") from exc
+    if "score_suggestion" not in parsed or "comment_text" not in parsed:
+        raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
+    return parsed
+
+
 def generate_short_answer_evaluation(
     config: LLMConfig,
     *,
