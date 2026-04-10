@@ -129,6 +129,17 @@
             <label class="form-label">{{ "隐藏测试权重" if current_locale == "zh" else "Hidden weight" }}</label>
             <input class="form-control" name="hidden_weight" value="0" />
           </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ "LLM 评分权重" if current_locale == "zh" else "LLM score weight" }}</label>
+            <input class="form-control" name="llm_score_weight" value="0" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ "Notebook 启用 LLM 评分反馈" if current_locale == "zh" else "Enable notebook LLM scoring feedback" }}</label>
+            <select class="form-select" name="llm_feedback_enabled">
+              <option value="false">{{ "否" if current_locale == "zh" else "No" }}</option>
+              <option value="true">{{ "是" if current_locale == "zh" else "Yes" }}</option>
+            </select>
+          </div>
           <div class="col-12">
             <label class="form-label">{{ "可见测试代码" if current_locale == "zh" else "Visible tests source" }}</label>
             <textarea class="form-control font-monospace" name="visible_tests_source" rows="5" placeholder="assert 1 + 1 == 2"></textarea>
@@ -136,6 +147,10 @@
           <div class="col-12">
             <label class="form-label">{{ "隐藏测试代码" if current_locale == "zh" else "Hidden tests source" }}</label>
             <textarea class="form-control font-monospace" name="hidden_tests_source" rows="5"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ "Notebook LLM 评分细则" if current_locale == "zh" else "Notebook LLM scoring rubric" }}</label>
+            <textarea class="form-control" name="llm_scoring_rubric" rows="3" placeholder="{{ '用于无唯一答案题目，指导 LLM 给出分数建议。' if current_locale == 'zh' else 'Use this for open-ended notebook questions to guide LLM score suggestions.' }}"></textarea>
           </div>
           <div class="col-12">
             <label class="form-label">{{ "简答题评分细则" if current_locale == "zh" else "Short answer rubric" }}</label>

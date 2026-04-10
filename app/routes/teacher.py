@@ -295,6 +295,9 @@ def create_question(
     execution_weight: str = Form("0"),
     visible_weight: str = Form("100"),
     hidden_weight: str = Form("0"),
+    llm_score_weight: str = Form("0"),
+    llm_scoring_rubric: str = Form(""),
+    llm_feedback_enabled: str = Form("false"),
     rubric_text: str = Form(""),
     min_length: str = Form(""),
     max_length: str = Form(""),
@@ -357,6 +360,9 @@ def create_question(
                 execution_weight=Decimal(execution_weight or "0"),
                 visible_weight=Decimal(visible_weight or "100"),
                 hidden_weight=Decimal(hidden_weight or "0"),
+                llm_score_weight=Decimal(llm_score_weight or "0"),
+                llm_scoring_rubric=llm_scoring_rubric.strip() or None,
+                llm_feedback_enabled=llm_feedback_enabled == "true",
             )
         )
     else:

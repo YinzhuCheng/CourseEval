@@ -26,7 +26,11 @@ from app.constants import (
     SubmissionStatus,
 )
 from app.db import SessionLocal, utcnow
-from app.services.llm import test_llm_connectivity, generate_feedback_with_llm, generate_short_answer_evaluation
+from app.services.llm import (
+    generate_notebook_evaluation_with_llm,
+    generate_short_answer_evaluation,
+    test_llm_connectivity,
+)
 from app.models import (
     Assignment,
     CourseMember,
@@ -59,6 +63,25 @@ def _resolve_llm_config_for_question(question: Question):
         or question.assignment.llm_config
         or question.assignment.course.default_llm_config
     )
+
+
+def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
+    return max(lower, min(value, upper))
+
+
+def _recompute_notebook_final_score(submission: Submission, latest_result: EvaluationResult) -> Decimal:
+    auto_score = Decimal(str(latest_result.auto_score or 0))
+    notebook_config = submission.question.notebook_config if submission.question else None
+    llm_weight = Decimal(str(notebook_config.llm_score_weight if notebook_config else 0))
+    llm_score_candidates = [
+        Decimal(str(item.score_suggestion or 0))
+        for item in submission.feedback_items
+        if item.source == FeedbackSource.LLM and item.score_suggestion is not None
+    ]
+    llm_score = llm_score_candidates[-1] if llm_score_candidates else Decimal("0")
+    llm_score = _clamp_score(llm_score, Decimal("0"), llm_weight)
+    max_score = Decimal(str(submission.question.max_score if submission.question else 100))
+    return _clamp_score(auto_score + llm_score, Decimal("0"), max_score)
 
 
 def redis_connection() -> Redis:
@@ -795,6 +818,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
                     comment_text=(result.summary_json or {}).get("message", "Automatic evaluation completed."),
                 )
             )
+            evaluation_result.final_score = _recompute_notebook_final_score(submission, evaluation_result)
         else:
             task.status = EvaluationTaskStatus.FAILED
             task.error_message = result.error_message
@@ -824,6 +848,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
                     comment_text=result.error_message or "Automatic evaluation failed.",
                 )
             )
+            evaluation_result.final_score = _recompute_notebook_final_score(submission, evaluation_result)
 
         db.commit()
         update_final_grade_snapshot(db, submission)
@@ -1086,25 +1111,32 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
         task.started_at = utcnow()
         db.commit()
 
+        notebook_config = submission.question.notebook_config
+        llm_max_score = Decimal(str(notebook_config.llm_score_weight if notebook_config else 0))
         stdout_text = read_submission_artifact_text(latest_result, "stdout")
         stderr_text = read_submission_artifact_text(latest_result, "stderr")
-        feedback_text = generate_feedback_with_llm(
+        llm_result = generate_notebook_evaluation_with_llm(
             llm_config,
             question_title=submission.question.title,
             question_description=submission.question.description or "",
+            rubric_text=notebook_config.llm_scoring_rubric if notebook_config else "",
             summary_json=latest_result.summary_json or "{}",
             stdout_text=stdout_text,
             stderr_text=stderr_text,
-            auto_score=float(latest_result.auto_score or 0),
+            max_llm_score=float(llm_max_score),
         )
+        llm_score_value = Decimal(str(llm_result.get("score_suggestion", 0)))
+        llm_score_value = _clamp_score(llm_score_value, Decimal("0"), llm_max_score)
         db.add(
             Feedback(
                 submission_id=submission.id,
                 evaluation_result_id=latest_result.id,
                 source=FeedbackSource.LLM,
-                comment_text=feedback_text,
+                score_suggestion=llm_score_value,
+                comment_text=llm_result.get("comment_text"),
             )
         )
+        latest_result.final_score = _recompute_notebook_final_score(submission, latest_result)
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()

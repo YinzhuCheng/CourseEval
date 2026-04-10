@@ -68,6 +68,9 @@ def migrate_legacy_schema() -> None:
         _normalize_enum_values("users", "platform_role", {"USER": "user", "ADMIN": "admin"})
     if "courses" in inspector.get_table_names():
         _ensure_column("courses", "join_code", "VARCHAR(32)")
+    if "notebook_question_configs" in inspector.get_table_names():
+        _ensure_column("notebook_question_configs", "llm_score_weight", "NUMERIC(10,2) NOT NULL DEFAULT 0")
+        _ensure_column("notebook_question_configs", "llm_scoring_rubric", "TEXT")
 
     enum_normalizations = {
         "course_members": {
