@@ -367,8 +367,8 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
             {
                 "name": item.get("name") or f"Test {index}",
                 "input": item.get("input", ""),
-                "expected_output": item.get("expected_output", ""),
-                "points": float(item.get("points", 0)),
+                "expected_output": item.get("expected_output", item.get("output", "")),
+                "points": float(item.get("points", 20)),
             }
         )
     return normalized
@@ -1374,8 +1374,8 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
             memory_limit=f"{config.memory_limit_mb}m",
             cpus=config.cpu_limit,
             network_disabled=not config.allow_network,
-            visible_tests_json=config.visible_tests_json,
-            hidden_tests_json=config.hidden_tests_json,
+            visible_tests_json=json.dumps(config.visible_tests(), ensure_ascii=True),
+            hidden_tests_json=json.dumps(config.hidden_tests(), ensure_ascii=True),
         )
 
         evaluation_result = EvaluationResult(

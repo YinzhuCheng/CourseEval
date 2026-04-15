@@ -425,19 +425,19 @@ def create_question(
         )
     elif q_type == QuestionType.PYTHON_CODE:
         visible_samples = [
-            {"input": visible_test_1_input.strip(), "output": visible_test_1_output.strip()},
-            {"input": visible_test_2_input.strip(), "output": visible_test_2_output.strip()},
-            {"input": visible_test_3_input.strip(), "output": visible_test_3_output.strip()},
+            {"input": visible_test_1_input.strip(), "expected_output": visible_test_1_output.strip(), "points": 20},
+            {"input": visible_test_2_input.strip(), "expected_output": visible_test_2_output.strip(), "points": 20},
+            {"input": visible_test_3_input.strip(), "expected_output": visible_test_3_output.strip(), "points": 20},
         ]
         hidden_samples = [
-            {"input": hidden_test_1_input.strip(), "output": hidden_test_1_output.strip()},
-            {"input": hidden_test_2_input.strip(), "output": hidden_test_2_output.strip()},
+            {"input": hidden_test_1_input.strip(), "expected_output": hidden_test_1_output.strip(), "points": 20},
+            {"input": hidden_test_2_input.strip(), "expected_output": hidden_test_2_output.strip(), "points": 20},
         ]
         if not input_spec.strip() or not output_spec.strip():
             push_flash(request, "Python code questions must define both input and output specifications.", "danger")
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
-        if any(not sample["input"] or not sample["output"] for sample in visible_samples + hidden_samples):
+        if any(not sample["input"] or not sample["expected_output"] for sample in visible_samples + hidden_samples):
             push_flash(request, "Python code questions require 5 complete test cases (3 visible, 2 hidden).", "danger")
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")

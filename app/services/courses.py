@@ -790,17 +790,17 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
             output_spec="若括号完全匹配输出 YES，否则输出 NO",
             visible_tests_json=json.dumps(
                 [
-                    {"input": "()[]{}", "output": "YES"},
-                    {"input": "([{}])", "output": "YES"},
-                    {"input": "([)]", "output": "NO"},
+                    {"input": "()[]{}", "expected_output": "YES", "points": 20},
+                    {"input": "([{}])", "expected_output": "YES", "points": 20},
+                    {"input": "([)]", "expected_output": "NO", "points": 20},
                 ],
                 ensure_ascii=False,
                 indent=2,
             ),
             hidden_tests_json=json.dumps(
                 [
-                    {"input": "(((", "output": "NO"},
-                    {"input": "{[()()]}", "output": "YES"},
+                    {"input": "(((", "expected_output": "NO", "points": 20},
+                    {"input": "{[()()]}", "expected_output": "YES", "points": 20},
                 ],
                 ensure_ascii=False,
                 indent=2,

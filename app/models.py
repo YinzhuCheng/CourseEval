@@ -26,6 +26,27 @@ from app.constants import (
 from app.db import Base, utcnow
 
 
+def _normalize_python_test_case(item: dict, index: int) -> dict:
+    expected_output = item.get("expected_output")
+    if expected_output is None:
+        expected_output = item.get("output", "")
+
+    raw_points = item.get("points")
+    try:
+        points = float(raw_points) if raw_points not in (None, "") else 20.0
+    except (TypeError, ValueError):
+        points = 20.0
+
+    return {
+        "name": item.get("name") or f"Test {index}",
+        "input": item.get("input", ""),
+        "expected_output": expected_output,
+        # Preserve the legacy key so templates and older call sites keep working.
+        "output": expected_output,
+        "points": points,
+    }
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -426,15 +447,21 @@ class PythonCodeQuestionConfig(Base):
 
     def visible_tests(self) -> list[dict]:
         try:
-            return json.loads(self.visible_tests_json or "[]")
+            payload = json.loads(self.visible_tests_json or "[]")
         except json.JSONDecodeError:
             return []
+        if not isinstance(payload, list):
+            return []
+        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
     def hidden_tests(self) -> list[dict]:
         try:
-            return json.loads(self.hidden_tests_json or "[]")
+            payload = json.loads(self.hidden_tests_json or "[]")
         except json.JSONDecodeError:
             return []
+        if not isinstance(payload, list):
+            return []
+        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
 
 class ShortAnswerQuestionConfig(Base):
