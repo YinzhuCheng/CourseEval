@@ -92,7 +92,18 @@
     {% if submission.answer_text %}
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Student answer</h2>
+        <h2 class="h5 mb-3">
+          {% if submission.submission_type.value == "python_code" %}
+          Submitted Python code
+          {% elif submission.submission_type.value in ["pdf_llm", "formatted_text_llm"] %}
+          Extracted submission text
+          {% else %}
+          Student answer
+          {% endif %}
+        </h2>
+        {% if submission.original_filename %}
+        <div class="small text-muted mb-2">Original file: {{ submission.original_filename }}</div>
+        {% endif %}
         <pre class="artifact-block">{{ submission.answer_text }}</pre>
       </div>
     </div>

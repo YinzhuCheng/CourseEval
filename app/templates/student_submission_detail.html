@@ -48,7 +48,7 @@
         </dl>
         {% if pending_teacher_review %}
         <div class="alert alert-warning mt-3 mb-0">
-          This short-answer submission is saved, but it will not affect your final grade until a teacher confirms the score.
+          This submission is saved, but it will not affect your final grade until a teacher confirms the score.
         </div>
         {% elif submission.status.value == "queued" %}
         <div class="alert alert-info mt-3 mb-0">Automatic evaluation has been queued.</div>
@@ -125,7 +125,7 @@
   <div class="col-lg-8">
     {% if pending_teacher_review %}
     <div class="alert alert-warning">
-      Your answer is in the manual review queue. LLM suggestions may appear below, but the final grade only becomes effective after teacher confirmation.
+      Your submission is in the manual review queue. LLM suggestions may appear below, but the final grade only becomes effective after teacher confirmation.
     </div>
     {% endif %}
 
@@ -154,8 +154,17 @@
     {% if submission.answer_text %}
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submitted answer</h2>
+        <h2 class="h5 mb-3">Submitted content</h2>
         <pre class="artifact-block">{{ submission.answer_text }}</pre>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if submission.original_filename %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submitted file</h2>
+        <div class="small text-muted">{{ submission.original_filename }}</div>
       </div>
     </div>
     {% endif %}

@@ -19,6 +19,7 @@ from app.constants import (
 )
 from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSnapshot, Question, ShortAnswerQuestionConfig, Submission, User
+from app.services.courses import bootstrap_sample_data
 from app.services.permissions import can_manage_course, can_staff_course
 from app.services.submissions import (
     _strip_hidden_output_sections,
@@ -251,6 +252,41 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertIn("visible result", sanitized)
         self.assertNotIn("secret branch", sanitized)
         self.assertNotIn("secret details", sanitized)
+
+    def test_bootstrap_data_structures_course_contains_three_new_modes(self) -> None:
+        bootstrap_user = User(
+            username="default",
+            email="default@example.com",
+            password_hash="x",
+            account_role=AccountRole.TEACHER,
+            platform_role=PlatformRole.USER,
+            is_active=True,
+        )
+        self.db.add(bootstrap_user)
+        self.db.commit()
+        self.db.refresh(bootstrap_user)
+
+        bootstrap_sample_data(self.db, bootstrap_user)
+
+        course = self.db.scalar(select(Course).where(Course.title == "Data Structures"))
+        self.assertIsNotNone(course)
+        assert course is not None
+        assignment = self.db.scalar(select(Assignment).where(Assignment.course_id == course.id))
+        self.assertIsNotNone(assignment)
+        assert assignment is not None
+        questions = list(
+            self.db.scalars(
+                select(Question).where(Question.assignment_id == assignment.id).order_by(Question.order_index.asc())
+            )
+        )
+        self.assertEqual(
+            [question.question_type for question in questions],
+            [
+                QuestionType.PYTHON_CODE,
+                QuestionType.PDF_LLM,
+                QuestionType.FORMATTED_TEXT_LLM,
+            ],
+        )
 
 
 if __name__ == "__main__":

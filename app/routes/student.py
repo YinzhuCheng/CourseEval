@@ -16,8 +16,11 @@ from app.services.courses import (
 from app.services.permissions import RedirectRequired, require_student_access, require_user
 from app.services.submissions import (
     build_student_result_view,
+    create_file_submission,
     create_notebook_submission,
+    create_python_code_submission,
     create_short_answer_submission,
+    enqueue_file_llm_evaluation,
     enqueue_submission_evaluation,
     get_submission_for_student,
     is_submission_pending_teacher_review,
@@ -146,6 +149,42 @@ async def submit_notebook(
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
 
 
+@router.post("/questions/{question_id}/submit-python")
+async def submit_python_code(
+    question_id: int,
+    request: Request,
+    code_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+
+    question = get_question_for_student(db, question_id, user.id)
+    if question is None or question.question_type != QuestionType.PYTHON_CODE:
+        push_flash(request, "Python code question not found.", "danger")
+        return RedirectResponse(url="/student/courses", status_code=303)
+
+    file_bytes = await code_file.read()
+    filename = code_file.filename or "solution.py"
+    try:
+        submission = create_python_code_submission(
+            db,
+            user_id=user.id,
+            question=question,
+            original_filename=filename,
+            submission_bytes=file_bytes,
+        )
+        enqueue_submission_evaluation(db, submission.id)
+        push_flash(request, f"Submission #{submission.id} created and queued.", "success")
+    except ValueError as exc:
+        push_flash(request, str(exc), "danger")
+    except Exception as exc:
+        push_flash(request, f"Failed to submit Python code: {exc}", "danger")
+    return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+
+
 @router.post("/questions/{question_id}/submit-text")
 def submit_short_answer(
     question_id: int,
@@ -180,6 +219,46 @@ def submit_short_answer(
             push_flash(request, f"Submission #{submission.id} saved.", "success")
     except ValueError as exc:
         push_flash(request, str(exc), "danger")
+    return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+
+
+@router.post("/questions/{question_id}/submit-file")
+async def submit_file_question(
+    question_id: int,
+    request: Request,
+    submission_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+
+    question = get_question_for_student(db, question_id, user.id)
+    if question is None or question.question_type not in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
+        push_flash(request, "File question not found.", "danger")
+        return RedirectResponse(url="/student/courses", status_code=303)
+
+    file_bytes = await submission_file.read()
+    filename = submission_file.filename or "submission.txt"
+    try:
+        submission = create_file_submission(
+            db,
+            user_id=user.id,
+            question=question,
+            original_filename=filename,
+            file_bytes=file_bytes,
+        )
+        enqueue_file_llm_evaluation(db, submission.id)
+        push_flash(
+            request,
+            f"Submission #{submission.id} uploaded. LLM review will prepare a suggestion for teacher confirmation.",
+            "success",
+        )
+    except ValueError as exc:
+        push_flash(request, str(exc), "danger")
+    except Exception as exc:
+        push_flash(request, f"Failed to upload file submission: {exc}", "danger")
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
 
 

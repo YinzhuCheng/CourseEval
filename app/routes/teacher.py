@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 
@@ -14,8 +15,8 @@ from app.constants import (
     MembershipStatus,
     QuestionType,
     ScoringRule,
-    SubmissionStatus,
     SubmissionLimitMode,
+    SubmissionStatus,
 )
 from app.db import get_db, utcnow
 from app.models import (
@@ -24,11 +25,14 @@ from app.models import (
     CourseMember,
     Feedback,
     FinalGradeSnapshot,
+    FileQuestionConfig,
+    PythonCodeQuestionConfig,
     Question,
     ShortAnswerQuestionConfig,
     Submission,
 )
 from app.services.courses import (
+    DEFAULT_ALLOWED_PYTHON_LIBRARIES,
     get_assignment_for_staff,
     get_course_for_staff,
     get_course_for_teacher,
@@ -311,6 +315,19 @@ def create_question(
     question_type: str = Form(...),
     max_score: str = Form("100"),
     scoring_rule_override: str = Form(""),
+    input_spec: str = Form(""),
+    output_spec: str = Form(""),
+    visible_test_1_input: str = Form(""),
+    visible_test_1_output: str = Form(""),
+    visible_test_2_input: str = Form(""),
+    visible_test_2_output: str = Form(""),
+    visible_test_3_input: str = Form(""),
+    visible_test_3_output: str = Form(""),
+    hidden_test_1_input: str = Form(""),
+    hidden_test_1_output: str = Form(""),
+    hidden_test_2_input: str = Form(""),
+    hidden_test_2_output: str = Form(""),
+    allowed_libraries_note: str = Form(""),
     time_limit_seconds: str = Form("300"),
     memory_limit_mb: str = Form("1024"),
     cpu_limit: str = Form("1"),
@@ -324,6 +341,9 @@ def create_question(
     llm_scoring_rubric: str = Form(""),
     llm_feedback_enabled: str = Form("false"),
     rubric_text: str = Form(""),
+    reference_answer: str = Form(""),
+    accepted_extensions: str = Form(""),
+    require_teacher_confirmation: str = Form("true"),
     min_length: str = Form(""),
     max_length: str = Form(""),
     db: Session = Depends(get_db),
@@ -358,6 +378,7 @@ def create_question(
 
     max_score_decimal = Decimal(max_score)
     order_index = len(assignment.questions) + 1
+    teacher_confirmation_required = require_teacher_confirmation == "true"
     question = Question(
         assignment_id=assignment.id,
         order_index=order_index,
@@ -390,13 +411,75 @@ def create_question(
                 llm_feedback_enabled=llm_feedback_enabled == "true",
             )
         )
-    else:
+    elif q_type == QuestionType.SHORT_ANSWER:
         db.add(
             ShortAnswerQuestionConfig(
                 question_id=question.id,
                 min_length=int(min_length) if min_length.strip() else None,
                 max_length=int(max_length) if max_length.strip() else None,
                 rubric_text=rubric_text.strip() or None,
+                reference_answer=reference_answer.strip() or None,
+                llm_suggestion_enabled=True,
+                teacher_confirmation_required=teacher_confirmation_required,
+            )
+        )
+    elif q_type == QuestionType.PYTHON_CODE:
+        visible_samples = [
+            {"input": visible_test_1_input.strip(), "output": visible_test_1_output.strip()},
+            {"input": visible_test_2_input.strip(), "output": visible_test_2_output.strip()},
+            {"input": visible_test_3_input.strip(), "output": visible_test_3_output.strip()},
+        ]
+        hidden_samples = [
+            {"input": hidden_test_1_input.strip(), "output": hidden_test_1_output.strip()},
+            {"input": hidden_test_2_input.strip(), "output": hidden_test_2_output.strip()},
+        ]
+        if not input_spec.strip() or not output_spec.strip():
+            push_flash(request, "Python code questions must define both input and output specifications.", "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        if any(not sample["input"] or not sample["output"] for sample in visible_samples + hidden_samples):
+            push_flash(request, "Python code questions require 5 complete test cases (3 visible, 2 hidden).", "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        if max_score_decimal != Decimal("100"):
+            push_flash(request, "Python code questions currently use a fixed 100-point rubric (5 tests x 20 points).", "warning")
+            question.max_score = Decimal("100")
+        db.add(
+            PythonCodeQuestionConfig(
+                question_id=question.id,
+                input_spec=input_spec.strip(),
+                output_spec=output_spec.strip(),
+                visible_tests_json=json.dumps(visible_samples, ensure_ascii=True, indent=2),
+                hidden_tests_json=json.dumps(hidden_samples, ensure_ascii=True, indent=2),
+                allowed_libraries_note=allowed_libraries_note.strip()
+                or DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+                time_limit_seconds=int(time_limit_seconds or 300),
+                memory_limit_mb=int(memory_limit_mb or 1024),
+                cpu_limit=cpu_limit or "1",
+                allow_network=allow_network == "true",
+            )
+        )
+    else:
+        normalized_extensions = [
+            ext.strip().lower()
+            for ext in (accepted_extensions or ".txt,.tex,.ipynb").split(",")
+            if ext.strip()
+        ]
+        if q_type == QuestionType.PDF_LLM:
+            normalized_extensions = [".pdf"]
+        if not rubric_text.strip() or not reference_answer.strip():
+            push_flash(request, "Reference answer and rubric are required for LLM-graded file questions.", "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        db.add(
+            FileQuestionConfig(
+                question_id=question.id,
+                accepted_extensions=",".join(normalized_extensions),
+                rubric_text=rubric_text.strip(),
+                reference_answer_text=reference_answer.strip(),
+                teacher_confirmation_required=teacher_confirmation_required,
+                notebook_outputs_required=q_type == QuestionType.FORMATTED_TEXT_LLM,
+                updated_at=utcnow(),
             )
         )
 
@@ -443,6 +526,7 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "snapshots": snapshots,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
+            "default_allowed_python_libraries": DEFAULT_ALLOWED_PYTHON_LIBRARIES,
         },
     )
 

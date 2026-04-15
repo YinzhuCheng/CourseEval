@@ -340,7 +340,17 @@ class Question(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    python_code_config: Mapped["PythonCodeQuestionConfig | None"] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
     short_answer_config: Mapped["ShortAnswerQuestionConfig | None"] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    file_question_config: Mapped["FileQuestionConfig | None"] = relationship(
         back_populates="question",
         cascade="all, delete-orphan",
         uselist=False,
@@ -388,6 +398,43 @@ class NotebookQuestionConfig(Base):
     question: Mapped[Question] = relationship(back_populates="notebook_config")
 
 
+class PythonCodeQuestionConfig(Base):
+    __tablename__ = "python_code_question_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    input_spec: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_spec: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visible_tests_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    hidden_tests_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    allowed_libraries_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_limit_seconds: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    memory_limit_mb: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
+    cpu_limit: Mapped[str] = mapped_column(String(16), default="1", nullable=False)
+    allow_network: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    question: Mapped[Question] = relationship(back_populates="python_code_config")
+
+    def visible_tests(self) -> list[dict]:
+        try:
+            return json.loads(self.visible_tests_json or "[]")
+        except json.JSONDecodeError:
+            return []
+
+    def hidden_tests(self) -> list[dict]:
+        try:
+            return json.loads(self.hidden_tests_json or "[]")
+        except json.JSONDecodeError:
+            return []
+
+
 class ShortAnswerQuestionConfig(Base):
     __tablename__ = "short_answer_question_configs"
 
@@ -407,6 +454,28 @@ class ShortAnswerQuestionConfig(Base):
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     question: Mapped[Question] = relationship(back_populates="short_answer_config")
+
+
+class FileQuestionConfig(Base):
+    __tablename__ = "file_question_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    accepted_extensions: Mapped[str] = mapped_column(String(255), nullable=False)
+    reference_answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
+    llm_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notebook_outputs_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    question: Mapped[Question] = relationship(back_populates="file_question_config")
 
 
 class Submission(Base):
@@ -429,6 +498,7 @@ class Submission(Base):
     )
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notebook_id: Mapped[int | None] = mapped_column(ForeignKey("notebooks.id", ondelete="SET NULL"), nullable=True)
+    stored_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     submitted_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     queued_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)

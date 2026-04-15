@@ -43,6 +43,9 @@ class AssignmentStatus(str, Enum):
 class QuestionType(str, Enum):
     NOTEBOOK = "notebook"
     SHORT_ANSWER = "short_answer"
+    PYTHON_CODE = "python_code"
+    PDF_LLM = "pdf_llm"
+    FORMATTED_TEXT_LLM = "formatted_text_llm"
 
 
 class ScoringRule(str, Enum):
@@ -76,6 +79,8 @@ class EvaluationTaskType(str, Enum):
     NOTEBOOK_EVALUATION = "notebook_evaluation"
     SHORT_ANSWER_LLM = "short_answer_llm"
     NOTEBOOK_LLM_FEEDBACK = "notebook_llm_feedback"
+    PYTHON_CODE_EVALUATION = "python_code_evaluation"
+    FILE_LLM_EVALUATION = "file_llm_evaluation"
 
 
 class FeedbackSource(str, Enum):
