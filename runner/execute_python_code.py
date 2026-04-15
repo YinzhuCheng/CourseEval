@@ -25,9 +25,21 @@ def normalize_output(value: str) -> str:
     return value.replace("\r\n", "\n").strip()
 
 
+def expected_output_for_case(test_case: dict) -> str:
+    return test_case.get("expected_output", test_case.get("output", ""))
+
+
+def points_for_case(test_case: dict) -> float:
+    raw_points = test_case.get("points")
+    try:
+        return float(raw_points) if raw_points not in (None, "") else 20.0
+    except (TypeError, ValueError):
+        return 20.0
+
+
 def run_test_case(script_path: Path, test_case: dict, timeout: int) -> dict:
-    expected_output = test_case.get("expected_output", "")
-    score = float(test_case.get("points", 0))
+    expected_output = expected_output_for_case(test_case)
+    score = points_for_case(test_case)
     input_text = test_case.get("input", "")
     command = [sys.executable, str(script_path)]
 

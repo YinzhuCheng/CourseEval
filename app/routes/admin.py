@@ -11,36 +11,44 @@ from app.constants import (
     LLMProvider,
     LLMScope,
     LLMTestStatus,
-    PlatformRole,
     RuntimeScope,
+    UserRole,
 )
 from app.db import get_db, utcnow
 from app.models import LLMConfig, RuntimeImage, User
+from app.auth import assign_user_role
+from app.i18n import t
 from app.services.llm import test_llm_connectivity
-from app.services.permissions import RedirectRequired, require_admin
+from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _redirect(location: str) -> RedirectResponse:
+    return RedirectResponse(url=location, status_code=303)
+
+
 @router.get("")
 def admin_home(request: Request, db: Session = Depends(get_db)):
     try:
         require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
-    return RedirectResponse(url="/admin/system", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    return _redirect("/admin/system")
 
 
 @router.get("/users")
 def admin_users(request: Request, db: Session = Depends(get_db)):
     try:
-        require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+        require_super_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     users = list(db.scalars(select(User).order_by(User.created_at.desc())).all())
     return render_template(request, db, "admin_users.html", {"users": users})
@@ -50,34 +58,53 @@ def admin_users(request: Request, db: Session = Depends(get_db)):
 def admin_update_user_role(
     user_id: int,
     request: Request,
-    platform_role: str = Form(...),
+    role: str = Form(...),
     db: Session = Depends(get_db),
 ):
     try:
-        require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+        current_user = require_super_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     user = db.get(User, user_id)
     if user is None:
-        push_flash(request, "User not found.", "danger")
-        return RedirectResponse(url="/admin/users", status_code=303)
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
 
-    user.platform_role = PlatformRole(platform_role)
+    if user.id == current_user.id:
+        push_flash(request, t(request, "flash.cannot_change_own_role"), "warning")
+        return _redirect("/admin/users")
+    if user.effective_role == UserRole.SUPER_ADMIN:
+        push_flash(request, t(request, "flash.super_admin_role_locked"), "warning")
+        return _redirect("/admin/users")
+
+    try:
+        target_role = UserRole(role)
+    except ValueError:
+        push_flash(request, t(request, "flash.invalid_role_selection"), "danger")
+        return _redirect("/admin/users")
+
+    if target_role == UserRole.SUPER_ADMIN:
+        push_flash(request, t(request, "flash.super_admin_role_locked"), "warning")
+        return _redirect("/admin/users")
+
+    assign_user_role(user, target_role)
     user.updated_at = utcnow()
     db.commit()
-    push_flash(request, "User role updated.", "success")
-    return RedirectResponse(url="/admin/users", status_code=303)
+    push_flash(request, t(request, "flash.user_role_updated"), "success")
+    return _redirect("/admin/users")
 
 
 @router.get("/runtime-images")
 def admin_runtime_images(request: Request, db: Session = Depends(get_db)):
     try:
         admin_user = require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     images = list(db.scalars(select(RuntimeImage).order_by(RuntimeImage.created_at.desc())).all())
     return render_template(request, db, "admin_runtime_images.html", {"images": images})
@@ -98,9 +125,10 @@ def admin_create_runtime_image(
 ):
     try:
         admin_user = require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     image = RuntimeImage(
         scope=RuntimeScope.PLATFORM,
@@ -116,17 +144,18 @@ def admin_create_runtime_image(
     )
     db.add(image)
     db.commit()
-    push_flash(request, "Runtime image record created.", "success")
-    return RedirectResponse(url="/admin/runtime-images", status_code=303)
+    push_flash(request, t(request, "flash.runtime_image_created"), "success")
+    return _redirect("/admin/runtime-images")
 
 
 @router.get("/llm-configs")
 def admin_llm_configs(request: Request, db: Session = Depends(get_db)):
     try:
         require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     configs = list(db.scalars(select(LLMConfig).order_by(LLMConfig.created_at.desc())).all())
     return render_template(request, db, "admin_llm_configs.html", {"configs": configs})
@@ -147,9 +176,10 @@ def admin_create_llm_config(
 ):
     try:
         admin_user = require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     config = LLMConfig(
         scope=LLMScope.PLATFORM,
@@ -165,44 +195,55 @@ def admin_create_llm_config(
     )
     db.add(config)
     db.commit()
-    push_flash(request, "LLM config created.", "success")
-    return RedirectResponse(url="/admin/llm-configs", status_code=303)
+    push_flash(request, t(request, "flash.llm_config_created"), "success")
+    return _redirect("/admin/llm-configs")
 
 
 @router.post("/llm-configs/{config_id}/test")
 def admin_test_llm_config(config_id: int, request: Request, db: Session = Depends(get_db)):
     try:
         require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
     config = db.get(LLMConfig, config_id)
     if config is None:
-        push_flash(request, "LLM config not found.", "danger")
-        return RedirectResponse(url="/admin/llm-configs", status_code=303)
+        push_flash(request, t(request, "flash.llm_config_not_found"), "danger")
+        return _redirect("/admin/llm-configs")
 
     result = test_llm_connectivity(config)
     config.last_test_status = LLMTestStatus.SUCCESS if result.success else LLMTestStatus.FAILED
     config.last_test_message = result.message
     flash_category = "success" if result.success else "danger"
-    flash_message = "LLM connectivity test succeeded." if result.success else f"LLM connectivity test failed: {result.message}"
+    flash_message = (
+        t(request, "flash.llm_test_success")
+        if result.success
+        else t(request, "flash.llm_test_failed", message=result.message)
+    )
     config.last_tested_at = utcnow()
     db.commit()
     push_flash(request, flash_message, flash_category)
-    return RedirectResponse(url="/admin/llm-configs", status_code=303)
+    return _redirect("/admin/llm-configs")
 
 
 @router.get("/system")
 def admin_system(request: Request, db: Session = Depends(get_db)):
     try:
         require_admin(request, db)
-    except (PermissionError, RedirectRequired):
-        push_flash(request, "Administrator access is required.", "danger")
-        return RedirectResponse(url="/login", status_code=303)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
 
+    users = list(db.scalars(select(User)).all())
     stats = {
-        "users": db.scalar(select(User).count()) if False else None,
+        "users": len(users),
+        "super_admins": len([user for user in users if user.effective_role == UserRole.SUPER_ADMIN]),
+        "admins": len([user for user in users if user.effective_role == UserRole.ADMIN]),
+        "teachers": len([user for user in users if user.effective_role == UserRole.TEACHER]),
+        "students": len([user for user in users if user.effective_role == UserRole.STUDENT]),
         "runtime_images": len(list(db.scalars(select(RuntimeImage)).all())),
         "llm_configs": len(list(db.scalars(select(LLMConfig)).all())),
     }

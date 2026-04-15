@@ -5,6 +5,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.auth import is_admin
 from app.constants import (
     AccountRole,
     AssignmentStatus,
@@ -35,11 +36,13 @@ from app.models import (
 
 
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
-DEFAULT_ALLOWED_LIBRARIES = (
+DEFAULT_ALLOWED_PYTHON_LIBRARIES = (
     "Allowed imports: Python standard library, numpy, pandas, matplotlib, scipy, scikit-learn.\n"
     "Deep learning libraries are not available in the default runner image: torch, tensorflow, jax, paddle, "
     "mxnet, transformers."
 )
+# Keep the legacy name as an alias so older imports and payload builders stay valid.
+DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
 
 def _question_loader_options():
@@ -167,7 +170,7 @@ def get_question_for_teacher(db: Session, question_id: int, teacher_user_id: int
 
 
 def list_courses_for_user(db: Session, user: User) -> list[Course]:
-    if user.platform_role.value == "admin":
+    if is_admin(user):
         statement = select(Course).order_by(Course.title.asc())
     else:
         statement = (
@@ -529,7 +532,8 @@ def create_question(
                 output_spec=payload.get("output_spec") or None,
                 visible_tests_json=payload.get("visible_tests_json", "[]"),
                 hidden_tests_json=payload.get("hidden_tests_json", "[]"),
-                allowed_libraries_note=payload.get("allowed_libraries_note") or DEFAULT_ALLOWED_LIBRARIES,
+                allowed_libraries_note=payload.get("allowed_libraries_note")
+                or DEFAULT_ALLOWED_PYTHON_LIBRARIES,
                 time_limit_seconds=payload.get("time_limit_seconds", 10),
                 memory_limit_mb=payload.get("memory_limit_mb", 512),
                 cpu_limit=payload.get("cpu_limit", "1"),
@@ -743,7 +747,11 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
     db.add(course)
     db.flush()
 
-    bootstrap_role = CourseRole.TEACHER if user.account_role == AccountRole.TEACHER else CourseRole.STUDENT
+    bootstrap_role = (
+        CourseRole.TEACHER
+        if user.account_role == AccountRole.TEACHER or user.platform_role in {PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN}
+        else CourseRole.STUDENT
+    )
     db.add(
         CourseMember(
             course_id=course.id,
@@ -787,22 +795,22 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
             output_spec="若括号完全匹配输出 YES，否则输出 NO",
             visible_tests_json=json.dumps(
                 [
-                    {"input": "()[]{}", "output": "YES"},
-                    {"input": "([{}])", "output": "YES"},
-                    {"input": "([)]", "output": "NO"},
+                    {"input": "()[]{}", "expected_output": "YES", "points": 20},
+                    {"input": "([{}])", "expected_output": "YES", "points": 20},
+                    {"input": "([)]", "expected_output": "NO", "points": 20},
                 ],
                 ensure_ascii=False,
                 indent=2,
             ),
             hidden_tests_json=json.dumps(
                 [
-                    {"input": "(((", "output": "NO"},
-                    {"input": "{[()()]}", "output": "YES"},
+                    {"input": "(((", "expected_output": "NO", "points": 20},
+                    {"input": "{[()()]}", "expected_output": "YES", "points": 20},
                 ],
                 ensure_ascii=False,
                 indent=2,
             ),
-            allowed_libraries_note=DEFAULT_ALLOWED_LIBRARIES,
+            allowed_libraries_note=DEFAULT_ALLOWED_PYTHON_LIBRARIES,
             time_limit_seconds=300,
             memory_limit_mb=1024,
             cpu_limit="1",

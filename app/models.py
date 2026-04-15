@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,8 +22,30 @@ from app.constants import (
     ScoringRule,
     SubmissionLimitMode,
     SubmissionStatus,
+    UserRole,
 )
 from app.db import Base, utcnow
+
+
+def _normalize_python_test_case(item: dict, index: int) -> dict:
+    expected_output = item.get("expected_output")
+    if expected_output is None:
+        expected_output = item.get("output", "")
+
+    raw_points = item.get("points")
+    try:
+        points = float(raw_points) if raw_points not in (None, "") else 20.0
+    except (TypeError, ValueError):
+        points = 20.0
+
+    return {
+        "name": item.get("name") or f"Test {index}",
+        "input": item.get("input", ""),
+        "expected_output": expected_output,
+        # Preserve the legacy key so templates and older call sites keep working.
+        "output": expected_output,
+        "points": points,
+    }
 
 
 class User(Base):
@@ -34,7 +58,7 @@ class User(Base):
     account_role: Mapped[AccountRole] = mapped_column(
         Enum(AccountRole, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,
-        default=AccountRole.TEACHER,
+        default=AccountRole.STUDENT,
         index=True,
     )
     platform_role: Mapped[PlatformRole] = mapped_column(
@@ -43,6 +67,9 @@ class User(Base):
         default=PlatformRole.USER,
         index=True,
     )
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    email_verification_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -76,6 +103,16 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="FinalGradeSnapshot.student_id",
     )
+
+    @property
+    def effective_role(self) -> UserRole:
+        if self.platform_role == PlatformRole.SUPER_ADMIN:
+            return UserRole.SUPER_ADMIN
+        if self.platform_role == PlatformRole.ADMIN:
+            return UserRole.ADMIN
+        if self.account_role == AccountRole.TEACHER:
+            return UserRole.TEACHER
+        return UserRole.STUDENT
 
 
 class Notebook(Base):
@@ -424,15 +461,21 @@ class PythonCodeQuestionConfig(Base):
 
     def visible_tests(self) -> list[dict]:
         try:
-            return json.loads(self.visible_tests_json or "[]")
+            payload = json.loads(self.visible_tests_json or "[]")
         except json.JSONDecodeError:
             return []
+        if not isinstance(payload, list):
+            return []
+        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
     def hidden_tests(self) -> list[dict]:
         try:
-            return json.loads(self.hidden_tests_json or "[]")
+            payload = json.loads(self.hidden_tests_json or "[]")
         except json.JSONDecodeError:
             return []
+        if not isinstance(payload, list):
+            return []
+        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
 
 class ShortAnswerQuestionConfig(Base):

@@ -46,6 +46,7 @@ from app.models import (
     Notebook,
     PythonCodeQuestionConfig,
     Question,
+    RuntimeImage,
     Submission,
 )
 
@@ -99,6 +100,21 @@ def _file_question_config(question: Question | None) -> FileQuestionConfig | Non
 
 def _python_code_config(question: Question | None) -> PythonCodeQuestionConfig | None:
     return question.python_code_config if question is not None else None
+
+
+def _resolve_runtime_image_for_question(question: Question) -> RuntimeImage | None:
+    return question.runtime_image or question.assignment.runtime_image or question.assignment.course.default_runtime_image
+
+
+def _resolve_runner_image_tag(question: Question) -> tuple[str, RuntimeImage | None]:
+    runtime_image = _resolve_runtime_image_for_question(question)
+    if runtime_image is not None and runtime_image.image_tag:
+        return runtime_image.image_tag, runtime_image
+    return settings.runner_image, None
+
+
+def _runner_script_path(script_name: str) -> Path:
+    return settings.base_dir / "runner" / script_name
 
 
 def submission_requires_teacher_confirmation(submission: Submission) -> bool:
@@ -351,8 +367,8 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
             {
                 "name": item.get("name") or f"Test {index}",
                 "input": item.get("input", ""),
-                "expected_output": item.get("expected_output", ""),
-                "points": float(item.get("points", 0)),
+                "expected_output": item.get("expected_output", item.get("output", "")),
+                "points": float(item.get("points", 20)),
             }
         )
     return normalized
@@ -1176,7 +1192,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
 
         question = submission.question
         notebook_config = question.notebook_config
-        runtime_image_tag = settings.runner_image
+        runtime_image_tag, runtime_image = _resolve_runner_image_tag(question)
         timeout_seconds = notebook_config.time_limit_seconds if notebook_config else settings.execution_timeout_seconds
         memory_limit = (
             f"{notebook_config.memory_limit_mb}m" if notebook_config else settings.runner_memory_limit
@@ -1187,6 +1203,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
         submission.status = SubmissionStatus.RUNNING
         submission.started_at = utcnow()
         task.status = EvaluationTaskStatus.RUNNING
+        task.runtime_image_id = runtime_image.id if runtime_image is not None else None
         task.started_at = utcnow()
         task.error_message = None
         db.commit()
@@ -1347,16 +1364,18 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
 
         output_dir = settings.outputs_dir / "submissions" / f"submission-{submission.id}"
         ensure_writable_directory(output_dir)
+        runtime_image_tag, runtime_image = _resolve_runner_image_tag(question)
+        task.runtime_image_id = runtime_image.id if runtime_image is not None else None
         result = run_python_code_in_docker(
             input_relative_path=submission.stored_file_path,
             output_dir_relative_path=relative_to_data(output_dir),
-            runner_image=settings.runner_image,
+            runner_image=runtime_image_tag,
             timeout_seconds=config.time_limit_seconds,
             memory_limit=f"{config.memory_limit_mb}m",
             cpus=config.cpu_limit,
             network_disabled=not config.allow_network,
-            visible_tests_json=config.visible_tests_json,
-            hidden_tests_json=config.hidden_tests_json,
+            visible_tests_json=json.dumps(config.visible_tests(), ensure_ascii=True),
+            hidden_tests_json=json.dumps(config.hidden_tests(), ensure_ascii=True),
         )
 
         evaluation_result = EvaluationResult(
@@ -1444,6 +1463,7 @@ def run_job_in_docker(
 ) -> RunnerResult:
     input_path = absolute_data_path(input_relative_path)
     output_dir = absolute_data_path(output_dir_relative_path)
+    runner_script_path = _runner_script_path("execute_notebook.py")
     executed_path = output_dir / "executed.ipynb"
     html_path = output_dir / "executed.html"
     stdout_path = output_dir / "stdout.txt"
@@ -1457,6 +1477,13 @@ def run_job_in_docker(
                 artifact_path.unlink()
             else:
                 shutil.rmtree(artifact_path)
+
+    if not runner_script_path.exists():
+        message = f"Runner helper script is missing from the application checkout: {runner_script_path}"
+        write_text(stderr_path, f"{message}\n")
+        summary = {"failure_type": "system_error", "message": message, "run_success": False, "auto_score": 0}
+        summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
+        return RunnerResult(exit_code=127, error_message=message, summary_json=summary)
 
     container_name = f"submission-runner-{uuid4().hex[:8]}"
     command = [
@@ -1475,6 +1502,8 @@ def run_job_in_docker(
         f"{input_path.resolve().as_posix()}:/job/input.ipynb:ro",
         "-v",
         f"{output_dir.resolve().as_posix()}:/job/output",
+        "-v",
+        f"{runner_script_path.resolve().as_posix()}:/runner/execute_notebook.py:ro",
         "-w",
         "/job",
     ]
@@ -1588,6 +1617,7 @@ def run_python_code_in_docker(
 ) -> RunnerResult:
     input_path = absolute_data_path(input_relative_path)
     output_dir = absolute_data_path(output_dir_relative_path)
+    runner_script_path = _runner_script_path("execute_python_code.py")
     stdout_path = output_dir / "stdout.txt"
     stderr_path = output_dir / "stderr.txt"
     summary_path = output_dir / "summary.json"
@@ -1596,6 +1626,13 @@ def run_python_code_in_docker(
     for artifact_path in (stdout_path, stderr_path, summary_path):
         if artifact_path.exists():
             artifact_path.unlink()
+
+    if not runner_script_path.exists():
+        message = f"Runner helper script is missing from the application checkout: {runner_script_path}"
+        write_text(stderr_path, f"{message}\n")
+        summary = {"failure_type": "system_error", "message": message, "run_success": False, "auto_score": 0}
+        summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
+        return RunnerResult(exit_code=127, error_message=message, summary_json=summary)
 
     container_name = f"python-submission-runner-{uuid4().hex[:8]}"
     command = [
@@ -1616,6 +1653,8 @@ def run_python_code_in_docker(
         f"{input_path.resolve().as_posix()}:/job/input.py:ro",
         "-v",
         f"{output_dir.resolve().as_posix()}:/job/output",
+        "-v",
+        f"{runner_script_path.resolve().as_posix()}:/runner/execute_python_code.py:ro",
         "-w",
         "/job",
     ]

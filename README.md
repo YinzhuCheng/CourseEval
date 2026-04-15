@@ -1,4 +1,4 @@
-# Notebook Runner MVP / Course Evaluation Platform Skeleton
+# CourseEval / Course Evaluation Platform Skeleton
 
 This repository started as a minimal notebook execution validation system and has been incrementally expanded into a lightweight course-assignment evaluation platform skeleton.
 
@@ -235,13 +235,18 @@ Important variables:
 
 - `SECRET_KEY`: session signing key, change in production
 - `DEFAULT_LOCALE`: default UI language (`en` or `zh`)
-- `TEACHER_REGISTRATION_CODE`: required when a user registers as a teacher
-- `ADMINISTRATOR_REGISTRATION_CODE`: required when a user registers as an administrator
 - `DATABASE_URL`: SQLite URL
 - `REDIS_URL`: Redis connection string
 - `RUNNER_IMAGE`: Docker image tag used for notebook execution
 - `UPLOAD_MAX_BYTES`: upload size limit
 - `EXECUTION_TIMEOUT_SECONDS`: notebook execution timeout
+
+User registration notes:
+
+- all public self-service registrations create student accounts
+- the first successful registration bootstraps the initial `super_admin`
+- `teacher` and `admin` roles are granted later from inside the system by a `super_admin`
+- `scripts/init_super_admin.py` is available as a maintenance tool if you want to seed a dedicated super admin explicitly
 
 ## Local startup
 
@@ -327,13 +332,13 @@ Then fill:
 
 - username
 - email
-- account role (`student`, `teacher`, or `administrator`)
-- teacher registration code (required only for teacher accounts)
-- administrator registration code (required only for administrator accounts)
 - password
 - confirm password
 
 Registration logs you in immediately.
+The first successful registration becomes the bootstrap `super_admin`; all later
+registrations are regular student accounts unless a super admin promotes them
+inside the platform.
 
 The UI language can be switched from the top-right navigation bar between English and Chinese.
 

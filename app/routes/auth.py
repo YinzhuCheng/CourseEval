@@ -6,16 +6,16 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from app.auth import (
+    initial_email_verification_state,
     find_user_by_login,
     get_current_user,
     hash_password,
     login_user,
     logout_user,
     push_flash,
+    resolve_registration_roles,
     verify_password,
 )
-from app.config import get_settings
-from app.constants import AccountRole, PlatformRole
 from app.db import get_db
 from app.i18n import set_locale, t
 from app.models import User
@@ -24,23 +24,16 @@ from app.web import render_template
 
 
 router = APIRouter()
-settings = get_settings()
 
 
 def _register_form_data(
     *,
     username: str = "",
     email: str = "",
-    account_role: str = AccountRole.STUDENT.value,
-    teacher_code: str = "",
-    administrator_code: str = "",
 ) -> dict[str, str]:
     return {
         "username": username,
         "email": email,
-        "account_role": account_role,
-        "teacher_code": teacher_code,
-        "administrator_code": administrator_code,
     }
 
 
@@ -83,30 +76,16 @@ def register_user(
     request: Request,
     username: str = Form(...),
     email: str = Form(...),
-    account_role: str = Form(AccountRole.STUDENT.value),
-    teacher_code: str = Form(""),
-    administrator_code: str = Form(""),
     password: str = Form(...),
     confirm_password: str = Form(...),
     db: Session = Depends(get_db),
 ):
     username = username.strip()
     email = email.strip().lower()
-    teacher_code = teacher_code.strip()
-    administrator_code = administrator_code.strip()
     form_data = _register_form_data(
         username=username,
         email=email,
-        account_role=account_role,
-        teacher_code=teacher_code,
-        administrator_code=administrator_code,
     )
-
-    try:
-        selected_account_role = AccountRole(account_role)
-    except ValueError:
-        push_flash(request, t(request, "flash.all_fields_required"), "danger")
-        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
     if not username or not email or not password or not confirm_password:
         push_flash(request, t(request, "flash.all_fields_required"), "danger")
@@ -122,33 +101,20 @@ def register_user(
     if len(password) < 8:
         push_flash(request, t(request, "flash.password_length"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
-    if selected_account_role == AccountRole.TEACHER and not teacher_code:
-        push_flash(request, t(request, "flash.teacher_code_required"), "danger")
-        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
-    if selected_account_role == AccountRole.TEACHER and teacher_code != settings.teacher_registration_code:
-        push_flash(request, t(request, "flash.teacher_code_invalid"), "danger")
-        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
-    if selected_account_role == AccountRole.ADMINISTRATOR and not administrator_code:
-        push_flash(request, t(request, "flash.admin_code_required"), "danger")
-        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
-    if (
-        selected_account_role == AccountRole.ADMINISTRATOR
-        and administrator_code != settings.administrator_registration_code
-    ):
-        push_flash(request, t(request, "flash.admin_code_invalid"), "danger")
-        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
     existing_user = db.scalar(select(User).where(or_(User.username == username, User.email == email)))
     if existing_user:
         push_flash(request, t(request, "flash.username_email_exists"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
+    account_role, platform_role = resolve_registration_roles(db)
     user = User(
         username=username,
         email=email,
         password_hash=hash_password(password),
-        account_role=selected_account_role,
-        platform_role=PlatformRole.ADMIN if selected_account_role == AccountRole.ADMINISTRATOR else PlatformRole.USER,
+        account_role=account_role,
+        platform_role=platform_role,
+        **initial_email_verification_state(),
     )
     db.add(user)
     db.commit()

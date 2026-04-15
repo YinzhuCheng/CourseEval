@@ -4,12 +4,21 @@ from enum import Enum
 class PlatformRole(str, Enum):
     USER = "user"
     ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
 
 
 class AccountRole(str, Enum):
     STUDENT = "student"
     TEACHER = "teacher"
+    # Legacy value kept for smooth migrations from the shared-registration-code flow.
     ADMINISTRATOR = "administrator"
+
+
+class UserRole(str, Enum):
+    STUDENT = "student"
+    TEACHER = "teacher"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
 
 
 class Locale(str, Enum):

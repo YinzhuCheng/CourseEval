@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.auth import get_current_user, is_teacher_account, pop_flashes
+from app.auth import get_current_user, is_admin, is_super_admin, is_teacher_account, pop_flashes
 from app.config import get_settings
 from app.i18n import get_locale, template_translator
 
@@ -40,6 +40,11 @@ def render_template(
         "format_datetime": format_datetime,
     }
     base_context["can_use_teacher_features"] = is_teacher_account(base_context["current_user"])
+    base_context["can_access_admin_features"] = is_admin(base_context["current_user"])
+    base_context["can_manage_platform_users"] = is_super_admin(base_context["current_user"])
+    base_context["current_user_role"] = (
+        base_context["current_user"].effective_role.value if base_context["current_user"] else None
+    )
     if context:
         base_context.update(context)
     return templates.TemplateResponse(request, template_name, dict(base_context), status_code=status_code)

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Submission #{{ submission.id }} - Notebook Runner{% endblock %}
+{% block title %}Submission #{{ submission.id }} - {{ t("site.title") }}{% endblock %}
 
 {% block extra_head %}
 {% if submission.status.value in ["queued", "running", "submitted"] %}

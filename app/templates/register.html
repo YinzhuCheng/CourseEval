@@ -5,7 +5,7 @@
 {% block content %}
 {% set form_data = form_data or {} %}
 <div class="row justify-content-center">
-  <div class="col-xl-8 col-lg-9">
+  <div class="col-lg-7 col-xl-6">
     <div class="card shadow-sm">
       <div class="card-body p-4 p-lg-5">
         <h1 class="h3 mb-2">{{ t("register.title") }}</h1>
@@ -40,79 +40,14 @@
               value="{{ form_data.get('email', '') }}"
               autocomplete="email"
             />
+            <div class="form-text">{{ t("register.email.help") }}</div>
           </div>
 
           <div class="col-12">
-            <label class="form-label d-block">{{ t("register.role") }}</label>
-            <div class="row g-3">
-              <div class="col-md-4">
-                <label class="card border h-100 p-3 role-option">
-                  <div class="form-check">
-                    <input
-                      class="form-check-input"
-                      type="radio"
-                      name="account_role"
-                      value="student"
-                      {% if form_data.get('account_role', 'student') == 'student' %}checked{% endif %}
-                    />
-                    <span class="form-check-label fw-semibold">{{ t("register.role.student") }}</span>
-                  </div>
-                  <div class="small text-muted mt-2">{{ t("register.role.student.help") }}</div>
-                </label>
-              </div>
-              <div class="col-md-4">
-                <label class="card border h-100 p-3 role-option">
-                  <div class="form-check">
-                    <input
-                      class="form-check-input"
-                      type="radio"
-                      name="account_role"
-                      value="teacher"
-                      {% if form_data.get('account_role') == 'teacher' %}checked{% endif %}
-                    />
-                    <span class="form-check-label fw-semibold">{{ t("register.role.teacher") }}</span>
-                  </div>
-                  <div class="small text-muted mt-2">{{ t("register.role.teacher.help") }}</div>
-                </label>
-              </div>
-              <div class="col-md-4">
-                <label class="card border h-100 p-3 role-option">
-                  <div class="form-check">
-                    <input
-                      class="form-check-input"
-                      type="radio"
-                      name="account_role"
-                      value="administrator"
-                      {% if form_data.get('account_role') == 'administrator' %}checked{% endif %}
-                    />
-                    <span class="form-check-label fw-semibold">{{ t("register.role.admin") }}</span>
-                  </div>
-                  <div class="small text-muted mt-2">{{ t("register.role.admin.help") }}</div>
-                </label>
-              </div>
+            <div class="alert alert-info mb-0">
+              <strong>{{ t("register.account_type_label") }}</strong>
+              {{ t("register.account_type_body") }}
             </div>
-          </div>
-
-          <div class="col-12" id="teacher-code-group">
-            <label class="form-label">{{ t("register.teacher_code") }}</label>
-            <input
-              class="form-control"
-              name="teacher_code"
-              value="{{ form_data.get('teacher_code', '') }}"
-              autocomplete="off"
-            />
-            <div class="form-text">{{ t("register.teacher_code.help") }}</div>
-          </div>
-
-          <div class="col-12" id="administrator-code-group">
-            <label class="form-label">{{ t("register.admin_code") }}</label>
-            <input
-              class="form-control"
-              name="administrator_code"
-              value="{{ form_data.get('administrator_code', '') }}"
-              autocomplete="off"
-            />
-            <div class="form-text">{{ t("register.admin_code.help") }}</div>
           </div>
 
           <div class="col-lg-6">
@@ -147,19 +82,4 @@
     </div>
   </div>
 </div>
-
-<script>
-  (() => {
-    const teacherGroup = document.getElementById("teacher-code-group");
-    const administratorGroup = document.getElementById("administrator-code-group");
-    const radios = Array.from(document.querySelectorAll('input[name="account_role"]'));
-    const updateVisibility = () => {
-      const selected = radios.find((radio) => radio.checked)?.value;
-      teacherGroup.style.display = selected === "teacher" ? "block" : "none";
-      administratorGroup.style.display = selected === "administrator" ? "block" : "none";
-    };
-    radios.forEach((radio) => radio.addEventListener("change", updateVisibility));
-    updateVisibility();
-  })();
-</script>
 {% endblock %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Job #{{ job.id }} - Notebook Runner MVP{% endblock %}
+{% block title %}Job #{{ job.id }} - {{ t("site.title") }}{% endblock %}
 
 {% block extra_head %}
 {% if job.status.value in ["queued", "running"] %}

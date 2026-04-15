@@ -1,1 +1,1 @@
-"""Notebook Runner MVP application package."""
+"""CourseEval application package."""
