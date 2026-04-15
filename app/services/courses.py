@@ -35,11 +35,13 @@ from app.models import (
 
 
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
-DEFAULT_ALLOWED_LIBRARIES = (
+DEFAULT_ALLOWED_PYTHON_LIBRARIES = (
     "Allowed imports: Python standard library, numpy, pandas, matplotlib, scipy, scikit-learn.\n"
     "Deep learning libraries are not available in the default runner image: torch, tensorflow, jax, paddle, "
     "mxnet, transformers."
 )
+# Keep the legacy name as an alias so older imports and payload builders stay valid.
+DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
 
 def _question_loader_options():
@@ -529,7 +531,8 @@ def create_question(
                 output_spec=payload.get("output_spec") or None,
                 visible_tests_json=payload.get("visible_tests_json", "[]"),
                 hidden_tests_json=payload.get("hidden_tests_json", "[]"),
-                allowed_libraries_note=payload.get("allowed_libraries_note") or DEFAULT_ALLOWED_LIBRARIES,
+                allowed_libraries_note=payload.get("allowed_libraries_note")
+                or DEFAULT_ALLOWED_PYTHON_LIBRARIES,
                 time_limit_seconds=payload.get("time_limit_seconds", 10),
                 memory_limit_mb=payload.get("memory_limit_mb", 512),
                 cpu_limit=payload.get("cpu_limit", "1"),
@@ -802,7 +805,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 ensure_ascii=False,
                 indent=2,
             ),
-            allowed_libraries_note=DEFAULT_ALLOWED_LIBRARIES,
+            allowed_libraries_note=DEFAULT_ALLOWED_PYTHON_LIBRARIES,
             time_limit_seconds=300,
             memory_limit_mb=1024,
             cpu_limit="1",
