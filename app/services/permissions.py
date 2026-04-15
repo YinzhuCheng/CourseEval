@@ -2,8 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.auth import get_current_user, is_teacher_account, push_flash
-from app.constants import CourseRole, MembershipStatus, PlatformRole
+from app.auth import get_current_user, is_admin, is_super_admin, is_teacher_account, push_flash
+from app.constants import CourseRole, MembershipStatus
 from app.i18n import t
 from app.models import Course, CourseMember, User
 
@@ -18,7 +18,15 @@ COURSE_MANAGEMENT_ROLES = {CourseRole.TEACHER}
 
 
 def is_platform_admin(user: User | None) -> bool:
-    return user is not None and user.platform_role == PlatformRole.ADMIN and user.is_active
+    return is_admin(user)
+
+
+def require_super_admin(request: Request, db: Session) -> User:
+    user = require_user(request, db)
+    if not is_super_admin(user):
+        push_flash(request, t(request, "flash.super_admin_required"), "danger")
+        raise RedirectRequired("/dashboard")
+    return user
 
 
 def get_course_membership(db: Session, course_id: int, user_id: int) -> CourseMember | None:

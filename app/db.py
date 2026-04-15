@@ -60,16 +60,32 @@ def ensure_data_directories() -> None:
 def migrate_legacy_schema() -> None:
     inspector = inspect(engine)
     if "users" in inspector.get_table_names():
-        _ensure_column("users", "account_role", "VARCHAR(20) NOT NULL DEFAULT 'teacher'")
+        _ensure_column("users", "account_role", "VARCHAR(20) NOT NULL DEFAULT 'student'")
         _ensure_column("users", "platform_role", "VARCHAR(20) NOT NULL DEFAULT 'user'")
+        _ensure_column("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 1")
+        _ensure_column("users", "email_verification_token", "VARCHAR(255)")
+        _ensure_column("users", "email_verification_sent_at", "DATETIME")
         _ensure_column("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1")
         _ensure_column("users", "updated_at", "DATETIME")
         _normalize_enum_values(
             "users",
             "account_role",
-            {"TEACHER": "teacher", "STUDENT": "student", "ADMINISTRATOR": "administrator"},
+            {
+                "TEACHER": "teacher",
+                "STUDENT": "student",
+                "ADMINISTRATOR": "student",
+                "administrator": "student",
+            },
         )
-        _normalize_enum_values("users", "platform_role", {"USER": "user", "ADMIN": "admin"})
+        _normalize_enum_values(
+            "users",
+            "platform_role",
+            {
+                "USER": "user",
+                "ADMIN": "admin",
+                "SUPER_ADMIN": "super_admin",
+            },
+        )
     if "courses" in inspector.get_table_names():
         _ensure_column("courses", "join_code", "VARCHAR(32)")
     if "notebook_question_configs" in inspector.get_table_names():

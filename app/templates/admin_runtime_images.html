@@ -1,59 +1,59 @@
 {% extends "base.html" %}
 
-{% block title %}Runtime Images - Admin{% endblock %}
+{% block title %}{{ t("admin.runtime.title") }} - {{ t("site.title") }}{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
-    <h1 class="h3 mb-1">Runtime image records</h1>
-    <p class="text-muted mb-0">Track platform runner images and their resource policies.</p>
+    <h1 class="h3 mb-1">{{ t("admin.runtime.title") }}</h1>
+    <p class="text-muted mb-0">{{ t("admin.runtime.subtitle") }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="/admin/system">Back to admin</a>
+  <a class="btn btn-outline-secondary" href="/admin/system">{{ t("admin.runtime.back") }}</a>
 </div>
 
 <div class="row g-4">
   <div class="col-lg-5">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Create runtime image record</h2>
+        <h2 class="h5 mb-3">{{ t("admin.runtime.create") }}</h2>
         <form method="post" action="/admin/runtime-images" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Name</label>
+            <label class="form-label">{{ t("admin.runtime.name") }}</label>
             <input class="form-control" name="name" required />
           </div>
           <div class="col-12">
-            <label class="form-label">Image tag</label>
+            <label class="form-label">{{ t("admin.runtime.image_tag") }}</label>
             <input class="form-control" name="image_tag" required />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Python version</label>
+            <label class="form-label">{{ t("admin.runtime.python_version") }}</label>
             <input class="form-control" name="python_version" value="python3.11" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">CPU limit</label>
+            <label class="form-label">{{ t("admin.runtime.cpu_limit") }}</label>
             <input class="form-control" name="cpu_limit" value="1" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Timeout seconds</label>
+            <label class="form-label">{{ t("admin.runtime.timeout_seconds") }}</label>
             <input class="form-control" name="timeout_seconds" value="300" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">Memory MB</label>
+            <label class="form-label">{{ t("admin.runtime.memory_mb") }}</label>
             <input class="form-control" name="memory_limit_mb" value="1024" />
           </div>
           <div class="col-12">
-            <label class="form-label">Package summary</label>
+            <label class="form-label">{{ t("admin.runtime.package_summary") }}</label>
             <textarea class="form-control" name="package_summary" rows="4"></textarea>
           </div>
           <div class="col-12">
-            <label class="form-label">Networking</label>
+            <label class="form-label">{{ t("admin.runtime.networking") }}</label>
             <select class="form-select" name="network_enabled">
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
+              <option value="false">{{ t("admin.runtime.network_disabled") }}</option>
+              <option value="true">{{ t("admin.runtime.network_enabled") }}</option>
             </select>
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Create runtime image record</button>
+            <button class="btn btn-primary" type="submit">{{ t("admin.runtime.submit") }}</button>
           </div>
         </form>
       </div>
@@ -63,17 +63,17 @@
   <div class="col-lg-7">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Registered images</h2>
+        <h2 class="h5 mb-3">{{ t("admin.runtime.list") }}</h2>
         {% if images %}
         <div class="table-responsive">
           <table class="table align-middle">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Tag</th>
-                <th>Python</th>
-                <th>Limits</th>
-                <th>Network</th>
+                <th>{{ t("admin.runtime.column.name") }}</th>
+                <th>{{ t("admin.runtime.column.tag") }}</th>
+                <th>{{ t("admin.runtime.column.python") }}</th>
+                <th>{{ t("admin.runtime.column.limits") }}</th>
+                <th>{{ t("admin.runtime.column.network") }}</th>
               </tr>
             </thead>
             <tbody>
@@ -83,14 +83,14 @@
                 <td><code>{{ image.image_tag }}</code></td>
                 <td>{{ image.python_version or "-" }}</td>
                 <td>{{ image.cpu_limit }} CPU / {{ image.memory_limit_mb }} MB / {{ image.timeout_seconds }}s</td>
-                <td>{{ "enabled" if image.network_enabled else "disabled" }}</td>
+                <td>{{ t("admin.runtime.network_enabled") if image.network_enabled else t("admin.runtime.network_disabled") }}</td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
         {% else %}
-        <p class="text-muted mb-0">No runtime image records yet.</p>
+        <p class="text-muted mb-0">{{ t("admin.runtime.empty") }}</p>
         {% endif %}
       </div>
     </div>

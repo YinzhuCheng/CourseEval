@@ -5,6 +5,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.auth import is_admin
 from app.constants import (
     AccountRole,
     AssignmentStatus,
@@ -169,7 +170,7 @@ def get_question_for_teacher(db: Session, question_id: int, teacher_user_id: int
 
 
 def list_courses_for_user(db: Session, user: User) -> list[Course]:
-    if user.platform_role.value == "admin":
+    if is_admin(user):
         statement = select(Course).order_by(Course.title.asc())
     else:
         statement = (
@@ -746,7 +747,11 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
     db.add(course)
     db.flush()
 
-    bootstrap_role = CourseRole.TEACHER if user.account_role == AccountRole.TEACHER else CourseRole.STUDENT
+    bootstrap_role = (
+        CourseRole.TEACHER
+        if user.account_role == AccountRole.TEACHER or user.platform_role in {PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN}
+        else CourseRole.STUDENT
+    )
     db.add(
         CourseMember(
             course_id=course.id,

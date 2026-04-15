@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.constants import AccountRole, PlatformRole
+from app.constants import AccountRole, PlatformRole, UserRole
 from app.models import User
 
 
@@ -65,12 +65,61 @@ def get_current_user(request: Request, db: Session) -> User | None:
     return db.get(User, user_id)
 
 
+def is_super_admin(user: User | None) -> bool:
+    return bool(user and user.platform_role == PlatformRole.SUPER_ADMIN and user.is_active)
+
+
 def is_admin(user: User | None) -> bool:
-    return bool(user and user.platform_role == PlatformRole.ADMIN and user.is_active)
+    return bool(
+        user
+        and user.platform_role in {PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN}
+        and user.is_active
+    )
 
 
 def is_teacher_account(user: User | None) -> bool:
     return bool(user and user.is_active and (user.account_role == AccountRole.TEACHER or is_admin(user)))
+
+
+def has_super_admin(db: Session) -> bool:
+    statement = select(User.id).where(
+        User.platform_role == PlatformRole.SUPER_ADMIN,
+        User.is_active.is_(True),
+    )
+    return db.scalar(statement) is not None
+
+
+def resolve_registration_roles(db: Session) -> tuple[AccountRole, PlatformRole]:
+    # Bootstrap logic: the very first successful registration becomes the only
+    # automatically created super administrator for the system lifetime.
+    if not has_super_admin(db):
+        return AccountRole.STUDENT, PlatformRole.SUPER_ADMIN
+    return AccountRole.STUDENT, PlatformRole.USER
+
+
+def initial_email_verification_state() -> dict[str, object]:
+    # Phase 1 keeps email verification auto-approved while preserving explicit
+    # fields for a later token-based verification flow.
+    return {
+        "email_verified": True,
+        "email_verification_token": None,
+        "email_verification_sent_at": None,
+    }
+
+
+def assign_user_role(user: User, role: UserRole) -> None:
+    if role == UserRole.SUPER_ADMIN:
+        user.account_role = AccountRole.STUDENT
+        user.platform_role = PlatformRole.SUPER_ADMIN
+    elif role == UserRole.ADMIN:
+        user.account_role = AccountRole.STUDENT
+        user.platform_role = PlatformRole.ADMIN
+    elif role == UserRole.TEACHER:
+        user.account_role = AccountRole.TEACHER
+        user.platform_role = PlatformRole.USER
+    else:
+        user.account_role = AccountRole.STUDENT
+        user.platform_role = PlatformRole.USER
 
 
 def login_user(request: Request, user: User) -> None:

@@ -22,6 +22,7 @@ from app.constants import (
     ScoringRule,
     SubmissionLimitMode,
     SubmissionStatus,
+    UserRole,
 )
 from app.db import Base, utcnow
 
@@ -57,7 +58,7 @@ class User(Base):
     account_role: Mapped[AccountRole] = mapped_column(
         Enum(AccountRole, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,
-        default=AccountRole.TEACHER,
+        default=AccountRole.STUDENT,
         index=True,
     )
     platform_role: Mapped[PlatformRole] = mapped_column(
@@ -66,6 +67,9 @@ class User(Base):
         default=PlatformRole.USER,
         index=True,
     )
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    email_verification_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -99,6 +103,16 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="FinalGradeSnapshot.student_id",
     )
+
+    @property
+    def effective_role(self) -> UserRole:
+        if self.platform_role == PlatformRole.SUPER_ADMIN:
+            return UserRole.SUPER_ADMIN
+        if self.platform_role == PlatformRole.ADMIN:
+            return UserRole.ADMIN
+        if self.account_role == AccountRole.TEACHER:
+            return UserRole.TEACHER
+        return UserRole.STUDENT
 
 
 class Notebook(Base):

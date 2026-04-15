@@ -29,7 +29,7 @@
               <a class="nav-link" href="/teacher/courses">{{ t("nav.teacher") }}</a>
             </li>
             {% endif %}
-            {% if current_user.platform_role.value == "admin" %}
+            {% if can_access_admin_features %}
             <li class="nav-item">
               <a class="nav-link" href="/admin">{{ t("nav.admin") }}</a>
             </li>
@@ -44,8 +44,12 @@
             {% if current_user %}
             <span class="small">
               {{ t("nav.signed_in_as", username=current_user.username) | safe }}
-              {% if current_user.platform_role.value == "admin" %}
+              {% if current_user_role == "super_admin" %}
+              <span class="badge bg-danger ms-1">super_admin</span>
+              {% elif current_user_role == "admin" %}
               <span class="badge bg-warning text-dark ms-1">admin</span>
+              {% elif current_user_role == "teacher" %}
+              <span class="badge bg-info text-dark ms-1">teacher</span>
               {% endif %}
             </span>
             <form method="post" action="/logout" class="m-0">

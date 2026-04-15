@@ -38,8 +38,6 @@ class Settings:
     static_dir: Path
     sample_dir: Path
     debug: bool
-    teacher_registration_code: str
-    administrator_registration_code: str
     default_locale: str
     timezone_name: str
 
@@ -48,7 +46,7 @@ class Settings:
 def get_settings() -> Settings:
     data_dir = BASE_DIR / os.getenv("DATA_DIR", "data")
     return Settings(
-        app_name=os.getenv("APP_NAME", "Notebook Runner MVP"),
+        app_name=os.getenv("APP_NAME", "CourseEval"),
         secret_key=os.getenv("SECRET_KEY", "change-me-in-production"),
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{(data_dir / 'app.db').as_posix()}"),
         redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
@@ -67,8 +65,6 @@ def get_settings() -> Settings:
         static_dir=BASE_DIR / "app" / "static",
         sample_dir=BASE_DIR / "samples",
         debug=_bool_env("DEBUG", False),
-        teacher_registration_code=os.getenv("TEACHER_REGISTRATION_CODE", "teacher2026"),
-        administrator_registration_code=os.getenv("ADMINISTRATOR_REGISTRATION_CODE", "administrator2026"),
         default_locale=os.getenv("DEFAULT_LOCALE", "en"),
         timezone_name=os.getenv("TIMEZONE_NAME", "Asia/Shanghai"),
     )

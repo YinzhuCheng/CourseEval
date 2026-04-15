@@ -16,11 +16,13 @@ from app.constants import (
     ScoringRule,
     SubmissionLimitMode,
     SubmissionStatus,
+    UserRole,
 )
 from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSnapshot, Question, ShortAnswerQuestionConfig, Submission, User
+from app.auth import assign_user_role, has_super_admin, resolve_registration_roles
 from app.services.courses import bootstrap_sample_data
-from app.services.permissions import can_manage_course, can_staff_course
+from app.services.permissions import can_manage_course, can_staff_course, is_platform_admin
 from app.services.submissions import (
     _strip_hidden_output_sections,
     create_short_answer_submission,
@@ -287,6 +289,61 @@ class Phase1AlignmentTests(unittest.TestCase):
                 QuestionType.FORMATTED_TEXT_LLM,
             ],
         )
+
+    def test_first_registration_becomes_super_admin_once(self) -> None:
+        fresh_user = User(
+            username="fresh",
+            email="fresh@example.com",
+            password_hash="x",
+            account_role=AccountRole.STUDENT,
+            platform_role=PlatformRole.USER,
+            is_active=True,
+        )
+        self.db.add(fresh_user)
+        self.db.commit()
+
+        self.assertFalse(has_super_admin(self.db))
+        account_role, platform_role = resolve_registration_roles(self.db)
+        self.assertEqual(account_role, AccountRole.STUDENT)
+        self.assertEqual(platform_role, PlatformRole.SUPER_ADMIN)
+
+        assign_user_role(fresh_user, UserRole.SUPER_ADMIN)
+        self.db.commit()
+
+        self.assertTrue(has_super_admin(self.db))
+        next_account_role, next_platform_role = resolve_registration_roles(self.db)
+        self.assertEqual(next_account_role, AccountRole.STUDENT)
+        self.assertEqual(next_platform_role, PlatformRole.USER)
+
+    def test_assign_user_role_maps_storage_fields_consistently(self) -> None:
+        user = self.student
+
+        assign_user_role(user, UserRole.TEACHER)
+        self.assertEqual(user.account_role, AccountRole.TEACHER)
+        self.assertEqual(user.platform_role, PlatformRole.USER)
+        self.assertEqual(user.effective_role, UserRole.TEACHER)
+
+        assign_user_role(user, UserRole.ADMIN)
+        self.assertEqual(user.account_role, AccountRole.STUDENT)
+        self.assertEqual(user.platform_role, PlatformRole.ADMIN)
+        self.assertEqual(user.effective_role, UserRole.ADMIN)
+
+        assign_user_role(user, UserRole.STUDENT)
+        self.assertEqual(user.account_role, AccountRole.STUDENT)
+        self.assertEqual(user.platform_role, PlatformRole.USER)
+        self.assertEqual(user.effective_role, UserRole.STUDENT)
+
+    def test_legacy_administrator_account_remains_admin_effective_role(self) -> None:
+        legacy_admin = User(
+            username="legacy-admin",
+            email="legacy-admin@example.com",
+            password_hash="x",
+            account_role=AccountRole.ADMINISTRATOR,
+            platform_role=PlatformRole.ADMIN,
+            is_active=True,
+        )
+        self.assertEqual(legacy_admin.effective_role, UserRole.ADMIN)
+        self.assertTrue(is_platform_admin(legacy_admin))
 
 
 if __name__ == "__main__":
