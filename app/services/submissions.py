@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import nbformat
-from pypdf import PdfReader
+from PyPDF2 import PdfReader
 from redis import Redis
 from rq import Queue
 from sqlalchemy import and_, func, or_, select

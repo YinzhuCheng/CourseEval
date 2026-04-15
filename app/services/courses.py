@@ -1,3 +1,4 @@
+import json
 import secrets
 from decimal import Decimal
 
@@ -801,7 +802,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 ensure_ascii=False,
                 indent=2,
             ),
-            allowed_libraries_note=DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+            allowed_libraries_note=DEFAULT_ALLOWED_LIBRARIES,
             time_limit_seconds=300,
             memory_limit_mb=1024,
             cpu_limit="1",

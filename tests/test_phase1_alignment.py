@@ -268,7 +268,7 @@ class Phase1AlignmentTests(unittest.TestCase):
 
         bootstrap_sample_data(self.db, bootstrap_user)
 
-        course = self.db.scalar(select(Course).where(Course.title == "Data Structures"))
+        course = self.db.scalar(select(Course).where(Course.title == "数据结构"))
         self.assertIsNotNone(course)
         assert course is not None
         assignment = self.db.scalar(select(Assignment).where(Assignment.course_id == course.id))
