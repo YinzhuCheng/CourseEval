@@ -34,6 +34,7 @@
         <p class="text-muted">No assignments yet.</p>
         {% endif %}
 
+        {% if can_manage_course %}
         <h3 class="h6 mb-3">Create assignment</h3>
         <form method="post" action="/teacher/courses/{{ course.id }}/assignments" class="row g-3">
           <div class="col-12">
@@ -94,6 +95,11 @@
             <button class="btn btn-primary" type="submit">Create assignment</button>
           </div>
         </form>
+        {% else %}
+        <div class="alert alert-secondary mb-0">
+          You are viewing this course as TA staff. Phase 1 keeps assignment creation and member management limited to teachers.
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -128,6 +134,7 @@
         </ul>
         {% endif %}
 
+        {% if can_manage_course %}
         <h3 class="h6 mb-3">Add / update member</h3>
         <form method="post" action="/teacher/courses/{{ course.id }}/members" class="row g-3">
           <div class="col-12">
@@ -146,6 +153,9 @@
             <button class="btn btn-outline-primary" type="submit">Save member</button>
           </div>
         </form>
+        {% else %}
+        <p class="text-muted mb-0">Only teachers can change course membership in this phase.</p>
+        {% endif %}
       </div>
     </div>
   </div>

@@ -7,3 +7,5 @@ redis
 rq
 email-validator
 itsdangerous
+nbformat
+PyPDF2

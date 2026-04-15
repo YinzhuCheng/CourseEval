@@ -131,6 +131,7 @@ def generate_short_answer_evaluation(
     question_title: str,
     question_description: str,
     rubric_text: str,
+    reference_answer_text: str = "",
     answer_text: str,
     max_score: float,
 ) -> dict:
@@ -141,6 +142,7 @@ def generate_short_answer_evaluation(
     prompt = (
         f"Question title: {question_title}\n"
         f"Question description:\n{question_description}\n\n"
+        f"Reference answer:\n{reference_answer_text or 'No reference answer provided.'}\n\n"
         f"Rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
         f"Maximum score: {max_score}\n\n"
         f"Student answer:\n{answer_text}\n\n"

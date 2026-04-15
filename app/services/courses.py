@@ -1,3 +1,4 @@
+import json
 import secrets
 from decimal import Decimal
 
@@ -20,15 +21,43 @@ from app.models import (
     Course,
     CourseMember,
     Feedback,
+    FileQuestionConfig,
     FinalGradeSnapshot,
     LLMConfig,
     NotebookQuestionConfig,
+    PythonCodeQuestionConfig,
     Question,
     RuntimeImage,
     ShortAnswerQuestionConfig,
     Submission,
     User,
 )
+
+
+STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
+DEFAULT_ALLOWED_LIBRARIES = (
+    "Allowed imports: Python standard library, numpy, pandas, matplotlib, scipy, scikit-learn.\n"
+    "Deep learning libraries are not available in the default runner image: torch, tensorflow, jax, paddle, "
+    "mxnet, transformers."
+)
+
+
+def _question_loader_options():
+    return (
+        joinedload(Question.notebook_config),
+        joinedload(Question.python_code_config),
+        joinedload(Question.short_answer_config),
+        joinedload(Question.file_question_config),
+    )
+
+
+def _assignment_question_loader_options():
+    return (
+        joinedload(Assignment.questions).joinedload(Question.notebook_config),
+        joinedload(Assignment.questions).joinedload(Question.python_code_config),
+        joinedload(Assignment.questions).joinedload(Question.short_answer_config),
+        joinedload(Assignment.questions).joinedload(Question.file_question_config),
+    )
 
 
 def generate_join_code() -> str:
@@ -70,8 +99,7 @@ def get_assignment_for_student(db: Session, assignment_id: int, user_id: int) ->
         select(Assignment)
         .options(
             joinedload(Assignment.course),
-            joinedload(Assignment.questions).joinedload(Question.notebook_config),
-            joinedload(Assignment.questions).joinedload(Question.short_answer_config),
+            *_assignment_question_loader_options(),
         )
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
         .where(
@@ -88,8 +116,7 @@ def get_question_for_student(db: Session, question_id: int, user_id: int) -> Que
         select(Question)
         .options(
             joinedload(Question.assignment).joinedload(Assignment.course),
-            joinedload(Question.notebook_config),
-            joinedload(Question.short_answer_config),
+            *_question_loader_options(),
         )
         .join(Assignment, Question.assignment_id == Assignment.id)
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
@@ -125,8 +152,7 @@ def get_question_for_teacher(db: Session, question_id: int, teacher_user_id: int
         select(Question)
         .options(
             joinedload(Question.assignment).joinedload(Assignment.course),
-            joinedload(Question.notebook_config),
-            joinedload(Question.short_answer_config),
+            *_question_loader_options(),
         )
         .join(Assignment, Question.assignment_id == Assignment.id)
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
@@ -188,13 +214,48 @@ def get_assignment_for_student(db: Session, assignment_id: int, user_id: int) ->
         select(Assignment)
         .options(
             joinedload(Assignment.course),
-            joinedload(Assignment.questions).joinedload(Question.notebook_config),
-            joinedload(Assignment.questions).joinedload(Question.short_answer_config),
+            *_assignment_question_loader_options(),
         )
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
         .where(
             Assignment.id == assignment_id,
             CourseMember.user_id == user_id,
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    return db.scalar(statement)
+
+
+def get_course_for_staff(db: Session, course_id: int, user_id: int) -> Course | None:
+    statement = (
+        select(Course)
+        .options(
+            joinedload(Course.assignments).joinedload(Assignment.questions),
+            joinedload(Course.members).joinedload(CourseMember.user),
+        )
+        .join(CourseMember, CourseMember.course_id == Course.id)
+        .where(
+            Course.id == course_id,
+            CourseMember.user_id == user_id,
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    return db.scalar(statement)
+
+
+def get_assignment_for_staff(db: Session, assignment_id: int, user_id: int) -> Assignment | None:
+    statement = (
+        select(Assignment)
+        .options(
+            joinedload(Assignment.course),
+            *_assignment_question_loader_options(),
+        )
+        .join(CourseMember, CourseMember.course_id == Assignment.course_id)
+        .where(
+            Assignment.id == assignment_id,
+            CourseMember.user_id == user_id,
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -219,13 +280,31 @@ def get_course_for_teacher(db: Session, course_id: int, user_id: int) -> Course 
     return db.scalar(statement)
 
 
+def get_question_for_staff(db: Session, question_id: int, user_id: int) -> Question | None:
+    statement = (
+        select(Question)
+        .options(
+            joinedload(Question.assignment).joinedload(Assignment.course),
+            *_question_loader_options(),
+        )
+        .join(Assignment, Assignment.id == Question.assignment_id)
+        .join(CourseMember, CourseMember.course_id == Assignment.course_id)
+        .where(
+            Question.id == question_id,
+            CourseMember.user_id == user_id,
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    return db.scalar(statement)
+
+
 def get_question_for_teacher(db: Session, question_id: int, user_id: int) -> Question | None:
     statement = (
         select(Question)
         .options(
             joinedload(Question.assignment).joinedload(Assignment.course),
-            joinedload(Question.notebook_config),
-            joinedload(Question.short_answer_config),
+            *_question_loader_options(),
         )
         .join(Assignment, Assignment.id == Question.assignment_id)
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
@@ -382,8 +461,7 @@ def get_assignment(db: Session, assignment_id: int) -> Assignment | None:
         select(Assignment)
         .options(
             joinedload(Assignment.course),
-            joinedload(Assignment.questions).joinedload(Question.notebook_config),
-            joinedload(Assignment.questions).joinedload(Question.short_answer_config),
+            *_assignment_question_loader_options(),
             joinedload(Assignment.runtime_image),
             joinedload(Assignment.llm_config),
         )
@@ -405,7 +483,9 @@ def create_question(
     runtime_image_id: int | None,
     llm_config_id: int | None,
     notebook_config_payload: dict | None,
+    python_code_config_payload: dict | None,
     short_answer_payload: dict | None,
+    file_question_payload: dict | None,
 ) -> Question:
     question = Question(
         assignment_id=assignment.id,
@@ -440,7 +520,24 @@ def create_question(
                 updated_at=utcnow(),
             )
         )
-    else:
+    elif question_type == QuestionType.PYTHON_CODE:
+        payload = python_code_config_payload or {}
+        db.add(
+            PythonCodeQuestionConfig(
+                question_id=question.id,
+                input_spec=payload.get("input_spec") or None,
+                output_spec=payload.get("output_spec") or None,
+                visible_tests_json=payload.get("visible_tests_json", "[]"),
+                hidden_tests_json=payload.get("hidden_tests_json", "[]"),
+                allowed_libraries_note=payload.get("allowed_libraries_note") or DEFAULT_ALLOWED_LIBRARIES,
+                time_limit_seconds=payload.get("time_limit_seconds", 10),
+                memory_limit_mb=payload.get("memory_limit_mb", 512),
+                cpu_limit=payload.get("cpu_limit", "1"),
+                allow_network=payload.get("allow_network", False),
+                updated_at=utcnow(),
+            )
+        )
+    elif question_type == QuestionType.SHORT_ANSWER:
         payload = short_answer_payload or {}
         db.add(
             ShortAnswerQuestionConfig(
@@ -453,11 +550,25 @@ def create_question(
                 updated_at=utcnow(),
             )
         )
+    elif question_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
+        payload = file_question_payload or {}
+        db.add(
+            FileQuestionConfig(
+                question_id=question.id,
+                accepted_extensions=payload.get("accepted_extensions", ".pdf"),
+                reference_answer_text=payload.get("reference_answer_text", ""),
+                rubric_text=payload.get("rubric_text", ""),
+                llm_suggestion_enabled=payload.get("llm_suggestion_enabled", True),
+                teacher_confirmation_required=payload.get("teacher_confirmation_required", True),
+                notebook_outputs_required=payload.get("notebook_outputs_required", True),
+                updated_at=utcnow(),
+            )
+        )
 
     db.commit()
     statement = (
         select(Question)
-        .options(joinedload(Question.notebook_config), joinedload(Question.short_answer_config))
+        .options(*_question_loader_options())
         .where(Question.id == question.id)
     )
     return db.scalar(statement)  # type: ignore[return-value]
@@ -621,10 +732,10 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
         return
 
     course = Course(
-        code=f"DEMO-{user.id}",
+        code=f"DS-{user.id}",
         join_code=generate_join_code(),
-        title="Demo Course",
-        description="Bootstrap course created automatically for first-time exploration.",
+        title="数据结构",
+        description="默认调试课程，覆盖 Python 代码题、PDF 题和格式化文本题三种提交模式。",
         status=CourseStatus.ACTIVE,
         created_by=user.id,
         updated_at=utcnow(),
@@ -644,8 +755,8 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
 
     assignment = Assignment(
         course_id=course.id,
-        title="Week 1 Demo Assignment",
-        description="Auto-created assignment to help validate the end-to-end course workflow.",
+        title="第一次作业",
+        description="用于调试三种新提交模式的默认作业。",
         status=AssignmentStatus.PUBLISHED,
         published_at=utcnow(),
         allow_late=True,
@@ -655,55 +766,100 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
     db.add(assignment)
     db.flush()
 
-    notebook_question = Question(
+    python_question = Question(
         assignment_id=assignment.id,
         order_index=1,
-        title="Notebook demo question",
-        description="Upload a notebook and validate asynchronous evaluation.",
-        question_type=QuestionType.NOTEBOOK,
+        title="括号匹配判断",
+        description=(
+            "输入一行只包含 ()[]{} 的字符串，输出 YES 或 NO，判断括号是否完全匹配。"
+            "\n请严格按照输入输出格式编写 Python 程序。"
+        ),
+        question_type=QuestionType.PYTHON_CODE,
         max_score=Decimal("100"),
         updated_at=utcnow(),
     )
-    db.add(notebook_question)
+    db.add(python_question)
     db.flush()
     db.add(
-        NotebookQuestionConfig(
-            question_id=notebook_question.id,
+        PythonCodeQuestionConfig(
+            question_id=python_question.id,
+            input_spec="输入一行括号字符串，例如 ()[]{}",
+            output_spec="若括号完全匹配输出 YES，否则输出 NO",
+            visible_tests_json=json.dumps(
+                [
+                    {"input": "()[]{}", "output": "YES"},
+                    {"input": "([{}])", "output": "YES"},
+                    {"input": "([)]", "output": "NO"},
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            hidden_tests_json=json.dumps(
+                [
+                    {"input": "(((", "output": "NO"},
+                    {"input": "{[()()]}", "output": "YES"},
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            allowed_libraries_note=DEFAULT_ALLOWED_LIBRARIES,
             time_limit_seconds=300,
             memory_limit_mb=1024,
             cpu_limit="1",
             allow_network=False,
-            visible_tests_source=(
-                "result = summary.get('run_success', False)\n"
-                "score = 100 if result else 0\n"
-                "message = 'Notebook executed successfully.' if result else 'Notebook execution failed.'\n"
-            ),
-            hidden_tests_source="",
-            execution_weight=Decimal('0'),
-            visible_weight=Decimal('100'),
-            hidden_weight=Decimal('0'),
             updated_at=utcnow(),
         )
     )
 
-    short_answer_question = Question(
+    pdf_question = Question(
         assignment_id=assignment.id,
         order_index=2,
-        title="Reflection question",
-        description="Describe what your notebook does and any assumptions you made.",
-        question_type=QuestionType.SHORT_ANSWER,
+        title="栈与队列概念比较（PDF）",
+        description="请提交 PDF，比较栈和队列的定义、典型操作以及一个实际应用场景。",
+        question_type=QuestionType.PDF_LLM,
         max_score=Decimal("20"),
         updated_at=utcnow(),
     )
-    db.add(short_answer_question)
+    db.add(pdf_question)
     db.flush()
     db.add(
-        ShortAnswerQuestionConfig(
-            question_id=short_answer_question.id,
-            min_length=20,
-            max_length=2000,
-            rubric_text="Check clarity, correctness, and completeness.",
+        FileQuestionConfig(
+            question_id=pdf_question.id,
+            accepted_extensions=".pdf",
+            rubric_text="比较定义是否准确、操作描述是否完整、应用场景是否合理，按 20 分评分。",
+                reference_answer_text=(
+                "栈是后进先出（LIFO），队列是先进先出（FIFO）；"
+                "栈常见操作有 push/pop/top，队列常见操作有 enqueue/dequeue/front；"
+                "应用场景可举函数调用栈、任务排队等。"
+            ),
             teacher_confirmation_required=True,
+            notebook_outputs_required=False,
+            updated_at=utcnow(),
+        )
+    )
+
+    formatted_question = Question(
+        assignment_id=assignment.id,
+        order_index=3,
+        title="顺序表与链表复杂度分析（文本/TeX/ipynb）",
+        description="请提交 txt、tex 或已执行输出的 ipynb，说明顺序表和链表在随机访问、插入、删除上的复杂度差异。",
+        question_type=QuestionType.FORMATTED_TEXT_LLM,
+        max_score=Decimal("20"),
+        updated_at=utcnow(),
+    )
+    db.add(formatted_question)
+    db.flush()
+    db.add(
+        FileQuestionConfig(
+            question_id=formatted_question.id,
+            accepted_extensions=".txt,.tex,.ipynb",
+            rubric_text="关注复杂度结论、原因解释和表达清晰度，按 20 分评分。",
+                reference_answer_text=(
+                "顺序表支持 O(1) 随机访问，但中间插入删除通常为 O(n)；"
+                "链表随机访问为 O(n)，但已定位节点后插入删除可达 O(1)。"
+            ),
+            teacher_confirmation_required=True,
+            notebook_outputs_required=True,
             updated_at=utcnow(),
         )
     )

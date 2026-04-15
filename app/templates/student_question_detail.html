@@ -48,12 +48,83 @@
             <button class="btn btn-primary" type="submit">Upload notebook submission</button>
           </div>
         </form>
+        {% elif question.question_type.value == "python_code" %}
+        <form method="post" action="/student/questions/{{ question.id }}/submit-python" enctype="multipart/form-data" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Python file</label>
+            <input class="form-control" type="file" name="code_file" accept=".py,text/x-python" required />
+          </div>
+          {% if question.python_code_config %}
+          <div class="col-12">
+            <div class="alert alert-info mb-0">
+              <div><strong>Input format:</strong> {{ question.python_code_config.input_spec }}</div>
+              <div class="mt-2"><strong>Output format:</strong> {{ question.python_code_config.output_spec }}</div>
+              <div class="mt-2"><strong>Allowed libraries:</strong> {{ question.python_code_config.allowed_libraries_note }}</div>
+              <div class="mt-2 small text-muted">This mode uses 5 tests worth 20 points each. Three sample tests are visible below; two hidden tests are staff-only.</div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="border rounded p-3">
+              <div class="fw-semibold mb-2">Visible test cases</div>
+              {% for sample in question.python_code_config.visible_tests() %}
+              <div class="mb-3 {% if not loop.last %}border-bottom pb-3{% endif %}">
+                <div class="small text-muted">Visible test {{ loop.index }} · 20 points</div>
+                <div><strong>Input</strong></div>
+                <pre class="artifact-block mb-2">{{ sample.input }}</pre>
+                <div><strong>Expected output</strong></div>
+                <pre class="artifact-block mb-0">{{ sample.output }}</pre>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Upload Python solution</button>
+          </div>
+        </form>
+        {% elif question.question_type.value in ["pdf_llm", "formatted_text_llm"] %}
+        <form method="post" action="/student/questions/{{ question.id }}/submit-file" enctype="multipart/form-data" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Submission file</label>
+            {% set accepted = question.file_question_config.accepted_extensions if question.file_question_config and question.file_question_config.accepted_extensions else '.pdf' if question.question_type.value == 'pdf_llm' else '.txt,.tex,.ipynb' %}
+            <input class="form-control" type="file" name="submission_file" accept="{{ accepted }}" required />
+          </div>
+          {% if question.file_question_config %}
+          <div class="col-12">
+            <div class="alert alert-warning mb-0">
+              {% if question.question_type.value == "pdf_llm" %}
+              Upload a text-based PDF. Scanned image PDFs are not supported in this Phase 1 workflow.
+              {% else %}
+              Supported formats: {{ question.file_question_config.accepted_extensions }}.
+              {% if question.file_question_config.notebook_outputs_required %}
+              Notebook submissions must already contain executed outputs before upload.
+              {% endif %}
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="alert alert-info mb-0">
+              <strong>Rubric:</strong> {{ question.file_question_config.rubric_text }}
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">Upload file submission</button>
+          </div>
+        </form>
         {% else %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-text" class="row g-3">
           <div class="col-12">
             <label class="form-label">Answer</label>
             <textarea class="form-control" rows="8" name="answer_text" required></textarea>
           </div>
+          {% if question.short_answer_config and question.short_answer_config.teacher_confirmation_required %}
+          <div class="col-12">
+            <div class="alert alert-warning mb-0">
+              Your submission will be saved immediately, but the score only becomes effective after a teacher confirms the final grade.
+            </div>
+          </div>
+          {% endif %}
           {% if question.short_answer_config and question.short_answer_config.rubric_text %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
