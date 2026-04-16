@@ -14,7 +14,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "site.title": "CourseEval",
         "nav.my_courses": "My Courses",
-        "nav.runner_dashboard": "Runner Dashboard",
+        "nav.python_runtime_help": "Python Runtime Help",
         "nav.teacher": "Teacher",
         "nav.admin": "Admin",
         "nav.user_management": "User Management",
@@ -22,10 +22,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nav.register": "Register",
         "nav.logout": "Logout",
         "nav.signed_in_as": "Signed in as {username}",
+        "hero.title": "Clear Python evaluation, clearer guidance",
+        "hero.subtitle": "Native Python questions run .py files directly. .ipynb files are supported through the file and LLM-reviewed workflow.",
         "locale.switch_to_en": "English",
         "locale.switch_to_zh": "中文",
         "register.title": "Create your account",
         "register.subtitle": "Register with your email to create a student account for CourseEval.",
+        "register.email.help": "Use a valid email address so teachers and administrators can identify your account.",
+        "register.account_type_label": "Account opening policy:",
+        "register.account_type_body": "Public registration creates a student account. Teacher, admin, and super-admin permissions are granted internally.",
         "register.username": "Username",
         "register.email": "Email",
         "register.account_type": "Account type",
@@ -44,7 +49,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "register.sign_in": "Sign in",
         "register.validation_failed": "Please review the highlighted registration fields and try again.",
         "login.title": "Sign in",
-        "login.subtitle": "Use your username or email to access your courses, submissions, and notebook jobs.",
+        "login.subtitle": "Use your username or email to access your courses, submissions, and Python evaluation results.",
         "login.login": "Username or email",
         "login.password": "Password",
         "login.submit": "Login",
@@ -65,19 +70,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "teacher.courses.empty_title": "No courses yet",
         "teacher.courses.empty_body": "Create your first course from the form on the left.",
         "teacher.courses.no_description": "No description.",
-        "dashboard.title": "Your notebook jobs",
-        "dashboard.subtitle": "Track uploads, execution progress, and generated artifacts.",
-        "dashboard.upload": "Upload notebook",
-        "dashboard.task_id": "Task ID",
-        "dashboard.notebook": "Notebook",
-        "dashboard.status": "Status",
-        "dashboard.created": "Created",
-        "dashboard.started": "Started",
-        "dashboard.finished": "Finished",
-        "dashboard.details": "Details",
-        "dashboard.empty_title": "No notebook jobs yet",
-        "dashboard.empty_body": "Upload your first .ipynb file to validate the full runner flow.",
-        "dashboard.empty_action": "Create your first job",
         "flash.auth_required": "Please sign in to continue.",
         "flash.invalid_email": "Please enter a valid email address.",
         "flash.all_fields_required": "All required fields must be completed.",
@@ -174,11 +166,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.llm.column.last_test": "Last test",
         "admin.llm.test": "Test",
         "admin.llm.no_test": "No connectivity test has been run yet.",
+        "common.back_to_course": "Back to course",
+        "common.status": "Status",
+        "common.open_at": "Open at",
+        "common.due_at": "Due at",
+        "common.close_at": "Close at",
+        "common.open": "Open",
+        "teacher.assignment.scoring_rule": "Scoring rule",
+        "teacher.assignment.questions": "Questions",
+        "teacher.question.max_score": "Max score",
+        "teacher.question.empty": "No questions yet.",
     },
     "zh": {
         "site.title": "CourseEval",
         "nav.my_courses": "我的课程",
-        "nav.runner_dashboard": "运行器面板",
+        "nav.python_runtime_help": "Python 运行环境帮助",
         "nav.teacher": "教师端",
         "nav.admin": "管理端",
         "nav.user_management": "用户管理",
@@ -186,10 +188,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nav.register": "注册",
         "nav.logout": "退出登录",
         "nav.signed_in_as": "当前登录：{username}",
+        "hero.title": "原生 Python 评测，更清晰的提交流程",
+        "hero.subtitle": "原生 Python 代码题会直接执行 .py 文件；.ipynb 文件通过文件与 LLM 评测流程支持。",
         "locale.switch_to_en": "English",
         "locale.switch_to_zh": "中文",
         "register.title": "创建账号",
         "register.subtitle": "通过邮箱注册 CourseEval 普通学生账户。",
+        "register.email.help": "请填写有效邮箱，便于教师和管理员识别你的账号。",
+        "register.account_type_label": "开户说明：",
+        "register.account_type_body": "公开注册默认创建学生账号；教师、管理员和超级管理员权限需由系统内部授予。",
         "register.username": "用户名",
         "register.email": "邮箱",
         "register.account_type": "账户类型",
@@ -208,7 +215,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "register.sign_in": "去登录",
         "register.validation_failed": "请检查标红或提示的注册字段后重试。",
         "login.title": "登录",
-        "login.subtitle": "使用用户名或邮箱登录，进入课程、提交记录和 Notebook 运行结果。",
+        "login.subtitle": "使用用户名或邮箱登录，进入课程、提交记录和 Python 评测结果。",
         "login.login": "用户名或邮箱",
         "login.password": "密码",
         "login.submit": "登录",
@@ -229,19 +236,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "teacher.courses.empty_title": "暂无课程",
         "teacher.courses.empty_body": "从左侧表单创建第一门课程。",
         "teacher.courses.no_description": "暂无描述。",
-        "dashboard.title": "Notebook 运行任务",
-        "dashboard.subtitle": "查看上传记录、执行进度和生成产物。",
-        "dashboard.upload": "上传 Notebook",
-        "dashboard.task_id": "任务 ID",
-        "dashboard.notebook": "Notebook 文件",
-        "dashboard.status": "状态",
-        "dashboard.created": "创建时间",
-        "dashboard.started": "开始时间",
-        "dashboard.finished": "结束时间",
-        "dashboard.details": "详情",
-        "dashboard.empty_title": "还没有 Notebook 任务",
-        "dashboard.empty_body": "上传第一个 .ipynb 文件，验证完整执行链路。",
-        "dashboard.empty_action": "创建第一个任务",
         "flash.auth_required": "请先登录后继续。",
         "flash.invalid_email": "请输入有效的邮箱地址。",
         "flash.all_fields_required": "请完整填写所有必填项。",
@@ -338,6 +332,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.llm.column.last_test": "最近测试",
         "admin.llm.test": "测试",
         "admin.llm.no_test": "尚未执行连通性测试。",
+        "common.back_to_course": "返回课程",
+        "common.status": "状态",
+        "common.open_at": "开放时间",
+        "common.due_at": "截止时间",
+        "common.close_at": "关闭时间",
+        "common.open": "打开",
+        "teacher.assignment.scoring_rule": "计分规则",
+        "teacher.assignment.questions": "题目列表",
+        "teacher.question.max_score": "满分",
+        "teacher.question.empty": "还没有题目。",
     },
 }
 
@@ -365,8 +369,19 @@ def t(request: Request | None, key: str, **kwargs) -> str:
     return translate(get_locale(request), key, **kwargs)
 
 
+def choose_text(request: Request | None, en: str, zh: str) -> str:
+    return zh if get_locale(request) == Locale.ZH.value else en
+
+
 def template_translator(request: Request) -> Callable[[str], str]:
     def _translate(key: str, **kwargs) -> str:
         return t(request, key, **kwargs)
 
     return _translate
+
+
+def template_localizer(request: Request) -> Callable[[str, str], str]:
+    def _localize(en: str, zh: str) -> str:
+        return choose_text(request, en, zh)
+
+    return _localize

@@ -33,14 +33,11 @@ from app.models import (
     Submission,
     User,
 )
+from app.runtime_support import default_allowed_python_libraries_text
 
 
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
-DEFAULT_ALLOWED_PYTHON_LIBRARIES = (
-    "Allowed imports: Python standard library, numpy, pandas, matplotlib, scipy, scikit-learn.\n"
-    "Deep learning libraries are not available in the default runner image: torch, tensorflow, jax, paddle, "
-    "mxnet, transformers."
-)
+DEFAULT_ALLOWED_PYTHON_LIBRARIES = default_allowed_python_libraries_text("en")
 # Keep the legacy name as an alias so older imports and payload builders stay valid.
 DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
@@ -490,6 +487,9 @@ def create_question(
     short_answer_payload: dict | None,
     file_question_payload: dict | None,
 ) -> Question:
+    if question_type == QuestionType.NOTEBOOK:
+        raise ValueError("Legacy notebook execution questions are no longer supported.")
+
     question = Question(
         assignment_id=assignment.id,
         order_index=order_index,
@@ -505,25 +505,7 @@ def create_question(
     db.add(question)
     db.flush()
 
-    if question_type == QuestionType.NOTEBOOK:
-        payload = notebook_config_payload or {}
-        db.add(
-            NotebookQuestionConfig(
-                question_id=question.id,
-                time_limit_seconds=payload.get("time_limit_seconds", 300),
-                memory_limit_mb=payload.get("memory_limit_mb", 1024),
-                cpu_limit=payload.get("cpu_limit", "1"),
-                allow_network=payload.get("allow_network", False),
-                visible_tests_source=payload.get("visible_tests_source") or None,
-                hidden_tests_source=payload.get("hidden_tests_source") or None,
-                execution_weight=payload.get("execution_weight", Decimal("0")),
-                visible_weight=payload.get("visible_weight", Decimal("100")),
-                hidden_weight=payload.get("hidden_weight", Decimal("0")),
-                llm_feedback_enabled=payload.get("llm_feedback_enabled", False),
-                updated_at=utcnow(),
-            )
-        )
-    elif question_type == QuestionType.PYTHON_CODE:
+    if question_type == QuestionType.PYTHON_CODE:
         payload = python_code_config_payload or {}
         db.add(
             PythonCodeQuestionConfig(

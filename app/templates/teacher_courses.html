@@ -5,9 +5,15 @@
 {% block content %}
 <div class="row g-4">
   <div class="col-lg-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm page-card">
       <div class="card-body">
         <h1 class="h4 mb-3">{{ t("teacher.courses.create_title") }}</h1>
+        <p class="text-muted small">
+          {{ lx(
+            "Create a course shell first. After that, you can add assignments, invite students, and configure native Python or file / LLM-reviewed questions.",
+            "先创建课程框架，随后即可添加作业、邀请学生，并配置原生 Python 题或文件 / LLM 评测题。"
+          ) }}
+        </p>
         <form method="post" action="/teacher/courses" class="row g-3">
           <div class="col-12">
             <label class="form-label">{{ t("teacher.courses.code") }}</label>
@@ -30,7 +36,7 @@
   </div>
 
   <div class="col-lg-8">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm page-card">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ t("teacher.courses.list_title") }}</h2>
         {% if courses %}

@@ -17,7 +17,14 @@ from app.constants import (
 from app.db import get_db, utcnow
 from app.models import LLMConfig, RuntimeImage, User
 from app.auth import assign_user_role
-from app.i18n import t
+from app.i18n import choose_text, t
+from app.runtime_support import (
+    SUPPORTED_PYTHON_PACKAGES,
+    SUPPORTED_PYTHON_VERSION,
+    UNSUPPORTED_PACKAGE_NOTE_EN,
+    UNSUPPORTED_PACKAGE_NOTE_ZH,
+    default_runtime_package_summary,
+)
 from app.services.llm import test_llm_connectivity
 from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
@@ -107,7 +114,22 @@ def admin_runtime_images(request: Request, db: Session = Depends(get_db)):
         return _redirect("/login")
 
     images = list(db.scalars(select(RuntimeImage).order_by(RuntimeImage.created_at.desc())).all())
-    return render_template(request, db, "admin_runtime_images.html", {"images": images})
+    return render_template(
+        request,
+        db,
+        "admin_runtime_images.html",
+        {
+            "images": images,
+            "default_python_version": SUPPORTED_PYTHON_VERSION,
+            "default_python_packages": SUPPORTED_PYTHON_PACKAGES,
+            "default_runtime_package_summary": default_runtime_package_summary(),
+            "default_package_note": choose_text(
+                request,
+                UNSUPPORTED_PACKAGE_NOTE_EN,
+                UNSUPPORTED_PACKAGE_NOTE_ZH,
+            ),
+        },
+    )
 
 
 @router.post("/runtime-images")
@@ -115,7 +137,7 @@ def admin_create_runtime_image(
     request: Request,
     name: str = Form(...),
     image_tag: str = Form(...),
-    python_version: str = Form("python3"),
+    python_version: str = Form(SUPPORTED_PYTHON_VERSION),
     package_summary: str = Form(""),
     network_enabled: str = Form("false"),
     timeout_seconds: int = Form(300),
@@ -134,8 +156,8 @@ def admin_create_runtime_image(
         scope=RuntimeScope.PLATFORM,
         name=name.strip(),
         image_tag=image_tag.strip(),
-        python_version=python_version.strip() or None,
-        package_summary=package_summary.strip() or None,
+        python_version=python_version.strip() or SUPPORTED_PYTHON_VERSION,
+        package_summary=package_summary.strip() or default_runtime_package_summary(),
         network_enabled=network_enabled == "true",
         timeout_seconds=timeout_seconds,
         memory_limit_mb=memory_limit_mb,

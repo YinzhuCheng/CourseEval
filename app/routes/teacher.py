@@ -19,6 +19,7 @@ from app.constants import (
     SubmissionStatus,
 )
 from app.db import get_db, utcnow
+from app.i18n import choose_text
 from app.models import (
     Assignment,
     Course,
@@ -100,11 +101,15 @@ def create_course(
     code = code.strip().upper()
     title = title.strip()
     if not code or not title:
-        push_flash(request, "Course code and title are required.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "Course code and title are required.", "课程编号和课程标题不能为空。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     if db.query(Course).filter(Course.code == code).first():
-        push_flash(request, "Course code already exists.", "danger")
+        push_flash(request, choose_text(request, "Course code already exists.", "课程编号已存在。"), "danger")
         return _redirect("/teacher/courses")
 
     course = Course(code=code, title=title, description=description.strip() or None, created_by=user.id)
@@ -119,7 +124,11 @@ def create_course(
         )
     )
     db.commit()
-    push_flash(request, f"Course {course.code} created.", "success")
+    push_flash(
+        request,
+        choose_text(request, f"Course {course.code} was created.", f"课程 {course.code} 已创建。"),
+        "success",
+    )
     return _redirect(f"/teacher/courses/{course.id}")
 
 
@@ -131,11 +140,19 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this course.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this course.", "你没有该课程的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     if course is None:
-        push_flash(request, "You do not have teacher access to this course.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this course.", "你没有该课程的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     assignments = (
@@ -180,20 +197,24 @@ def add_course_member(
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this course.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this course.", "你没有该课程的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     from app.models import User
 
     member_user = db.query(User).filter(User.username == username.strip()).first()
     if member_user is None:
-        push_flash(request, "User not found.", "danger")
+        push_flash(request, choose_text(request, "User not found.", "未找到该用户。"), "danger")
         return _redirect(f"/teacher/courses/{course.id}")
 
     try:
         course_role = CourseRole(role)
     except ValueError:
-        push_flash(request, "Invalid course role.", "danger")
+        push_flash(request, choose_text(request, "Invalid course role.", "课程角色无效。"), "danger")
         return _redirect(f"/teacher/courses/{course.id}")
 
     membership = (
@@ -208,7 +229,15 @@ def add_course_member(
         membership.role = course_role
         membership.status = MembershipStatus.ACTIVE
     db.commit()
-    push_flash(request, f"Added {member_user.username} as {course_role.value}.", "success")
+    push_flash(
+        request,
+        choose_text(
+            request,
+            f"Updated {member_user.username} as {course_role.value}.",
+            f"已将 {member_user.username} 更新为 {course_role.value}。",
+        ),
+        "success",
+    )
     return _redirect(f"/teacher/courses/{course.id}")
 
 
@@ -234,7 +263,11 @@ def create_assignment(
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this course.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this course.", "你没有该课程的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     try:
@@ -242,7 +275,11 @@ def create_assignment(
         scoring_rule = ScoringRule(default_scoring_rule)
         limit_mode = SubmissionLimitMode(submission_limit_mode)
     except ValueError:
-        push_flash(request, "Invalid assignment settings.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "Invalid assignment settings.", "作业配置无效，请检查后重试。"),
+            "danger",
+        )
         return _redirect(f"/teacher/courses/{course.id}")
 
     assignment = Assignment(
@@ -261,7 +298,11 @@ def create_assignment(
     )
     db.add(assignment)
     db.commit()
-    push_flash(request, f"Assignment {assignment.title} created.", "success")
+    push_flash(
+        request,
+        choose_text(request, f"Assignment {assignment.title} was created.", f"作业 {assignment.title} 已创建。"),
+        "success",
+    )
     return _redirect(f"/teacher/assignments/{assignment.id}")
 
 
@@ -275,7 +316,15 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this assignment.", "danger")
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "You do not have teacher access to this assignment.",
+                "你没有该作业的教师端访问权限。",
+            ),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     questions = (
@@ -373,7 +422,19 @@ def create_question(
     try:
         q_type = QuestionType(question_type)
     except ValueError:
-        push_flash(request, "Invalid question type.", "danger")
+        push_flash(request, choose_text(request, "Invalid question type.", "题目类型无效。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
+
+    if q_type == QuestionType.NOTEBOOK:
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "Notebook execution has been retired. Use a native Python code question for executable tasks, or use a file / LLM-reviewed question for .ipynb submissions.",
+                "Notebook 执行流程已下线。需要可执行评测时请创建原生 Python 代码题；需要提交 .ipynb 时，请创建文件 / LLM 评测题。",
+            ),
+            "warning",
+        )
         return _redirect(f"/teacher/assignments/{assignment.id}")
 
     max_score_decimal = Decimal(max_score)
@@ -391,27 +452,7 @@ def create_question(
     db.add(question)
     db.flush()
 
-    if q_type == QuestionType.NOTEBOOK:
-        from app.models import NotebookQuestionConfig
-
-        db.add(
-            NotebookQuestionConfig(
-                question_id=question.id,
-                time_limit_seconds=int(time_limit_seconds or 300),
-                memory_limit_mb=int(memory_limit_mb or 1024),
-                cpu_limit=cpu_limit or "1",
-                allow_network=allow_network == "true",
-                visible_tests_source=visible_tests_source.strip() or None,
-                hidden_tests_source=hidden_tests_source.strip() or None,
-                execution_weight=Decimal(execution_weight or "0"),
-                visible_weight=Decimal(visible_weight or "100"),
-                hidden_weight=Decimal(hidden_weight or "0"),
-                llm_score_weight=Decimal(llm_score_weight or "0"),
-                llm_scoring_rubric=llm_scoring_rubric.strip() or None,
-                llm_feedback_enabled=llm_feedback_enabled == "true",
-            )
-        )
-    elif q_type == QuestionType.SHORT_ANSWER:
+    if q_type == QuestionType.SHORT_ANSWER:
         db.add(
             ShortAnswerQuestionConfig(
                 question_id=question.id,
@@ -434,15 +475,39 @@ def create_question(
             {"input": hidden_test_2_input.strip(), "expected_output": hidden_test_2_output.strip(), "points": 20},
         ]
         if not input_spec.strip() or not output_spec.strip():
-            push_flash(request, "Python code questions must define both input and output specifications.", "danger")
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Python code questions must define both input and output specifications.",
+                    "Python 代码题必须同时填写输入说明和输出说明。",
+                ),
+                "danger",
+            )
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
         if any(not sample["input"] or not sample["expected_output"] for sample in visible_samples + hidden_samples):
-            push_flash(request, "Python code questions require 5 complete test cases (3 visible, 2 hidden).", "danger")
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Python code questions require 5 complete test cases (3 visible, 2 hidden).",
+                    "Python 代码题需要完整填写 5 个测试点（3 个可见测试，2 个隐藏测试）。",
+                ),
+                "danger",
+            )
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
         if max_score_decimal != Decimal("100"):
-            push_flash(request, "Python code questions currently use a fixed 100-point rubric (5 tests x 20 points).", "warning")
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Python code questions currently use a fixed 100-point rubric (5 tests x 20 points).",
+                    "当前 Python 代码题固定按 100 分计分（5 个测试点，每个 20 分）。",
+                ),
+                "warning",
+            )
             question.max_score = Decimal("100")
         db.add(
             PythonCodeQuestionConfig(
@@ -468,7 +533,15 @@ def create_question(
         if q_type == QuestionType.PDF_LLM:
             normalized_extensions = [".pdf"]
         if not rubric_text.strip() or not reference_answer.strip():
-            push_flash(request, "Reference answer and rubric are required for LLM-graded file questions.", "danger")
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Reference answer and rubric are required for file / LLM-reviewed questions.",
+                    "文件 / LLM 评测题必须填写参考答案和评分细则。",
+                ),
+                "danger",
+            )
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
         db.add(
@@ -484,7 +557,11 @@ def create_question(
         )
 
     db.commit()
-    push_flash(request, f"Question {question.title} created.", "success")
+    push_flash(
+        request,
+        choose_text(request, f"Question {question.title} was created.", f"题目 {question.title} 已创建。"),
+        "success",
+    )
     return _redirect(f"/teacher/questions/{question.id}")
 
 
@@ -496,11 +573,19 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this question.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this question.", "你没有该题目的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     if question is None:
-        push_flash(request, "You do not have teacher access to this question.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this question.", "你没有该题目的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     submissions = (
@@ -539,7 +624,15 @@ def teacher_submission_detail(submission_id: int, request: Request, db: Session 
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this submission.", "danger")
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "You do not have teacher access to this submission.",
+                "你没有该提交记录的教师端访问权限。",
+            ),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
@@ -575,20 +668,52 @@ def grade_submission(
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this submission.", "danger")
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "You do not have teacher access to this submission.",
+                "你没有该提交记录的教师端访问权限。",
+            ),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER:
-        push_flash(request, "Only teachers can save final grading decisions for this course.", "danger")
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "Only teachers can save final grading decisions for this course.",
+                "只有教师角色可以保存该课程的最终评分结论。",
+            ),
+            "danger",
+        )
         return _redirect(f"/teacher/submissions/{submission.id}")
 
     score_value = Decimal(score) if score.strip() else None
     requires_teacher_score = submission.submission_type == QuestionType.SHORT_ANSWER
     if requires_teacher_score and score_value is None:
-        push_flash(request, "A score is required when saving teacher feedback.", "danger")
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "A score is required when saving teacher feedback.",
+                "保存教师反馈时必须填写分数。",
+            ),
+            "danger",
+        )
         return _redirect(f"/teacher/submissions/{submission.id}")
     if score_value is not None and (score_value < 0 or score_value > Decimal(str(submission.question.max_score))):
-        push_flash(request, f"Score must be between 0 and {submission.question.max_score}.", "danger")
+        push_flash(
+            request,
+            choose_text(
+                request,
+                f"Score must be between 0 and {submission.question.max_score}.",
+                f"分数必须在 0 到 {submission.question.max_score} 之间。",
+            ),
+            "danger",
+        )
         return _redirect(f"/teacher/submissions/{submission.id}")
 
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
@@ -608,7 +733,7 @@ def grade_submission(
         submission.failure_reason_code = None
     db.commit()
     refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
-    push_flash(request, "Teacher feedback saved.", "success")
+    push_flash(request, choose_text(request, "Teacher feedback was saved.", "教师反馈已保存。"), "success")
     return _redirect(f"/teacher/submissions/{submission.id}")
 
 

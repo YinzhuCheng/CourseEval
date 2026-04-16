@@ -10,6 +10,7 @@ from app.auth import (
     find_user_by_login,
     get_current_user,
     hash_password,
+    landing_path_for_user,
     login_user,
     logout_user,
     push_flash,
@@ -60,7 +61,7 @@ def _render_register_form(
 @router.get("/register")
 def register_page(request: Request, db: Session = Depends(get_db)):
     if get_current_user(request, db):
-        return RedirectResponse(url="/dashboard", status_code=303)
+        return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
     return _render_register_form(request, db)
 
 
@@ -123,13 +124,13 @@ def register_user(
 
     login_user(request, user)
     push_flash(request, t(request, "flash.registration_success"), "success")
-    return RedirectResponse(url="/dashboard", status_code=303)
+    return RedirectResponse(url=landing_path_for_user(user), status_code=303)
 
 
 @router.get("/login")
 def login_page(request: Request, db: Session = Depends(get_db)):
     if get_current_user(request, db):
-        return RedirectResponse(url="/dashboard", status_code=303)
+        return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
     return render_template(request, db, "login.html")
 
 
@@ -147,7 +148,7 @@ def login(
 
     login_user(request, user)
     push_flash(request, t(request, "flash.login_success"), "success")
-    return RedirectResponse(url="/dashboard", status_code=303)
+    return RedirectResponse(url=landing_path_for_user(user), status_code=303)
 
 
 @router.post("/logout")

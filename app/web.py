@@ -8,7 +8,7 @@ from starlette.requests import Request
 
 from app.auth import get_current_user, is_admin, is_super_admin, is_teacher_account, pop_flashes
 from app.config import get_settings
-from app.i18n import get_locale, template_translator
+from app.i18n import get_locale, template_localizer, template_translator
 
 
 settings = get_settings()
@@ -37,6 +37,7 @@ def render_template(
         "flashes": pop_flashes(request),
         "current_locale": get_locale(request),
         "t": template_translator(request),
+        "lx": template_localizer(request),
         "format_datetime": format_datetime,
     }
     base_context["can_use_teacher_features"] = is_teacher_account(base_context["current_user"])

@@ -1,63 +1,69 @@
 {% extends "base.html" %}
 
-{% block title %}Teacher Review - Submission #{{ submission.id }}{% endblock %}
+{% block title %}{{ lx("Teacher review", "教师评阅") }} - #{{ submission.id }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<section class="page-hero mb-4">
   <div>
-    <h1 class="h3 mb-1">Submission #{{ submission.id }}</h1>
+    <p class="eyebrow mb-2">{{ lx("Teacher review workspace", "教师评阅工作台") }}</p>
+    <h1 class="h3 mb-1">{{ lx("Submission", "提交记录") }} #{{ submission.id }}</h1>
     <p class="text-muted mb-0">
       {{ submission.user.username }} · {{ submission.question.title }}
     </p>
   </div>
-  <a class="btn btn-outline-secondary" href="/teacher/questions/{{ submission.question.id }}">Back to question</a>
-</div>
+  <a class="btn btn-outline-secondary" href="/teacher/questions/{{ submission.question.id }}">
+    {{ lx("Back to question", "返回题目") }}
+  </a>
+</section>
 
 <div class="row g-4">
   <div class="col-lg-5">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submission info</h2>
+        <h2 class="h5 mb-3">{{ lx("Submission overview", "提交概览") }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-5">Status</dt>
+          <dt class="col-sm-5">{{ lx("Status", "状态") }}</dt>
           <dd class="col-sm-7"><span class="badge bg-secondary">{{ submission.status.value }}</span></dd>
-          <dt class="col-sm-5">Submitted</dt>
+          <dt class="col-sm-5">{{ lx("Submitted", "提交时间") }}</dt>
           <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
-          <dt class="col-sm-5">Question type</dt>
+          <dt class="col-sm-5">{{ lx("Question type", "题型") }}</dt>
           <dd class="col-sm-7">{{ submission.submission_type.value }}</dd>
-          <dt class="col-sm-5">Counts toward limit</dt>
-          <dd class="col-sm-7">{{ "Yes" if submission.counts_toward_limit else "No" }}</dd>
-          <dt class="col-sm-5">Effective submission</dt>
-          <dd class="col-sm-7">{{ "Yes" if submission.is_effective_submission else "No" }}</dd>
+          <dt class="col-sm-5">{{ lx("Counts toward limit", "计入次数限制") }}</dt>
+          <dd class="col-sm-7">{{ lx("Yes", "是") if submission.counts_toward_limit else lx("No", "否") }}</dd>
+          <dt class="col-sm-5">{{ lx("Effective submission", "是否为有效提交") }}</dt>
+          <dd class="col-sm-7">{{ lx("Yes", "是") if submission.is_effective_submission else lx("No", "否") }}</dd>
         </dl>
       </div>
     </div>
 
     {% if pending_teacher_review %}
     <div class="alert alert-warning mt-4 mb-0">
-      This short-answer submission is waiting for a teacher confirmation before it becomes the effective grade snapshot.
+      {{ lx(
+        "This submission is waiting for teacher confirmation before it becomes the active grade snapshot.",
+        "该提交仍在等待教师确认，确认后才会成为当前生效成绩快照。"
+      ) }}
     </div>
     {% endif %}
 
     {% if latest_result %}
     <div class="card shadow-sm mt-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Latest evaluation result</h2>
+        <h2 class="h5 mb-3">{{ lx("Latest evaluation result", "最近一次评测结果") }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-5">Run success</dt>
-          <dd class="col-sm-7">{{ "Yes" if latest_result.run_success else "No" }}</dd>
-          <dt class="col-sm-5">Visible score</dt>
+          <dt class="col-sm-5">{{ lx("Run success", "运行成功") }}</dt>
+          <dd class="col-sm-7">{{ lx("Yes", "是") if latest_result.run_success else lx("No", "否") }}</dd>
+          <dt class="col-sm-5">{{ lx("Visible score", "可见测试得分") }}</dt>
           <dd class="col-sm-7">{{ latest_result.visible_score if latest_result.visible_score is not none else "-" }}</dd>
-          <dt class="col-sm-5">Hidden score</dt>
+          <dt class="col-sm-5">{{ lx("Hidden score", "隐藏测试得分") }}</dt>
           <dd class="col-sm-7">{{ latest_result.hidden_score if latest_result.hidden_score is not none else "-" }}</dd>
-          <dt class="col-sm-5">Auto score</dt>
+          <dt class="col-sm-5">{{ lx("Automatic score", "自动得分") }}</dt>
           <dd class="col-sm-7">{{ latest_result.auto_score if latest_result.auto_score is not none else "-" }}</dd>
-          <dt class="col-sm-5">Final score</dt>
+          <dt class="col-sm-5">{{ lx("Final score", "当前最终得分") }}</dt>
           <dd class="col-sm-7">{{ latest_result.final_score if latest_result.final_score is not none else "-" }}</dd>
         </dl>
         {% if latest_result.summary_json %}
         <hr />
-        <h3 class="h6 mb-2">Structured summary</h3>
+        <h3 class="h6 mb-2">{{ lx("Structured summary", "结构化摘要") }}</h3>
         <pre class="artifact-block">{{ latest_result.summary_json }}</pre>
         {% endif %}
       </div>
@@ -66,23 +72,28 @@
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Teacher grading</h2>
+        <h2 class="h5 mb-3">{{ lx("Teacher grading", "教师评分") }}</h2>
         {% if can_grade_submission %}
         <form method="post" action="/teacher/submissions/{{ submission.id }}/grade" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Teacher final score</label>
+            <label class="form-label">{{ lx("Teacher final score", "教师最终分数") }}</label>
             <input class="form-control" type="number" step="0.01" name="score" />
           </div>
           <div class="col-12">
-            <label class="form-label">Teacher comment</label>
+            <label class="form-label">{{ lx("Teacher comment", "教师评语") }}</label>
             <textarea class="form-control" rows="6" name="comment_text"></textarea>
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Save teacher feedback</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Save teacher feedback", "保存教师反馈") }}</button>
           </div>
         </form>
         {% else %}
-        <p class="text-muted mb-0">TA access is read-only here. Only teachers can confirm final grades in Phase 1.</p>
+        <p class="text-muted mb-0">
+          {{ lx(
+            "TA access is read-only here. Only teachers can confirm final grades in the current product version.",
+            "助教在此页面仅可只读查看；当前版本只有教师可以确认最终成绩。"
+          ) }}
+        </p>
         {% endif %}
       </div>
     </div>
@@ -94,15 +105,15 @@
       <div class="card-body">
         <h2 class="h5 mb-3">
           {% if submission.submission_type.value == "python_code" %}
-          Submitted Python code
+          {{ lx("Submitted Python code", "提交的 Python 代码") }}
           {% elif submission.submission_type.value in ["pdf_llm", "formatted_text_llm"] %}
-          Extracted submission text
+          {{ lx("Extracted submission text", "提取后的提交文本") }}
           {% else %}
-          Student answer
+          {{ lx("Student answer", "学生答案") }}
           {% endif %}
         </h2>
         {% if submission.original_filename %}
-        <div class="small text-muted mb-2">Original file: {{ submission.original_filename }}</div>
+        <div class="small text-muted mb-2">{{ lx("Original file", "原始文件") }}: {{ submission.original_filename }}</div>
         {% endif %}
         <pre class="artifact-block">{{ submission.answer_text }}</pre>
       </div>
@@ -111,7 +122,7 @@
 
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Feedback timeline</h2>
+        <h2 class="h5 mb-3">{{ lx("Feedback timeline", "反馈时间线") }}</h2>
         {% if feedback_items %}
         <div class="vstack gap-3">
           {% for item in feedback_items %}
@@ -121,14 +132,14 @@
               <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
             </div>
             <div class="small text-muted mb-2">
-              score suggestion: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}
+              {{ lx("Score suggestion", "建议分数") }}: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}
             </div>
             <div>{{ item.comment_text or "-" }}</div>
           </div>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">No feedback has been recorded yet.</p>
+        <p class="text-muted mb-0">{{ lx("No feedback has been recorded yet.", "当前还没有反馈记录。") }}</p>
         {% endif %}
       </div>
     </div>
@@ -137,14 +148,14 @@
     <div class="card shadow-sm mt-4">
       <div class="card-body">
         <h2 class="h5 mb-3">stdout</h2>
-        <pre class="artifact-block">{{ stdout_text or "No stdout captured yet." }}</pre>
+        <pre class="artifact-block">{{ stdout_text or lx("No stdout captured yet.", "当前还没有 stdout 输出。") }}</pre>
       </div>
     </div>
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
         <h2 class="h5 mb-3">stderr</h2>
-        <pre class="artifact-block">{{ stderr_text or "No stderr captured yet." }}</pre>
+        <pre class="artifact-block">{{ stderr_text or lx("No stderr captured yet.", "当前还没有 stderr 输出。") }}</pre>
       </div>
     </div>
     {% endif %}

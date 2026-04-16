@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lx("Python Runtime Help", "Python 运行环境说明") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="card hero-card mb-4">
+  <div class="card-body p-4 p-lg-5">
+    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+      <div>
+        <span class="feature-chip">{{ lx("Student help", "学生帮助") }}</span>
+        <h1 class="h3 mt-3 mb-2">{{ lx("Python runtime and submission guide", "Python 运行环境与提交流程说明") }}</h1>
+        <p class="text-muted mb-0">
+          {{ lx(
+            "Use this page to understand which Python version is available, which libraries are preinstalled, and when to submit .py versus .ipynb files.",
+            "本页用于说明系统支持的 Python 版本、已预装的第三方库，以及什么时候应提交 .py 或 .ipynb 文件。"
+          ) }}
+        </p>
+      </div>
+      <a class="btn btn-outline-primary" href="/student/courses">{{ lx("Back to courses", "返回课程") }}</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card section-card h-100">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-3">{{ lx("Supported runtime", "支持的运行环境") }}</h2>
+        <dl class="row mb-0 kv-list">
+          <dt class="col-sm-5">{{ lx("Python version", "Python 版本") }}</dt>
+          <dd class="col-sm-7"><code>{{ supported_python_version }}</code></dd>
+
+          <dt class="col-sm-5">{{ lx("Execution mode", "执行模式") }}</dt>
+          <dd class="col-sm-7">
+            {{ lx("Native Python runner for .py questions", "原生 Python 运行器（用于 .py 代码题）") }}
+          </dd>
+
+          <dt class="col-sm-5">{{ lx("ipynb support", "ipynb 支持") }}</dt>
+          <dd class="col-sm-7">
+            {{ lx("Supported through file / LLM-reviewed questions", "通过文件 / LLM 评测题支持") }}
+          </dd>
+        </dl>
+
+        <div class="soft-note mt-4">
+          <div class="fw-semibold mb-2">{{ lx("Which submission type should I choose?", "我应该选择哪种提交方式？") }}</div>
+          <ul class="small text-muted mb-0 ps-3">
+            <li>{{ lx("Use .py when the question expects executable code and automatic test-based evaluation.", "当题目需要执行代码并按测试点自动评测时，请提交 .py 文件。") }}</li>
+            <li>{{ lx("Use .ipynb when the course asks for notebook-style reasoning, analysis, charts, or formatted reports reviewed through the LLM workflow.", "当课程要求提交 Notebook 形式的分析、说明、图表或报告时，请提交 .ipynb，并通过文件 / LLM 评测流程处理。") }}</li>
+            <li>{{ lx("The old standalone notebook execution page has been retired.", "旧的独立 Notebook 执行页面已经下线。") }}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card section-card mb-4">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-3">{{ lx("Preinstalled Python packages", "预装 Python 包") }}</h2>
+        <div class="table-responsive">
+          <table class="table align-middle package-table">
+            <thead>
+              <tr>
+                <th>{{ lx("Package", "包名") }}</th>
+                <th>{{ lx("Version", "版本") }}</th>
+                <th>{{ lx("Purpose", "用途") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for package in supported_python_packages %}
+              <tr>
+                <td><code>{{ package.name }}</code></td>
+                <td><code>{{ package.version }}</code></td>
+                <td>{{ lx(package.summary_en, package.summary_zh) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="alert alert-warning mb-0">
+          {{ lx(unsupported_package_note_en, unsupported_package_note_zh) }}
+        </div>
+      </div>
+    </div>
+
+    <div class="card section-card">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-3">{{ lx("Common questions", "常见问题") }}</h2>
+        <div class="vstack gap-3">
+          <div class="soft-note">
+            <div class="fw-semibold mb-1">{{ lx("Can I submit an executed notebook?", "我可以提交已经执行过的 Notebook 吗？") }}</div>
+            <div class="small text-muted">
+              {{ lx(
+                "Yes. For file / LLM-reviewed questions that accept .ipynb, executed outputs may be required by the teacher so the evaluator can review results and explanations together.",
+                "可以。对于支持 .ipynb 的文件 / LLM 评测题，教师可能会要求你上传带有执行输出的 Notebook，以便系统结合结果与说明一起评阅。"
+              ) }}
+            </div>
+          </div>
+          <div class="soft-note">
+            <div class="fw-semibold mb-1">{{ lx("Can I import extra packages?", "我可以导入额外的第三方库吗？") }}</div>
+            <div class="small text-muted">
+              {{ lx(
+                "Only the Python standard library and the preinstalled packages listed above are guaranteed. If a course needs more dependencies, ask the teaching staff first.",
+                "系统仅保证可用 Python 标准库和上表列出的预装包。如课程确实需要更多依赖，请先联系教师确认。"
+              ) }}
+            </div>
+          </div>
+          <div class="soft-note">
+            <div class="fw-semibold mb-1">{{ lx("Where else can I view this information?", "我还能在哪里看到这些信息？") }}</div>
+            <div class="small text-muted">
+              {{ lx(
+                "Teachers see the same runtime information while creating Python questions, and administrators can review the default runtime image from the admin console.",
+                "教师在创建 Python 代码题时也会看到同一份运行环境信息，管理员还可以在管理后台查看默认运行镜像配置。"
+              ) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

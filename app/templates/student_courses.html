@@ -13,14 +13,17 @@
   <div class="col-lg-5">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ "Join a course" if current_locale == "en" else "加入课程" }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Join a course", "加入课程") }}</h2>
         <form method="post" action="/student/courses/join" class="row g-3">
           <div class="col-12">
-            <label class="form-label">{{ "Course join code" if current_locale == "en" else "课程加入码" }}</label>
+            <label class="form-label">{{ lx("Course join code", "课程加入码") }}</label>
             <input class="form-control text-uppercase" name="join_code" required />
+            <div class="form-text">
+              {{ lx("Ask your teacher for the course join code if you have not been added yet.", "如果你还没有加入课程，请向教师获取课程加入码。") }}
+            </div>
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-outline-primary" type="submit">{{ "Join course" if current_locale == "en" else "加入课程" }}</button>
+            <button class="btn btn-outline-primary" type="submit">{{ lx("Join course", "加入课程") }}</button>
           </div>
         </form>
       </div>
@@ -37,6 +40,9 @@
           <h2 class="h5 mb-1">{{ course.code }}</h2>
           <p class="fw-semibold mb-2">{{ course.title }}</p>
           <p class="text-muted small">{{ course.description or t("student.courses.no_description") }}</p>
+          <p class="small text-muted">
+            {{ lx("Open the course to view assignments, question instructions, and submission history.", "进入课程后可查看作业、题目要求和历史提交记录。") }}
+          </p>
           <a class="btn btn-primary" href="/student/courses/{{ course.id }}">{{ t("student.courses.open") }}</a>
         </div>
       </div>

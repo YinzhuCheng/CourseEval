@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Question - {{ question.title }}{% endblock %}
+{% block title %}{{ question.title }} - {{ t("nav.teacher") }}{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -8,43 +8,58 @@
     <h1 class="h3 mb-1">{{ question.title }}</h1>
     <p class="text-muted mb-0">{{ question.assignment.course.code }} / {{ question.assignment.title }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="/teacher/assignments/{{ question.assignment.id }}">Back to assignment</a>
+  <a class="btn btn-outline-secondary" href="/teacher/assignments/{{ question.assignment.id }}">
+    {{ lx("Back to assignment", "返回作业") }}
+  </a>
 </div>
 
 <div class="row g-4">
   <div class="col-lg-4">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Question settings</h2>
+        <h2 class="h5 mb-3">{{ lx("Question settings", "题目设置") }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-5">Type</dt>
+          <dt class="col-sm-5">{{ lx("Type", "题型") }}</dt>
           <dd class="col-sm-7">{{ question.question_type.value }}</dd>
-          <dt class="col-sm-5">Max score</dt>
+          <dt class="col-sm-5">{{ lx("Max score", "满分") }}</dt>
           <dd class="col-sm-7">{{ question.max_score }}</dd>
-          <dt class="col-sm-5">Rule override</dt>
+          <dt class="col-sm-5">{{ lx("Rule override", "计分规则覆盖") }}</dt>
           <dd class="col-sm-7">{{ question.scoring_rule_override.value if question.scoring_rule_override else "-" }}</dd>
         </dl>
+        {% if question.question_type.value == "python_code" and question.python_code_config %}
+        <hr />
+        <div class="small text-muted">
+          <div><strong>{{ lx("Runtime", "运行环境") }}:</strong> Python {{ question.python_code_config.time_limit_seconds }}s / {{ question.python_code_config.memory_limit_mb }} MB / CPU {{ question.python_code_config.cpu_limit }}</div>
+          <div class="mt-2"><strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong> {{ question.python_code_config.allowed_libraries_note }}</div>
+        </div>
+        {% elif question.question_type.value in ["pdf_llm", "formatted_text_llm"] and question.file_question_config %}
+        <hr />
+        <div class="small text-muted">
+          <div><strong>{{ lx("Accepted files", "允许文件类型") }}:</strong> {{ question.file_question_config.accepted_extensions }}</div>
+          <div class="mt-2"><strong>{{ lx("Teacher confirmation", "教师确认") }}:</strong> {{ lx("Required", "需要") if question.file_question_config.teacher_confirmation_required else lx("Not required", "不需要") }}</div>
+        </div>
+        {% endif %}
       </div>
     </div>
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Active grade snapshots</h2>
+        <h2 class="h5 mb-3">{{ lx("Active grade snapshots", "当前生效成绩快照") }}</h2>
         {% if snapshots %}
         <div class="list-group list-group-flush">
           {% for snapshot in snapshots %}
           <div class="list-group-item px-0">
-            <div class="fw-semibold">Student #{{ snapshot.student_id }}</div>
+            <div class="fw-semibold">{{ lx("Student", "学生") }} #{{ snapshot.student_id }}</div>
             <div class="small text-muted">
-              score={{ snapshot.score if snapshot.score is not none else "-" }},
-              rule={{ snapshot.grading_rule_applied.value }},
-              source={{ snapshot.feedback_source.value if snapshot.feedback_source else "-" }}
+              {{ lx("score", "分数") }}={{ snapshot.score if snapshot.score is not none else "-" }},
+              {{ lx("rule", "规则") }}={{ snapshot.grading_rule_applied.value }},
+              {{ lx("source", "来源") }}={{ snapshot.feedback_source.value if snapshot.feedback_source else "-" }}
             </div>
           </div>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">No effective grades yet.</p>
+        <p class="text-muted mb-0">{{ lx("No effective grades yet.", "当前还没有生效成绩。") }}</p>
         {% endif %}
       </div>
     </div>
@@ -53,20 +68,20 @@
   <div class="col-lg-8">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submissions</h2>
+        <h2 class="h5 mb-3">{{ lx("Submissions", "提交记录") }}</h2>
         {% if submissions %}
         <div class="table-responsive">
           <table class="table align-middle">
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Student</th>
-                <th>Status</th>
-                <th>Visible</th>
-                <th>Hidden</th>
-                <th>Auto</th>
-                <th>Final</th>
-                <th>Submitted</th>
+                <th>{{ lx("Student", "学生") }}</th>
+                <th>{{ lx("Status", "状态") }}</th>
+                <th>{{ lx("Visible", "可见测试") }}</th>
+                <th>{{ lx("Hidden", "隐藏测试") }}</th>
+                <th>{{ lx("Auto", "自动得分") }}</th>
+                <th>{{ lx("Final", "最终得分") }}</th>
+                <th>{{ lx("Submitted", "提交时间") }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -83,7 +98,9 @@
                 <td>{{ latest_result.final_score if latest_result and latest_result.final_score is not none else "-" }}</td>
                 <td>{{ format_datetime(submission.submitted_at) }}</td>
                 <td class="text-end">
-                  <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ submission.id }}">Open</a>
+                  <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ submission.id }}">
+                    {{ lx("Open", "查看") }}
+                  </a>
                 </td>
               </tr>
               {% endfor %}
@@ -91,7 +108,7 @@
           </table>
         </div>
         {% else %}
-        <p class="text-muted mb-0">No submissions yet.</p>
+        <p class="text-muted mb-0">{{ lx("No submissions yet.", "还没有提交记录。") }}</p>
         {% endif %}
       </div>
     </div>

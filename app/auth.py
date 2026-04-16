@@ -122,6 +122,16 @@ def assign_user_role(user: User, role: UserRole) -> None:
         user.platform_role = PlatformRole.USER
 
 
+def landing_path_for_user(user: User | None) -> str:
+    if user is None or not user.is_active:
+        return "/login"
+    if user.effective_role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        return "/admin/system"
+    if user.effective_role == UserRole.TEACHER:
+        return "/teacher/courses"
+    return "/student/courses"
+
+
 def login_user(request: Request, user: User) -> None:
     request.session["user_id"] = user.id
 

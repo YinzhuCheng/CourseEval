@@ -1,46 +1,73 @@
 {% extends "base.html" %}
 
-{% block title %}{{ course.title }} - Student Course{% endblock %}
+{% block title %}{{ course.title }} - {{ t("nav.my_courses") }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <div>
-    <h1 class="h3 mb-1">{{ course.title }}</h1>
-    <p class="text-muted mb-0">{{ course.code }}{% if course.description %} · {{ course.description }}{% endif %}</p>
+<div class="page-header page-header-soft mb-4">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+    <div>
+      <div class="eyebrow-text">{{ course.code }}</div>
+      <h1 class="h3 mb-2">{{ course.title }}</h1>
+      <p class="text-muted mb-0">
+        {{ course.description or lx("No course description has been added yet.", "课程暂时还没有补充说明。") }}
+      </p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-outline-secondary" href="/student/courses">{{ lx("Back to courses", "返回课程列表") }}</a>
+      <a class="btn btn-primary" href="/student/help/python-runtime">{{ lx("Python runtime help", "Python 运行环境帮助") }}</a>
+    </div>
   </div>
-  <a class="btn btn-outline-secondary" href="/student/courses">Back to courses</a>
 </div>
 
 <div class="card shadow-sm">
   <div class="card-body">
-    <h2 class="h5 mb-3">Assignments</h2>
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+      <div>
+        <h2 class="h5 mb-1">{{ lx("Assignments", "作业列表") }}</h2>
+        <p class="text-muted small mb-0">
+          {{ lx("Open an assignment to see the supported submission type, scoring rule, and deadline window.", "进入作业后可查看支持的提交方式、计分规则与时间窗口。") }}
+        </p>
+      </div>
+    </div>
     {% if course.assignments %}
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
           <tr>
-            <th>Title</th>
-            <th>Status</th>
-            <th>Open</th>
-            <th>Due</th>
+            <th>{{ lx("Title", "标题") }}</th>
+            <th>{{ lx("Status", "状态") }}</th>
+            <th>{{ lx("Open", "开放时间") }}</th>
+            <th>{{ lx("Due", "截止时间") }}</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {% for assignment in course.assignments %}
           <tr>
-            <td>{{ assignment.title }}</td>
+            <td>
+              <div class="fw-semibold">{{ assignment.title }}</div>
+              {% if assignment.description %}
+              <div class="small text-muted">{{ assignment.description }}</div>
+              {% endif %}
+            </td>
             <td><span class="badge text-bg-secondary">{{ assignment.status.value }}</span></td>
             <td>{{ format_datetime(assignment.open_at, "%Y-%m-%d %H:%M") }}</td>
             <td>{{ format_datetime(assignment.due_at, "%Y-%m-%d %H:%M") }}</td>
-            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/student/assignments/{{ assignment.id }}">View</a></td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="/student/assignments/{{ assignment.id }}">{{ lx("Open", "查看") }}</a>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-    <p class="text-muted mb-0">No assignments published yet.</p>
+    <div class="empty-state">
+      <h3 class="h6">{{ lx("No assignments published yet", "暂时还没有已发布的作业") }}</h3>
+      <p class="text-muted mb-0">
+        {{ lx("Your teacher may still be preparing this course. Check back later or contact course staff for details.", "教师可能仍在准备这门课程。你可以稍后再来查看，或联系课程教师了解安排。") }}
+      </p>
+    </div>
     {% endif %}
   </div>
 </div>

@@ -3,7 +3,7 @@ import logging
 from rq import Worker
 
 from app.config import get_settings
-from app.services.jobs import cleanup_stale_running_jobs, redis_connection
+from app.services.submissions import cleanup_stale_running_items, redis_connection
 
 
 settings = get_settings()
@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    recovered_jobs = cleanup_stale_running_jobs()
-    if recovered_jobs:
-        logger.warning("Marked %s stale running jobs as failed during worker startup.", recovered_jobs)
+    recovered_items = cleanup_stale_running_items()
+    if recovered_items:
+        logger.warning(
+            "Marked %s stale submissions or evaluation tasks as failed during worker startup.",
+            recovered_items,
+        )
 
     connection = redis_connection()
     worker = Worker([settings.rq_queue_name], connection=connection)

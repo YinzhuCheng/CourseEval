@@ -76,6 +76,10 @@ def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
 
 _HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
 _HIDDEN_STDERR_MARKER = "=== Hidden Test stderr ==="
+_RETIRED_NOTEBOOK_MESSAGE = (
+    "Notebook execution has been retired. Use native Python code questions for .py submissions, "
+    "or use file / LLM-reviewed questions for .ipynb submissions."
+)
 
 
 def _latest_feedback(submission: Submission, source: FeedbackSource) -> Feedback | None:
@@ -703,54 +707,10 @@ def create_notebook_submission(
     original_filename: str,
     notebook_bytes: bytes,
 ) -> Submission:
-    allowed, message = _submission_window_open(question)
-    if not allowed:
-        raise ValueError(message or "Submission window is closed.")
-
-    allowed, message = _check_submission_limit(db, question, user_id)
-    if not allowed:
-        raise ValueError(message or "Submission limit reached.")
-
-    upload_dir = settings.uploads_dir / f"user-{user_id}" / f"question-{question.id}"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = upload_dir / f"{uuid4().hex}.ipynb"
-    stored_path.write_bytes(notebook_bytes)
-
-    notebook = Notebook(
-        user_id=user_id,
-        original_filename=original_filename,
-        stored_path=relative_to_data(stored_path),
+    raise ValueError(
+        "Notebook execution has been retired. Use a native Python code question for .py submissions, "
+        "or use a file / LLM-reviewed question for .ipynb submissions."
     )
-    db.add(notebook)
-    db.flush()
-
-    submission = Submission(
-        course_id=question.assignment.course_id,
-        assignment_id=question.assignment_id,
-        question_id=question.id,
-        user_id=user_id,
-        submission_type=QuestionType.NOTEBOOK,
-        status=SubmissionStatus.SUBMITTED,
-        original_filename=original_filename,
-        notebook_id=notebook.id,
-        submitted_at=utcnow(),
-        is_late=_is_late(question),
-        counts_toward_limit=False,
-        is_effective_submission=False,
-    )
-    db.add(submission)
-    db.flush()
-
-    task = EvaluationTask(
-        submission_id=submission.id,
-        task_type=EvaluationTaskType.NOTEBOOK_EVALUATION,
-        backend_type="rq",
-        status=EvaluationTaskStatus.QUEUED,
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(submission)
-    return submission
 
 
 def create_short_answer_submission(
@@ -1049,40 +1009,7 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
 
 
 def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
-    submission = db.get(Submission, submission_id)
-    if submission is None:
-        raise ValueError("Submission not found.")
-
-    task = db.scalar(
-        select(EvaluationTask)
-        .where(
-            EvaluationTask.submission_id == submission_id,
-            EvaluationTask.task_type == EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
-        )
-        .order_by(EvaluationTask.created_at.desc())
-    )
-    if task is None:
-        task = EvaluationTask(
-            submission_id=submission_id,
-            task_type=EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
-            backend_type="rq",
-            status=EvaluationTaskStatus.QUEUED,
-        )
-        db.add(task)
-        db.flush()
-
-    rq_job = get_queue().enqueue(
-        process_notebook_llm_feedback,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
-    task.backend_job_id = rq_job.id
-    task.status = EvaluationTaskStatus.QUEUED
-    db.commit()
-    return rq_job.id
+    raise ValueError(_RETIRED_NOTEBOOK_MESSAGE)
 
 
 def cleanup_stale_running_items() -> int:
@@ -1461,146 +1388,28 @@ def run_job_in_docker(
     visible_weight: str,
     hidden_weight: str,
 ) -> RunnerResult:
-    input_path = absolute_data_path(input_relative_path)
     output_dir = absolute_data_path(output_dir_relative_path)
-    runner_script_path = _runner_script_path("execute_notebook.py")
-    executed_path = output_dir / "executed.ipynb"
-    html_path = output_dir / "executed.html"
     stdout_path = output_dir / "stdout.txt"
     stderr_path = output_dir / "stderr.txt"
     summary_path = output_dir / "summary.json"
     ensure_writable_directory(output_dir)
 
-    for artifact_path in (executed_path, html_path, stdout_path, stderr_path, summary_path):
+    for artifact_path in (stdout_path, stderr_path, summary_path):
         if artifact_path.exists():
-            if artifact_path.is_file():
-                artifact_path.unlink()
-            else:
-                shutil.rmtree(artifact_path)
+            artifact_path.unlink()
 
-    if not runner_script_path.exists():
-        message = f"Runner helper script is missing from the application checkout: {runner_script_path}"
-        write_text(stderr_path, f"{message}\n")
-        summary = {"failure_type": "system_error", "message": message, "run_success": False, "auto_score": 0}
-        summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
-        return RunnerResult(exit_code=127, error_message=message, summary_json=summary)
-
-    container_name = f"submission-runner-{uuid4().hex[:8]}"
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--name",
-        container_name,
-        "--memory",
-        memory_limit,
-        "--cpus",
-        cpus,
-        "--pids-limit",
-        "256",
-        "-v",
-        f"{input_path.resolve().as_posix()}:/job/input.ipynb:ro",
-        "-v",
-        f"{output_dir.resolve().as_posix()}:/job/output",
-        "-v",
-        f"{runner_script_path.resolve().as_posix()}:/runner/execute_notebook.py:ro",
-        "-w",
-        "/job",
-    ]
-    if network_disabled:
-        command.extend(["--network", "none"])
-
-    command.extend(
-        [
-            runner_image,
-            "--input",
-            "/job/input.ipynb",
-            "--executed",
-            "/job/output/executed.ipynb",
-            "--html",
-            "/job/output/executed.html",
-            "--stdout",
-            "/job/output/stdout.txt",
-            "--stderr",
-            "/job/output/stderr.txt",
-            "--summary",
-            "/job/output/summary.json",
-            "--visible-tests",
-            visible_tests_source,
-            "--hidden-tests",
-            hidden_tests_source,
-            "--execution-weight",
-            execution_weight,
-            "--visible-weight",
-            visible_weight,
-            "--hidden-weight",
-            hidden_weight,
-            "--timeout",
-            str(timeout_seconds),
-        ]
-    )
-
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds + 30,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        _force_remove_container(container_name)
-        message = f"Notebook execution timed out after {timeout_seconds} seconds."
-        write_text(stderr_path, f"{message}\n")
-        summary = {"failure_type": "answer_timeout", "message": message, "run_success": False, "auto_score": 0}
-        summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
-        return RunnerResult(exit_code=124, error_message=message, summary_json=summary)
-    except FileNotFoundError:
-        message = "Docker is not installed or is not available in PATH."
-        write_text(stderr_path, f"{message}\n")
-        summary = {"failure_type": "system_error", "message": message, "run_success": False, "auto_score": 0}
-        summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
-        return RunnerResult(exit_code=127, error_message=message, summary_json=summary)
-
-    if completed.stdout.strip():
-        write_text(stdout_path, f"{completed.stdout}\n", append=True)
-    if completed.stderr.strip():
-        write_text(stderr_path, f"{completed.stderr}\n", append=True)
-
-    summary_json = {}
-    if summary_path.exists():
-        try:
-            summary_json = json.loads(summary_path.read_text(encoding="utf-8"))
-        except Exception:
-            summary_json = {}
-
-    if completed.returncode != 0:
-        message = summary_json.get("message") or "Docker runner exited with a non-zero status."
-        summary_json.setdefault("failure_type", "answer_error")
-        summary_json.setdefault("auto_score", 0)
-        return RunnerResult(exit_code=completed.returncode, error_message=message, summary_json=summary_json)
-
-    missing_artifacts = [
-        name
-        for name, path in {
-            "executed notebook": executed_path,
-            "html export": html_path,
-            "stdout": stdout_path,
-            "stderr": stderr_path,
-            "summary": summary_path,
-        }.items()
-        if not path.exists()
-    ]
-    if missing_artifacts:
-        message = f"Runner finished without producing required artifacts: {', '.join(missing_artifacts)}."
-        write_text(stderr_path, f"{message}\n", append=True)
-        summary_json.setdefault("failure_type", "system_error")
-        summary_json.setdefault("message", message)
-        summary_json.setdefault("auto_score", 0)
-        summary_path.write_text(json.dumps(summary_json, ensure_ascii=True, indent=2), encoding="utf-8")
-        return RunnerResult(exit_code=1, error_message=message, summary_json=summary_json)
-
-    return RunnerResult(exit_code=0, summary_json=summary_json)
+    summary = {
+        "failure_type": "system_error",
+        "message": _RETIRED_NOTEBOOK_MESSAGE,
+        "run_success": False,
+        "auto_score": 0,
+        "visible_score": 0,
+        "hidden_score": 0,
+    }
+    write_text(stdout_path, "")
+    write_text(stderr_path, f"{_RETIRED_NOTEBOOK_MESSAGE}\n")
+    summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
+    return RunnerResult(exit_code=1, error_message=_RETIRED_NOTEBOOK_MESSAGE, summary_json=summary)
 
 
 def run_python_code_in_docker(
@@ -1863,62 +1672,14 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
 def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
     db = SessionLocal()
     try:
-        submission = db.scalar(
-            select(Submission)
-            .options(
-                joinedload(Submission.question).joinedload(Question.notebook_config),
-                joinedload(Submission.assignment).joinedload(Assignment.course),
-                joinedload(Submission.evaluation_results),
-            )
-            .where(Submission.id == submission_id)
-        )
         task = db.get(EvaluationTask, task_id)
-        if submission is None or task is None:
+        if task is None:
             return
 
-        llm_config = _resolve_llm_config_for_question(submission.question)
-        latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
-        if llm_config is None or latest_result is None or not llm_config.enabled:
-            task.status = EvaluationTaskStatus.FAILED
-            task.error_message = "No enabled LLM config or evaluation result available."
-            task.finished_at = utcnow()
-            db.commit()
-            return
-
-        task.status = EvaluationTaskStatus.RUNNING
-        task.started_at = utcnow()
-        db.commit()
-
-        notebook_config = submission.question.notebook_config
-        llm_max_score = Decimal(str(notebook_config.llm_score_weight if notebook_config else 0))
-        stdout_text = read_submission_artifact_text(latest_result, "stdout")
-        stderr_text = read_submission_artifact_text(latest_result, "stderr")
-        llm_result = generate_notebook_evaluation_with_llm(
-            llm_config,
-            question_title=submission.question.title,
-            question_description=submission.question.description or "",
-            rubric_text=notebook_config.llm_scoring_rubric if notebook_config else "",
-            summary_json=latest_result.summary_json or "{}",
-            stdout_text=stdout_text,
-            stderr_text=stderr_text,
-            max_llm_score=float(llm_max_score),
-        )
-        llm_score_value = Decimal(str(llm_result.get("score_suggestion", 0)))
-        llm_score_value = _clamp_score(llm_score_value, Decimal("0"), llm_max_score)
-        db.add(
-            Feedback(
-                submission_id=submission.id,
-                evaluation_result_id=latest_result.id,
-                source=FeedbackSource.LLM,
-                score_suggestion=llm_score_value,
-                comment_text=llm_result.get("comment_text"),
-            )
-        )
-        latest_result.final_score = _recompute_notebook_final_score(submission, latest_result)
-        task.status = EvaluationTaskStatus.SUCCEEDED
+        task.status = EvaluationTaskStatus.FAILED
         task.finished_at = utcnow()
+        task.error_message = _RETIRED_NOTEBOOK_MESSAGE
         db.commit()
-        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Notebook LLM feedback failed for submission %s", submission_id)
         task = db.get(EvaluationTask, task_id)
