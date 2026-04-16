@@ -3,11 +3,12 @@ from urllib.parse import urlparse, parse_qs
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
 from app.auth import can_verify_email_token, hash_password
 from app.config import get_settings
-from app.db import Base
+from app.db import Base, utcnow
 from app.main import app
 from app.models import User
 from app.routes.auth import get_db
@@ -15,7 +16,11 @@ from app.routes.auth import get_db
 
 class AuthEmailVerificationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
         Base.metadata.create_all(self.engine)
         self.session_factory = sessionmaker(
             bind=self.engine,
@@ -102,6 +107,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
                     password_hash=hash_password("password123"),
                     email_verified=False,
                     email_verification_token="verify-token",
+                    email_verification_sent_at=utcnow(),
                     is_active=True,
                 )
             )

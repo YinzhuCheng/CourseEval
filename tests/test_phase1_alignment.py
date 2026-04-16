@@ -340,6 +340,7 @@ class Phase1AlignmentTests(unittest.TestCase):
             password_hash="x",
             account_role=AccountRole.ADMINISTRATOR,
             platform_role=PlatformRole.ADMIN,
+            email_verified=True,
             is_active=True,
         )
         self.assertEqual(legacy_admin.effective_role, UserRole.ADMIN)
