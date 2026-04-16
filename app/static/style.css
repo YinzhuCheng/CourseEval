@@ -5,6 +5,84 @@ body {
     linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
 }
 
+.app-shell {
+  color: #0f172a;
+}
+
+.app-navbar {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+}
+
+.app-navbar .navbar-brand,
+.app-navbar .nav-link {
+  color: #f8fafc;
+}
+
+.app-navbar .navbar-brand:hover,
+.app-navbar .nav-link:hover,
+.app-navbar .nav-link:focus {
+  color: #ffffff;
+}
+
+.app-navbar .nav-link {
+  opacity: 0.9;
+}
+
+.app-navbar .nav-link.active,
+.app-navbar .nav-link[aria-current="page"] {
+  opacity: 1;
+}
+
+.hero-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.25rem;
+  align-items: center;
+  padding: 1.5rem;
+  border-radius: 1rem;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e293b 100%);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+}
+
+.hero-banner__eyebrow {
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.hero-banner__title {
+  color: #ffffff;
+}
+
+.hero-banner__body {
+  max-width: 48rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.hero-banner__actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.auth-card {
+  border: 0;
+  border-radius: 1rem;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+
+.auth-helper {
+  border-radius: 0.9rem;
+  padding: 1rem 1.1rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
 .empty-state {
   padding: 3rem 1rem;
   text-align: center;
@@ -94,4 +172,11 @@ body {
 
 .package-table code {
   font-size: 0.9rem;
+}
+
+@media (max-width: 767.98px) {
+  .hero-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

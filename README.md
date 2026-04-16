@@ -235,6 +235,47 @@ python worker.py
 - Upload size limit: 5 MB
 - Intended deployment profile: small single-machine Ubuntu setup
 
+## Email verification deployment notes
+
+Public registration now uses a two-step flow:
+
+1. The user submits the registration form
+2. The system creates a pending account with `email_verified = false`
+3. The system sends a verification email containing `/verify-email?token=...`
+4. The user clicks the email link
+5. The account becomes active and can sign in
+
+### Required environment variables
+
+Set these values in `.env` for production:
+
+```bash
+APP_BASE_URL=https://your-domain.example.com
+EMAIL_VERIFICATION_EXPIRE_HOURS=24
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your-smtp-user
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM_ADDRESS=no-reply@your-domain.example.com
+SMTP_FROM_NAME=CourseEval
+SMTP_STARTTLS=true
+SMTP_USE_SSL=false
+```
+
+### Deployment checklist
+
+- `APP_BASE_URL` must be the externally accessible HTTPS origin used by end users, otherwise verification links may point to an internal address
+- Configure a working SMTP account before enabling public registration in production
+- Use HTTPS in front of the FastAPI app so email verification links and session cookies travel securely
+- Make sure the email sender domain and mailbox are allowed by your mail provider
+- If you run multiple app instances, they must share the same database so verification tokens stay valid across nodes
+- Keep `SECRET_KEY` stable across restarts so session handling remains consistent
+
+### Behavior when SMTP is not configured
+
+If SMTP is missing or delivery fails, the account is still created in a pending state, but the user cannot complete registration until email sending works and the verification email is resent.
+
 ## Data model notes
 
 Main teaching-domain tables include:

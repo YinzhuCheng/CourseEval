@@ -21,6 +21,7 @@ def _bool_env(name: str, default: bool) -> bool:
 class Settings:
     app_name: str
     secret_key: str
+    app_base_url: str
     database_url: str
     redis_url: str
     rq_queue_name: str
@@ -40,6 +41,15 @@ class Settings:
     debug: bool
     default_locale: str
     timezone_name: str
+    email_verification_expire_hours: int
+    smtp_host: str
+    smtp_port: int
+    smtp_username: str
+    smtp_password: str
+    smtp_from_address: str
+    smtp_from_name: str
+    smtp_starttls: bool
+    smtp_use_ssl: bool
 
 
 @lru_cache
@@ -48,6 +58,7 @@ def get_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "CourseEval"),
         secret_key=os.getenv("SECRET_KEY", "change-me-in-production"),
+        app_base_url=os.getenv("APP_BASE_URL", "").strip(),
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{(data_dir / 'app.db').as_posix()}"),
         redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         rq_queue_name=os.getenv("RQ_QUEUE_NAME", "notebook-jobs"),
@@ -67,4 +78,13 @@ def get_settings() -> Settings:
         debug=_bool_env("DEBUG", False),
         default_locale=os.getenv("DEFAULT_LOCALE", "en"),
         timezone_name=os.getenv("TIMEZONE_NAME", "Asia/Shanghai"),
+        email_verification_expire_hours=max(int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24")), 1),
+        smtp_host=os.getenv("SMTP_HOST", "").strip(),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_username=os.getenv("SMTP_USERNAME", "").strip(),
+        smtp_password=os.getenv("SMTP_PASSWORD", ""),
+        smtp_from_address=os.getenv("SMTP_FROM_ADDRESS", "").strip(),
+        smtp_from_name=os.getenv("SMTP_FROM_NAME", "").strip(),
+        smtp_starttls=_bool_env("SMTP_STARTTLS", True),
+        smtp_use_ssl=_bool_env("SMTP_USE_SSL", False),
     )

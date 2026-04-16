@@ -62,7 +62,7 @@ def migrate_legacy_schema() -> None:
     if "users" in inspector.get_table_names():
         _ensure_column("users", "account_role", "VARCHAR(20) NOT NULL DEFAULT 'student'")
         _ensure_column("users", "platform_role", "VARCHAR(20) NOT NULL DEFAULT 'user'")
-        _ensure_column("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 1")
+        _ensure_column("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 0")
         _ensure_column("users", "email_verification_token", "VARCHAR(255)")
         _ensure_column("users", "email_verification_sent_at", "DATETIME")
         _ensure_column("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1")

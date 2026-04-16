@@ -6,7 +6,7 @@
 {% set form_data = form_data or {} %}
 <div class="row justify-content-center">
   <div class="col-lg-7 col-xl-6">
-    <div class="card shadow-sm">
+    <div class="card auth-card">
       <div class="card-body p-4 p-lg-5">
         <h1 class="h3 mb-2">{{ t("register.title") }}</h1>
         <p class="text-muted mb-4">{{ t("register.subtitle") }}</p>
@@ -47,6 +47,13 @@
             <div class="alert alert-info mb-0">
               <strong>{{ t("register.account_type_label") }}</strong>
               {{ t("register.account_type_body") }}
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="auth-helper">
+              <div class="fw-semibold mb-2">{{ t("register.email_verification_title") }}</div>
+              <div class="small text-muted mb-0">{{ t("register.email_verification_note") }}</div>
             </div>
           </div>
 
