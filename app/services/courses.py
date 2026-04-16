@@ -13,6 +13,7 @@ from app.constants import (
     CourseStatus,
     FeedbackSource,
     MembershipStatus,
+    PlatformRole,
     QuestionType,
     ScoringRule,
 )
