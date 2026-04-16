@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}Submission #{{ submission.id }} - {{ t("site.title") }}{% endblock %}
+
+{% block extra_head %}
+{% if submission.status.value in ["queued", "running", "submitted"] %}
+<meta http-equiv="refresh" content="5" />
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">Submission #{{ submission.id }}</h1>
+    <p class="text-muted mb-0">
+      {{ submission.question.assignment.course.title }} / {{ submission.question.assignment.title }} / {{ submission.question.title }}
+    </p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/student/questions/{{ submission.question_id }}">Back to question</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submission status</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-5">Status</dt>
+          <dd class="col-sm-7"><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></dd>
+
+          <dt class="col-sm-5">Submitted</dt>
+          <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
+
+          <dt class="col-sm-5">Started</dt>
+          <dd class="col-sm-7">{{ format_datetime(submission.started_at) if submission.started_at else "-" }}</dd>
+
+          <dt class="col-sm-5">Completed</dt>
+          <dd class="col-sm-7">{{ format_datetime(submission.completed_at) if submission.completed_at else "-" }}</dd>
+
+          <dt class="col-sm-5">Late</dt>
+          <dd class="col-sm-7">{{ "Yes" if submission.is_late else "No" }}</dd>
+
+          <dt class="col-sm-5">Counts limit</dt>
+          <dd class="col-sm-7">{{ "Yes" if submission.counts_toward_limit else "No" }}</dd>
+
+          <dt class="col-sm-5">Effective</dt>
+          <dd class="col-sm-7">{{ "Yes" if submission.is_effective_submission else "No" }}</dd>
+        </dl>
+        {% if pending_teacher_review %}
+        <div class="alert alert-warning mt-3 mb-0">
+          This submission is saved, but it will not affect your final grade until a teacher confirms the score.
+        </div>
+        {% elif submission.status.value == "queued" %}
+        <div class="alert alert-info mt-3 mb-0">Automatic evaluation has been queued.</div>
+        {% elif submission.status.value == "running" %}
+        <div class="alert alert-info mt-3 mb-0">Automatic evaluation is running.</div>
+        {% elif submission.status.value == "failed_system" %}
+        <div class="alert alert-danger mt-3 mb-0">The system could not complete this evaluation, so the attempt does not count against your limit.</div>
+        {% elif submission.status.value == "failed_answer" %}
+        <div class="alert alert-warning mt-3 mb-0">Execution or tests failed for this submission, so the attempt counts as an answer attempt.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Scores</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-6">Current score</dt>
+          <dd class="col-sm-6">
+            {% if result_view.score is not none %}
+            {{ result_view.score }}
+            {% else %}
+            {{ "Awaiting teacher review" if pending_teacher_review else "-" }}
+            {% endif %}
+          </dd>
+          <dt class="col-sm-6">Score source</dt>
+          <dd class="col-sm-6">{{ result_view.score_source.value if result_view.score_source else "-" }}</dd>
+          {% if result_view.run_success is not none %}
+          <dt class="col-sm-6">Run success</dt>
+          <dd class="col-sm-6">{{ "Yes" if result_view.run_success else "No" }}</dd>
+          {% endif %}
+          {% if result_view.visible_score is not none %}
+          <dt class="col-sm-6">Visible score</dt>
+          <dd class="col-sm-6">{{ result_view.visible_score }}</dd>
+          {% endif %}
+          {% if result_view.auto_score is not none %}
+          <dt class="col-sm-6">Automatic score</dt>
+          <dd class="col-sm-6">{{ result_view.auto_score }}</dd>
+          {% endif %}
+        </dl>
+        {% if result_view.message or result_view.visible_message or result_view.hidden_checks_applied %}
+        <hr />
+        <h3 class="h6 mb-2">Evaluation summary</h3>
+        <ul class="small text-muted mb-0">
+          {% if result_view.message %}
+          <li>{{ result_view.message }}</li>
+          {% endif %}
+          {% if result_view.visible_message %}
+          <li>Visible checks: {{ result_view.visible_message }}</li>
+          {% endif %}
+          {% if result_view.hidden_checks_applied %}
+          <li>Additional hidden checks were run, but their detailed breakdown is only visible to course staff.</li>
+          {% endif %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if latest_result %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Artifacts</h2>
+        <div class="d-grid gap-2">
+          <a class="btn btn-outline-primary" href="/student/submissions/{{ submission.id }}/artifacts/executed_notebook">Download executed notebook</a>
+          <a class="btn btn-outline-primary" href="/student/submissions/{{ submission.id }}/artifacts/html" target="_blank" rel="noreferrer">Open HTML</a>
+          <a class="btn btn-outline-secondary" href="/student/submissions/{{ submission.id }}/artifacts/stdout">Download stdout</a>
+          <a class="btn btn-outline-secondary" href="/student/submissions/{{ submission.id }}/artifacts/stderr">Download stderr</a>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-8">
+    {% if pending_teacher_review %}
+    <div class="alert alert-warning">
+      Your submission is in the manual review queue. LLM suggestions may appear below, but the final grade only becomes effective after teacher confirmation.
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Feedback</h2>
+        {% if feedback_items %}
+        <div class="list-group list-group-flush">
+          {% for item in feedback_items %}
+          <div class="list-group-item px-0">
+            <div class="d-flex justify-content-between">
+              <strong>{{ item.source.value }}</strong>
+              <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
+            </div>
+            <div class="small text-muted mb-1">Score suggestion: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}</div>
+            <div>{{ item.comment_text or "-" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No feedback available yet.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if submission.answer_text %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submitted content</h2>
+        <pre class="artifact-block">{{ submission.answer_text }}</pre>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if submission.original_filename %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Submitted file</h2>
+        <div class="small text-muted">{{ submission.original_filename }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if latest_result %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">stdout</h2>
+        <pre class="artifact-block">{{ stdout_text or "No stdout captured yet." }}</pre>
+      </div>
+    </div>
+
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">stderr</h2>
+        <pre class="artifact-block">{{ stderr_text or "No stderr captured yet." }}</pre>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

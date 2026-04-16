@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}{{ assignment.title }} - Assignment{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ assignment.title }}</h1>
+    <p class="text-muted mb-0">{{ assignment.course.title }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/student/courses/{{ assignment.course.id }}">{{ t("common.back_to_course") }}</a>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <dl class="row mb-0">
+      <dt class="col-sm-3">{{ t("common.status") }}</dt>
+      <dd class="col-sm-9">{{ assignment.status.value }}</dd>
+      <dt class="col-sm-3">{{ t("common.open_at") }}</dt>
+      <dd class="col-sm-9">{{ format_datetime(assignment.open_at) if assignment.open_at else "-" }}</dd>
+      <dt class="col-sm-3">{{ t("common.due_at") }}</dt>
+      <dd class="col-sm-9">{{ format_datetime(assignment.due_at) if assignment.due_at else "-" }}</dd>
+      <dt class="col-sm-3">{{ t("common.close_at") }}</dt>
+      <dd class="col-sm-9">{{ format_datetime(assignment.close_at) if assignment.close_at else "-" }}</dd>
+      <dt class="col-sm-3">{{ t("teacher.assignment.scoring_rule") }}</dt>
+      <dd class="col-sm-9">{{ assignment.default_scoring_rule.value }}</dd>
+    </dl>
+    {% if assignment.description %}
+    <hr />
+    <div class="markdown-like">{{ assignment.description | replace('\n', '<br />') | safe }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="h5 mb-3">{{ t("teacher.assignment.questions") }}</h2>
+    {% if assignment.questions %}
+    <div class="list-group">
+      {% for question in assignment.questions|sort(attribute='order_index') %}
+      <a class="list-group-item list-group-item-action" href="/student/questions/{{ question.id }}">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <strong>Q{{ question.order_index }}. {{ question.title }}</strong>
+            <div class="small text-muted">{{ question.question_type.value }} · {{ t("teacher.question.max_score") }} {{ question.max_score }}</div>
+          </div>
+          <span class="btn btn-sm btn-outline-primary">{{ t("common.open") }}</span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">{{ t("teacher.question.empty") }}</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

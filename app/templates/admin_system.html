@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("admin.system.title") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ t("admin.system.title") }}</h1>
+    <p class="text-muted mb-0">{{ t("admin.system.subtitle") }}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if can_manage_platform_users %}
+    <a class="btn btn-outline-secondary" href="/admin/users">{{ t("nav.user_management") }}</a>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="/admin/runtime-images">{{ t("admin.system.runtime_images") }}</a>
+    <a class="btn btn-outline-secondary" href="/admin/llm-configs">{{ t("admin.system.llm_configs") }}</a>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ t("admin.system.quick_stats") }}</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-7">{{ t("admin.system.users") }}</dt>
+          <dd class="col-sm-5">{{ stats.users }}</dd>
+          <dt class="col-sm-7">{{ t("admin.system.super_admins") }}</dt>
+          <dd class="col-sm-5">{{ stats.super_admins }}</dd>
+          <dt class="col-sm-7">{{ t("admin.system.admins") }}</dt>
+          <dd class="col-sm-5">{{ stats.admins }}</dd>
+          <dt class="col-sm-7">{{ t("admin.system.teachers") }}</dt>
+          <dd class="col-sm-5">{{ stats.teachers }}</dd>
+          <dt class="col-sm-7">{{ t("admin.system.students") }}</dt>
+          <dd class="col-sm-5">{{ stats.students }}</dd>
+          <dt class="col-sm-7">{{ t("admin.system.runtime_images") }}</dt>
+          <dd class="col-sm-5">{{ stats.runtime_images }}</dd>
+          <dt class="col-sm-7">{{ t("admin.system.llm_configs") }}</dt>
+          <dd class="col-sm-5">{{ stats.llm_configs }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ t("admin.system.raw_snapshot") }}</h2>
+        <pre class="artifact-block">{{ raw_stats_json }}</pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

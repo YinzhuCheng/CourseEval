@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("student.courses.title") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="row g-4 mb-4">
+  <div class="col-lg-7">
+    <div>
+      <h1 class="h3 mb-1">{{ t("student.courses.title") }}</h1>
+      <p class="text-muted mb-0">{{ t("student.courses.subtitle") }}</p>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ "Join a course" if current_locale == "en" else "加入课程" }}</h2>
+        <form method="post" action="/student/courses/join" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">{{ "Course join code" if current_locale == "en" else "课程加入码" }}</label>
+            <input class="form-control text-uppercase" name="join_code" required />
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-outline-primary" type="submit">{{ "Join course" if current_locale == "en" else "加入课程" }}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  {% if courses %}
+    {% for course in courses %}
+    <div class="col-md-6 col-xl-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h2 class="h5 mb-1">{{ course.code }}</h2>
+          <p class="fw-semibold mb-2">{{ course.title }}</p>
+          <p class="text-muted small">{{ course.description or t("student.courses.no_description") }}</p>
+          <a class="btn btn-primary" href="/student/courses/{{ course.id }}">{{ t("student.courses.open") }}</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="col-12">
+    <div class="empty-state">
+      <h2 class="h5">{{ t("student.courses.empty_title") }}</h2>
+      <p class="text-muted">{{ t("student.courses.empty_body") }}</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

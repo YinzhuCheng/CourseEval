@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+jinja2
+python-multipart
+redis
+rq
+email-validator
+itsdangerous
+nbformat
+PyPDF2

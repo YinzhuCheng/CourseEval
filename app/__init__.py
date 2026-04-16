@@ -1,0 +1,1 @@
+"""CourseEval application package."""
