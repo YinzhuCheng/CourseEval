@@ -8,8 +8,8 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
+import fitz
 import nbformat
-from PyPDF2 import PdfReader
 from redis import Redis
 from rq import Queue
 from sqlalchemy import and_, func, or_, select
@@ -21,6 +21,8 @@ from app.constants import (
     EvaluationTaskType,
     FeedbackSource,
     JobStatus,
+    LLMScope,
+    LLMTestStatus,
     MembershipStatus,
     QuestionType,
     ScoringRule,
@@ -30,8 +32,8 @@ from app.constants import (
 from app.db import SessionLocal, utcnow
 from app.services.llm import (
     generate_notebook_evaluation_with_llm,
+    generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
-    test_llm_connectivity,
 )
 from app.models import (
     Assignment,
@@ -44,6 +46,7 @@ from app.models import (
     Job,
     JobOutput,
     Notebook,
+    LLMConfig,
     PythonCodeQuestionConfig,
     Question,
     RuntimeImage,
@@ -53,6 +56,8 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+PYTHON_EVALUATION_QUEUE = "python-evaluation"
+LLM_EVALUATION_QUEUE_PREFIX = "llm-evaluation"
 
 
 @dataclass
@@ -62,12 +67,37 @@ class RunnerResult:
     summary_json: dict | None = None
 
 
-def _resolve_llm_config_for_question(question: Question):
-    return (
-        question.llm_config
-        or question.assignment.llm_config
-        or question.assignment.course.default_llm_config
+def _latest_platform_llm_config(db: Session) -> LLMConfig | None:
+    statement = (
+        select(LLMConfig)
+        .where(
+            LLMConfig.scope == LLMScope.PLATFORM,
+            LLMConfig.enabled.is_(True),
+            LLMConfig.last_test_status == LLMTestStatus.SUCCESS,
+        )
+        .order_by(LLMConfig.last_tested_at.desc(), LLMConfig.created_at.desc())
     )
+    return db.scalar(statement)
+
+
+def _resolve_llm_config_for_question(question: Question, db: Session | None = None) -> LLMConfig | None:
+    question_level = question.llm_config
+    if question_level is not None and question_level.enabled:
+        return question_level
+
+    assignment_level = question.assignment.llm_config
+    if assignment_level is not None and assignment_level.enabled:
+        return assignment_level
+
+    course = question.assignment.course
+    if not course.use_global_llm_default:
+        course_level = course.default_llm_config
+        if course_level is not None and course_level.enabled:
+            return course_level
+
+    if db is None:
+        return None
+    return _latest_platform_llm_config(db)
 
 
 def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
@@ -255,8 +285,38 @@ def redis_connection() -> Redis:
     return Redis.from_url(settings.redis_url)
 
 
-def get_queue() -> Queue:
-    return Queue(settings.rq_queue_name, connection=redis_connection())
+def get_queue(queue_name: str) -> Queue:
+    return Queue(queue_name, connection=redis_connection())
+
+
+def get_python_queue_name() -> str:
+    return settings.python_queue_name or PYTHON_EVALUATION_QUEUE
+
+
+def llm_queue_name_for_config(config: LLMConfig) -> str:
+    return f"{settings.llm_queue_prefix or LLM_EVALUATION_QUEUE_PREFIX}-{config.id}"
+
+
+def active_llm_queue_names(db: Session) -> list[str]:
+    configs = list(
+        db.scalars(
+            select(LLMConfig)
+            .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
+            .order_by(LLMConfig.id.asc())
+        ).all()
+    )
+    return [llm_queue_name_for_config(config) for config in configs]
+
+
+def active_llm_worker_specs(db: Session) -> list[tuple[str, int]]:
+    configs = list(
+        db.scalars(
+            select(LLMConfig)
+            .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
+            .order_by(LLMConfig.id.asc())
+        ).all()
+    )
+    return [(llm_queue_name_for_config(config), max(int(config.queue_concurrency or 1), 1)) for config in configs]
 
 
 def relative_to_data(path: Path) -> str:
@@ -287,6 +347,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _store_uploaded_file(*, user_id: int, question_id: int, original_filename: str, file_bytes: bytes) -> tuple[str, str]:
     suffix = Path(original_filename).suffix.lower() or ".bin"
     upload_dir = settings.uploads_dir / f"user-{user_id}" / f"question-{question_id}"
@@ -303,13 +371,27 @@ def _ensure_text_file_extension(filename: str, allowed_extensions: set[str]) -> 
     return extension
 
 
-def _extract_pdf_text(file_path: Path) -> str:
-    reader = PdfReader(file_path)
-    extracted_pages = [page.extract_text() or "" for page in reader.pages]
-    extracted_text = "\n\n".join(page_text.strip() for page_text in extracted_pages if page_text.strip()).strip()
-    if not extracted_text:
-        raise ValueError("The uploaded PDF does not contain extractable text. Phase 1 supports text-based PDFs only.")
-    return extracted_text
+def _render_pdf_pages_to_images(file_path: Path) -> list[Path]:
+    pdf_document = fitz.open(file_path)
+    if pdf_document.page_count <= 0:
+        raise ValueError("The uploaded PDF is empty.")
+
+    output_dir = file_path.parent / f"{file_path.stem}-pages"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rendered_pages: list[Path] = []
+    try:
+        for page_index in range(min(pdf_document.page_count, settings.pdf_review_max_pages)):
+            page = pdf_document.load_page(page_index)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image_path = output_dir / f"page-{page_index + 1}.png"
+            pixmap.save(image_path.as_posix())
+            rendered_pages.append(image_path)
+    finally:
+        pdf_document.close()
+
+    if not rendered_pages:
+        raise ValueError("The uploaded PDF could not be rendered into images.")
+    return rendered_pages
 
 
 def _render_notebook_as_text(file_path: Path, *, require_outputs: bool) -> str:
@@ -420,7 +502,7 @@ def create_legacy_job_with_upload(
 
 
 def enqueue_legacy_job(job_id: int) -> str:
-    rq_job = get_queue().enqueue(
+    rq_job = get_queue(get_python_queue_name()).enqueue(
         process_legacy_job,
         job_id,
         job_timeout=settings.execution_timeout_seconds + 90,
@@ -645,7 +727,7 @@ def _question_scoring_rule(question: Question) -> ScoringRule:
 
 def _is_late(question: Question) -> bool:
     now = _now()
-    due_at = question.assignment.due_at
+    due_at = _as_utc(question.assignment.due_at)
     if due_at is None:
         return False
     return now > due_at
@@ -654,11 +736,14 @@ def _is_late(question: Question) -> bool:
 def _submission_window_open(question: Question) -> tuple[bool, str | None]:
     now = _now()
     assignment = question.assignment
-    if assignment.open_at and now < assignment.open_at:
+    open_at = _as_utc(assignment.open_at)
+    due_at = _as_utc(assignment.due_at)
+    close_at = _as_utc(assignment.close_at)
+    if open_at and now < open_at:
         return False, "Submission window has not opened yet."
-    if assignment.close_at and now > assignment.close_at:
+    if close_at and now > close_at:
         return False, "Submission window is closed."
-    if assignment.due_at and now > assignment.due_at and not assignment.allow_late:
+    if due_at and now > due_at and not assignment.allow_late:
         return False, "Late submissions are not allowed for this assignment."
     return True, None
 
@@ -862,8 +947,10 @@ def create_file_submission(
         file_bytes=file_bytes,
     )
     stored_path = absolute_data_path(stored_relative_path)
+    pdf_page_paths: list[Path] = []
     if question.question_type == QuestionType.PDF_LLM:
-        extracted_text = _extract_pdf_text(stored_path)
+        pdf_page_paths = _render_pdf_pages_to_images(stored_path)
+        extracted_text = f"PDF rendered into {len(pdf_page_paths)} page image(s) for multimodal LLM review."
     else:
         extracted_text = _extract_formatted_text(
             stored_path,
@@ -932,7 +1019,7 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
         target_func = process_submission_evaluation
         timeout_seconds = settings.execution_timeout_seconds + 120
 
-    rq_job = get_queue().enqueue(
+    rq_job = get_queue(get_python_queue_name()).enqueue(
         target_func,
         submission_id,
         task.id,
@@ -964,7 +1051,10 @@ def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
     if task is None:
         raise ValueError("Short-answer LLM task not found.")
 
-    rq_job = get_queue().enqueue(
+    llm_config = _resolve_llm_config_for_question(submission.question, db)
+    if llm_config is None:
+        raise ValueError("No enabled LLM config available.")
+    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
         process_short_answer_llm_evaluation,
         submission_id,
         task.id,
@@ -994,7 +1084,10 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
     if task is None:
         raise ValueError("File LLM task not found.")
 
-    rq_job = get_queue().enqueue(
+    llm_config = _resolve_llm_config_for_question(submission.question, db)
+    if llm_config is None:
+        raise ValueError("No enabled LLM config available.")
+    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
         process_file_llm_evaluation,
         submission_id,
         task.id,
@@ -1556,7 +1649,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         if submission is None or task is None:
             return
 
-        llm_config = _resolve_llm_config_for_question(submission.question)
+        llm_config = _resolve_llm_config_for_question(submission.question, db)
         if llm_config is None or not llm_config.enabled:
             task.status = EvaluationTaskStatus.FAILED
             task.error_message = "No enabled LLM config available."
@@ -1617,7 +1710,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         if submission is None or task is None:
             return
 
-        llm_config = _resolve_llm_config_for_question(submission.question)
+        llm_config = _resolve_llm_config_for_question(submission.question, db)
         question_config = _file_question_config(submission.question)
         if llm_config is None or not llm_config.enabled or question_config is None:
             task.status = EvaluationTaskStatus.FAILED
@@ -1630,15 +1723,31 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         task.started_at = utcnow()
         db.commit()
 
-        result = generate_short_answer_evaluation(
-            llm_config,
-            question_title=submission.question.title,
-            question_description=submission.question.description or "",
-            rubric_text=question_config.rubric_text,
-            reference_answer_text=question_config.reference_answer_text,
-            answer_text=submission.answer_text or "",
-            max_score=float(submission.question.max_score),
-        )
+        if submission.submission_type == QuestionType.PDF_LLM and submission.stored_file_path:
+            pdf_path = absolute_data_path(submission.stored_file_path)
+            page_dir = pdf_path.parent / f"{pdf_path.stem}-pages"
+            page_paths = sorted(page_dir.glob("page-*.png"))
+            if not page_paths:
+                page_paths = _render_pdf_pages_to_images(pdf_path)
+            result = generate_file_evaluation_from_images(
+                llm_config,
+                question_title=submission.question.title,
+                question_description=submission.question.description or "",
+                rubric_text=question_config.rubric_text,
+                reference_answer_text=question_config.reference_answer_text,
+                image_paths=page_paths,
+                max_score=float(submission.question.max_score),
+            )
+        else:
+            result = generate_short_answer_evaluation(
+                llm_config,
+                question_title=submission.question.title,
+                question_description=submission.question.description or "",
+                rubric_text=question_config.rubric_text,
+                reference_answer_text=question_config.reference_answer_text,
+                answer_text=submission.answer_text or "",
+                max_score=float(submission.question.max_score),
+            )
 
         db.add(
             Feedback(

@@ -1,3 +1,4 @@
+import base64
 import json
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -23,12 +24,16 @@ class LLMGenerationResult:
     raw_response: dict | None
 
 
+@dataclass(frozen=True)
+class ImageInput:
+    mime_type: str
+    data: bytes
+
+
 def mask_api_key(api_key: str | None) -> str:
     if not api_key:
         return ""
-    if len(api_key) <= 8:
-        return "*" * len(api_key)
-    return f"{api_key[:4]}...{api_key[-4:]}"
+    return "•" * 12
 
 
 def test_llm_connectivity(config: LLMConfig) -> LLMTestResult:
@@ -60,6 +65,23 @@ def generate_text(config: LLMConfig, prompt: str, system_prompt: str | None = No
         return _generate_gemini(config, prompt, system_prompt)
     if config.provider_type == LLMProvider.CLAUDE:
         return _generate_claude(config, prompt, system_prompt)
+    raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
+
+
+def generate_multimodal(
+    config: LLMConfig,
+    *,
+    prompt: str,
+    system_prompt: str | None = None,
+    images: list[ImageInput] | None = None,
+) -> LLMGenerationResult:
+    image_inputs = images or []
+    if config.provider_type == LLMProvider.OPENAI_COMPATIBLE:
+        return _generate_openai_compatible(config, prompt, system_prompt, images=image_inputs)
+    if config.provider_type == LLMProvider.GEMINI:
+        return _generate_gemini(config, prompt, system_prompt, images=image_inputs)
+    if config.provider_type == LLMProvider.CLAUDE:
+        return _generate_claude(config, prompt, system_prompt, images=image_inputs)
     raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
 
 
@@ -158,14 +180,68 @@ def generate_short_answer_evaluation(
     return parsed
 
 
-def _generate_openai_compatible(config: LLMConfig, prompt: str, system_prompt: str | None) -> LLMGenerationResult:
+def generate_file_evaluation_from_images(
+    config: LLMConfig,
+    *,
+    question_title: str,
+    question_description: str,
+    rubric_text: str,
+    reference_answer_text: str,
+    max_score: float,
+    images: list[ImageInput],
+) -> dict:
+    if not images:
+        raise ValueError("At least one rendered PDF page image is required for multimodal grading.")
+    system_prompt = (
+        "You are grading a student's PDF submission from rendered page images. "
+        "Produce a JSON object with keys `score_suggestion` and `comment_text`. "
+        "The score must be between 0 and the maximum score."
+    )
+    prompt = (
+        f"Question title: {question_title}\n"
+        f"Question description:\n{question_description}\n\n"
+        f"Reference answer:\n{reference_answer_text or 'No reference answer provided.'}\n\n"
+        f"Rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
+        f"Maximum score: {max_score}\n\n"
+        "The student's PDF has been rendered into page images attached to this request. "
+        "Review the pages and return valid JSON only."
+    )
+    raw = generate_multimodal(config, prompt=prompt, system_prompt=system_prompt, images=images).content
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LLM did not return valid JSON: {raw}") from exc
+    if "score_suggestion" not in parsed or "comment_text" not in parsed:
+        raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
+    return parsed
+
+
+def _generate_openai_compatible(
+    config: LLMConfig,
+    prompt: str,
+    system_prompt: str | None,
+    images: list[ImageInput] | None = None,
+) -> LLMGenerationResult:
     if not config.base_url:
         raise ValueError("Base URL is required for OpenAI-compatible providers.")
     endpoint = config.base_url.rstrip("/") + "/chat/completions"
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    if images:
+        content_parts: list[dict] = [{"type": "text", "text": prompt}]
+        for image in images:
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{image.mime_type};base64,{base64.b64encode(image.data).decode('ascii')}"
+                    },
+                }
+            )
+        messages.append({"role": "user", "content": content_parts})
+    else:
+        messages.append({"role": "user", "content": prompt})
     payload = {
         "model": config.model_name,
         "messages": messages,
@@ -185,19 +261,40 @@ def _generate_openai_compatible(config: LLMConfig, prompt: str, system_prompt: s
     if not choices:
         raise ValueError("OpenAI-compatible provider returned no choices.")
     content = choices[0].get("message", {}).get("content")
+    if isinstance(content, list):
+        content = "\n".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") in {"text", "output_text"}
+        )
     if not content:
         raise ValueError("OpenAI-compatible provider returned an empty response.")
     return LLMGenerationResult(content=content.strip(), raw_response=response)
 
 
-def _generate_gemini(config: LLMConfig, prompt: str, system_prompt: str | None) -> LLMGenerationResult:
+def _generate_gemini(
+    config: LLMConfig,
+    prompt: str,
+    system_prompt: str | None,
+    images: list[ImageInput] | None = None,
+) -> LLMGenerationResult:
     base_url = config.base_url.rstrip("/") if config.base_url else "https://generativelanguage.googleapis.com"
     endpoint = (
         f"{base_url}/v1beta/models/{config.model_name}:generateContent?key={config.api_key}"
     )
     prompt_text = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+    parts: list[dict] = [{"text": prompt_text}]
+    for image in images or []:
+        parts.append(
+            {
+                "inline_data": {
+                    "mime_type": image.mime_type,
+                    "data": base64.b64encode(image.data).decode("ascii"),
+                }
+            }
+        )
     payload = {
-        "contents": [{"parts": [{"text": prompt_text}]}],
+        "contents": [{"parts": parts}],
         "generationConfig": {
             "temperature": _temperature_value(config.temperature),
             "maxOutputTokens": config.max_tokens,
@@ -215,15 +312,33 @@ def _generate_gemini(config: LLMConfig, prompt: str, system_prompt: str | None) 
     return LLMGenerationResult(content=content, raw_response=response)
 
 
-def _generate_claude(config: LLMConfig, prompt: str, system_prompt: str | None) -> LLMGenerationResult:
+def _generate_claude(
+    config: LLMConfig,
+    prompt: str,
+    system_prompt: str | None,
+    images: list[ImageInput] | None = None,
+) -> LLMGenerationResult:
     if not config.base_url:
         raise ValueError("Base URL is required for Claude providers.")
     endpoint = config.base_url.rstrip("/") + "/messages"
+    message_content: list[dict] = [{"type": "text", "text": prompt}]
+    for image in images or []:
+        media_type = image.mime_type.split("/", 1)[-1].lower()
+        message_content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.mime_type if image.mime_type.startswith("image/") else f"image/{media_type}",
+                    "data": base64.b64encode(image.data).decode("ascii"),
+                },
+            }
+        )
     payload = {
         "model": config.model_name,
         "max_tokens": config.max_tokens,
         "temperature": _temperature_value(config.temperature),
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": message_content}],
     }
     if system_prompt:
         payload["system"] = system_prompt

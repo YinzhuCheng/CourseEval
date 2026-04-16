@@ -10,3 +10,4 @@ email-validator
 itsdangerous
 nbformat
 PyPDF2
+pymupdf

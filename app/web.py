@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
@@ -20,7 +20,9 @@ def format_datetime(value: datetime | None, pattern: str = "%Y-%m-%d %H:%M:%S") 
     if value is None:
         return "-"
     if value.tzinfo is None:
-        value = value.replace(tzinfo=display_timezone)
+        # Legacy rows may store UTC timestamps without tzinfo. Interpret naive
+        # values as UTC so rendered times stay aligned with real-world Beijing time.
+        value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(display_timezone).strftime(pattern)
 
 

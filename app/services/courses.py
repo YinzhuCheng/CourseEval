@@ -136,6 +136,7 @@ def get_course_for_teacher(db: Session, course_id: int, teacher_user_id: int) ->
         .options(
             joinedload(Course.assignments).joinedload(Assignment.questions),
             joinedload(Course.members).joinedload(CourseMember.user),
+            joinedload(Course.default_llm_config),
         )
         .join(CourseMember, CourseMember.course_id == Course.id)
         .where(
@@ -233,6 +234,7 @@ def get_course_for_staff(db: Session, course_id: int, user_id: int) -> Course | 
         .options(
             joinedload(Course.assignments).joinedload(Assignment.questions),
             joinedload(Course.members).joinedload(CourseMember.user),
+            joinedload(Course.default_llm_config),
         )
         .join(CourseMember, CourseMember.course_id == Course.id)
         .where(
@@ -269,6 +271,7 @@ def get_course_for_teacher(db: Session, course_id: int, user_id: int) -> Course 
         .options(
             joinedload(Course.assignments).joinedload(Assignment.questions),
             joinedload(Course.members).joinedload(CourseMember.user),
+            joinedload(Course.default_llm_config),
         )
         .join(CourseMember, CourseMember.course_id == Course.id)
         .where(
@@ -823,6 +826,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 "栈常见操作有 push/pop/top，队列常见操作有 enqueue/dequeue/front；"
                 "应用场景可举函数调用栈、任务排队等。"
             ),
+            llm_suggestion_enabled=True,
             teacher_confirmation_required=True,
             notebook_outputs_required=False,
             updated_at=utcnow(),
@@ -849,6 +853,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 "顺序表支持 O(1) 随机访问，但中间插入删除通常为 O(n)；"
                 "链表随机访问为 O(n)，但已定位节点后插入删除可达 O(1)。"
             ),
+            llm_suggestion_enabled=True,
             teacher_confirmation_required=True,
             notebook_outputs_required=True,
             updated_at=utcnow(),

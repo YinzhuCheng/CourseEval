@@ -28,7 +28,6 @@ from app.services.submissions import (
     create_notebook_submission,
     create_python_code_submission,
     create_short_answer_submission,
-    enqueue_file_llm_evaluation,
     enqueue_submission_evaluation,
     get_submission_for_student,
     is_submission_pending_teacher_review,
@@ -318,7 +317,6 @@ async def submit_file_question(
             original_filename=filename,
             file_bytes=file_bytes,
         )
-        enqueue_file_llm_evaluation(db, submission.id)
         push_flash(
             request,
             choose_text(

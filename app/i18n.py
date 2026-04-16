@@ -22,8 +22,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nav.register": "Register",
         "nav.logout": "Logout",
         "nav.signed_in_as": "Signed in as {username}",
-        "hero.title": "Clear Python evaluation, clearer guidance",
-        "hero.subtitle": "Native Python questions run .py files directly. .ipynb files are supported through the file and LLM-reviewed workflow.",
+        "hero.title": "CourseEval: an AI-assisted teaching platform",
+        "hero.subtitle": "",
         "locale.switch_to_en": "English",
         "locale.switch_to_zh": "中文",
         "register.title": "Create your account",
@@ -189,6 +189,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.llm.timeout": "Timeout",
         "admin.llm.max_tokens": "Max tokens",
         "admin.llm.temperature": "Temperature",
+        "admin.llm.queue_concurrency": "Queue concurrency",
         "admin.llm.submit": "Create config",
         "admin.llm.list": "Existing configs",
         "admin.llm.empty": "No LLM configs yet.",
@@ -197,6 +198,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.llm.column.model": "Model",
         "admin.llm.column.status": "Status",
         "admin.llm.column.api_key": "API Key",
+        "admin.llm.column.concurrency": "Concurrency",
         "admin.llm.column.last_test": "Last test",
         "admin.llm.test": "Test",
         "admin.llm.no_test": "No connectivity test has been run yet.",
@@ -222,8 +224,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nav.register": "注册",
         "nav.logout": "退出登录",
         "nav.signed_in_as": "当前登录：{username}",
-        "hero.title": "原生 Python 评测，更清晰的提交流程",
-        "hero.subtitle": "原生 Python 代码题会直接执行 .py 文件；.ipynb 文件通过文件与 LLM 评测流程支持。",
+        "hero.title": "CourseEval：一个AI辅助教学平台",
+        "hero.subtitle": "",
         "locale.switch_to_en": "English",
         "locale.switch_to_zh": "中文",
         "register.title": "创建账号",
@@ -389,6 +391,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.llm.timeout": "超时",
         "admin.llm.max_tokens": "最大 Tokens",
         "admin.llm.temperature": "温度",
+        "admin.llm.queue_concurrency": "队列并发数",
         "admin.llm.submit": "创建配置",
         "admin.llm.list": "已有配置",
         "admin.llm.empty": "还没有 LLM 配置。",
@@ -397,6 +400,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin.llm.column.model": "模型",
         "admin.llm.column.status": "状态",
         "admin.llm.column.api_key": "API Key",
+        "admin.llm.column.concurrency": "并发数",
         "admin.llm.column.last_test": "最近测试",
         "admin.llm.test": "测试",
         "admin.llm.no_test": "尚未执行连通性测试。",
@@ -429,7 +433,12 @@ def set_locale(request: Request, locale: str) -> str:
 
 def translate(locale: str, key: str, **kwargs) -> str:
     catalog = TRANSLATIONS.get(locale, TRANSLATIONS[Locale.EN.value])
-    template = catalog.get(key) or TRANSLATIONS[Locale.EN.value].get(key) or key
+    if key in catalog:
+        template = catalog[key]
+    elif key in TRANSLATIONS[Locale.EN.value]:
+        template = TRANSLATIONS[Locale.EN.value][key]
+    else:
+        template = key
     return template.format(**kwargs)
 
 

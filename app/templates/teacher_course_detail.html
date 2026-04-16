@@ -142,6 +142,41 @@
       </div>
     </div>
 
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Course LLM default", "课程默认 LLM") }}</h2>
+        <p class="small text-muted">
+          {{ lx(
+            "By default, courses follow the latest platform LLM configuration that has passed connectivity testing. You can also pin this course to a specific configuration below.",
+            "默认情况下，课程会跟随平台最新测试成功的 LLM 配置。你也可以在下方将本课程固定到某个指定配置。"
+          ) }}
+        </p>
+        {% if can_manage_course %}
+        <form method="post" action="/teacher/courses/{{ course.id }}/llm-config" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM config", "LLM 配置") }}</label>
+            <select class="form-select" name="llm_config_id">
+              <option value="">{{ lx("Follow latest platform-tested default", "跟随平台最新测试成功默认配置") }}</option>
+              {% for config in available_llm_configs %}
+              <option
+                value="{{ config.id }}"
+                {% if not course.use_global_llm_default and course.default_llm_config_id == config.id %}selected{% endif %}
+              >
+                {{ config.name }} · {{ config.model_name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-outline-primary" type="submit">{{ lx("Save LLM setting", "保存 LLM 设置") }}</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0">{{ lx("Only teachers can change the course LLM setting.", "只有教师可以修改课程 LLM 设置。") }}</p>
+        {% endif %}
+      </div>
+    </div>
+
     <div class="card shadow-sm">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ lx("Course members", "课程成员") }}</h2>

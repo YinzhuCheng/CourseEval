@@ -287,6 +287,43 @@ SMTP_USE_SSL=false
 
 If SMTP is missing or delivery fails, email-based registrations stay pending until email sending works and the verification email is resent. Invitation-code registrations are not affected as long as `REGISTRATION_INVITE_CODE` is configured.
 
+## Queue and LLM deployment notes
+
+The platform now separates evaluation traffic into:
+
+- a dedicated Python evaluation queue
+- per-LLM-config queues for LLM review tasks
+
+Relevant environment variables:
+
+```bash
+PYTHON_QUEUE_NAME=python-evaluations
+LLM_QUEUE_PREFIX=llm-evaluations
+PDF_REVIEW_MAX_PAGES=8
+```
+
+### Worker behavior
+
+- Python Docker grading runs on its own queue
+- Each enabled LLM config has its own queue
+- `queue_concurrency` is configured per LLM config record in the admin UI
+- `worker.py` now works as a lightweight worker manager and starts:
+  - 1 Python worker process
+  - N LLM worker processes per enabled config, where N is that config's concurrency
+
+### Global default LLM behavior
+
+- The latest **platform** LLM config that has passed connectivity testing becomes the default for all courses still following the global platform default
+- Teachers can override a specific course to use a chosen enabled LLM config from the course detail page
+
+### PDF review behavior
+
+- PDF review no longer relies on OCR or text extraction
+- Uploaded PDFs are rendered page-by-page into images
+- Those page images are sent to the configured multimodal LLM for grading
+- `PDF_REVIEW_MAX_PAGES` limits how many pages are rendered per submission
+- Use a multimodal-capable model for PDF review; text-only models may fail for these tasks
+
 ## Data model notes
 
 Main teaching-domain tables include:
