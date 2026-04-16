@@ -235,15 +235,21 @@ python worker.py
 - Upload size limit: 5 MB
 - Intended deployment profile: small single-machine Ubuntu setup
 
-## Email verification deployment notes
+## Registration deployment notes
 
-Public registration now uses a two-step flow:
+Public registration now supports two paths:
 
-1. The user submits the registration form
-2. The system creates a pending account with `email_verified = false`
-3. The system sends a verification email containing `/verify-email?token=...`
-4. The user clicks the email link
-5. The account becomes active and can sign in
+1. **Email verification registration**
+   - The user submits the registration form with an email address
+   - The system creates a pending account with `email_verified = false`
+   - The system sends a verification email containing `/verify-email?token=...`
+   - The user clicks the email link
+   - The account becomes active and can sign in
+2. **Invitation-code registration**
+   - The user selects invitation-code registration
+   - The server validates the configured invitation code
+   - The account becomes active immediately
+   - If the user leaves the email blank, the system generates an internal placeholder email and the user can still sign in with the username
 
 ### Required environment variables
 
@@ -251,6 +257,8 @@ Set these values in `.env` for production:
 
 ```bash
 APP_BASE_URL=https://your-domain.example.com
+REGISTRATION_INVITE_CODE=your-server-side-invite-code
+INTERNAL_EMAIL_DOMAIN=invite.local
 EMAIL_VERIFICATION_EXPIRE_HOURS=24
 
 SMTP_HOST=smtp.example.com
@@ -266,7 +274,10 @@ SMTP_USE_SSL=false
 ### Deployment checklist
 
 - `APP_BASE_URL` must be the externally accessible HTTPS origin used by end users, otherwise verification links may point to an internal address
-- Configure a working SMTP account before enabling public registration in production
+- Configure a working SMTP account if you want email-verification registration to work in production
+- Set `REGISTRATION_INVITE_CODE` if you want to allow the faster invitation-code registration path
+- Keep the invitation code only on the server side; do not expose it in client-side assets or public docs
+- `INTERNAL_EMAIL_DOMAIN` should use a reserved internal-only domain because it is used for auto-generated placeholder emails when invite registrations skip the email field
 - Use HTTPS in front of the FastAPI app so email verification links and session cookies travel securely
 - Make sure the email sender domain and mailbox are allowed by your mail provider
 - If you run multiple app instances, they must share the same database so verification tokens stay valid across nodes
@@ -274,7 +285,7 @@ SMTP_USE_SSL=false
 
 ### Behavior when SMTP is not configured
 
-If SMTP is missing or delivery fails, the account is still created in a pending state, but the user cannot complete registration until email sending works and the verification email is resent.
+If SMTP is missing or delivery fails, email-based registrations stay pending until email sending works and the verification email is resent. Invitation-code registrations are not affected as long as `REGISTRATION_INVITE_CODE` is configured.
 
 ## Data model notes
 

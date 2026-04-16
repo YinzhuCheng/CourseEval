@@ -8,17 +8,20 @@ from starlette.responses import RedirectResponse
 from app.auth import (
     assign_user_role,
     can_verify_email_token,
+    generate_internal_email_address,
     initial_email_verification_state,
     find_user_by_login,
     get_current_user,
     has_super_admin,
     hash_password,
+    invite_registration_enabled,
     landing_path_for_user,
     login_user,
     logout_user,
     mark_email_verified,
     push_flash,
     refresh_email_verification,
+    valid_registration_invite_code,
     verify_password,
 )
 from app.constants import AccountRole, PlatformRole, UserRole
@@ -37,10 +40,14 @@ def _register_form_data(
     *,
     username: str = "",
     email: str = "",
+    registration_mode: str = "email",
+    invite_code: str = "",
 ) -> dict[str, str]:
     return {
         "username": username,
         "email": email,
+        "registration_mode": registration_mode,
+        "invite_code": invite_code,
     }
 
 
@@ -59,6 +66,7 @@ def _render_register_form(
         {
             "form_data": form_data or _register_form_data(),
             "register_error": register_error,
+            "invite_registration_enabled": invite_registration_enabled(),
         },
         status_code=status_code,
     )
@@ -109,25 +117,28 @@ def register_pending_page(
 def register_user(
     request: Request,
     username: str = Form(...),
-    email: str = Form(...),
+    email: str = Form(""),
+    registration_mode: str = Form("email"),
+    invite_code: str = Form(""),
     password: str = Form(...),
     confirm_password: str = Form(...),
     db: Session = Depends(get_db),
 ):
     username = username.strip()
     email = email.strip().lower()
+    registration_mode = registration_mode.strip().lower()
+    invite_code = invite_code.strip()
+    if registration_mode not in {"email", "invite"}:
+        registration_mode = "email"
     form_data = _register_form_data(
         username=username,
         email=email,
+        registration_mode=registration_mode,
+        invite_code=invite_code,
     )
 
-    if not username or not email or not password or not confirm_password:
+    if not username or not password or not confirm_password:
         push_flash(request, t(request, "flash.all_fields_required"), "danger")
-        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
-    try:
-        email = validate_email(email, check_deliverability=False).normalized
-    except EmailNotValidError:
-        push_flash(request, t(request, "flash.invalid_email"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
     if password != confirm_password:
         push_flash(request, t(request, "flash.password_mismatch"), "danger")
@@ -136,14 +147,67 @@ def register_user(
         push_flash(request, t(request, "flash.password_length"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
-    existing_user = db.scalar(select(User).where(or_(User.username == username, User.email == email)))
+    normalized_email = ""
+    if email:
+        try:
+            normalized_email = validate_email(email, check_deliverability=False).normalized
+        except EmailNotValidError:
+            push_flash(request, t(request, "flash.invalid_email"), "danger")
+            return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+    elif registration_mode == "email":
+        push_flash(request, t(request, "flash.email_required_for_email_registration"), "danger")
+        return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+
+    if registration_mode == "invite":
+        if not invite_registration_enabled():
+            push_flash(request, t(request, "flash.invite_registration_disabled"), "danger")
+            return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+        if not invite_code:
+            push_flash(request, t(request, "flash.invite_code_required"), "danger")
+            return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+        if not valid_registration_invite_code(invite_code):
+            push_flash(request, t(request, "flash.invalid_invite_code"), "danger")
+            return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
+
+    existing_user_query = select(User).where(User.username == username)
+    if normalized_email:
+        existing_user_query = select(User).where(or_(User.username == username, User.email == normalized_email))
+    existing_user = db.scalar(existing_user_query)
     if existing_user:
         push_flash(request, t(request, "flash.username_email_exists"), "danger")
         return _render_register_form(request, db, form_data=form_data, status_code=400, register_error=True)
 
+    if registration_mode == "invite":
+        invite_email = normalized_email
+        while not invite_email:
+            generated_email = generate_internal_email_address()
+            if db.scalar(select(User.id).where(User.email == generated_email)) is None:
+                invite_email = generated_email
+        user = User(
+            username=username,
+            email=invite_email,
+            password_hash=hash_password(password),
+            account_role=AccountRole.STUDENT,
+            platform_role=PlatformRole.USER,
+            email_verified=True,
+            email_verification_token=None,
+            email_verification_sent_at=None,
+        )
+        if not has_super_admin(db, require_verified=True):
+            assign_user_role(user, UserRole.SUPER_ADMIN)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        bootstrap_sample_data(db, user)
+        db.commit()
+        db.refresh(user)
+        login_user(request, user)
+        push_flash(request, t(request, "flash.invite_registration_success"), "success")
+        return RedirectResponse(url=landing_path_for_user(user), status_code=303)
+
     user = User(
         username=username,
-        email=email,
+        email=normalized_email,
         password_hash=hash_password(password),
         account_role=AccountRole.STUDENT,
         platform_role=PlatformRole.USER,

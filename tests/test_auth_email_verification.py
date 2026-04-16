@@ -1,5 +1,4 @@
 import unittest
-from urllib.parse import urlparse, parse_qs
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -40,10 +39,14 @@ class AuthEmailVerificationTests(unittest.TestCase):
         self.client = TestClient(app)
         self.settings = get_settings()
         self.original_base_url = self.settings.app_base_url
+        self.original_registration_invite_code = self.settings.registration_invite_code
+        self.original_internal_email_domain = self.settings.internal_email_domain
 
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
         object.__setattr__(self.settings, "app_base_url", self.original_base_url)
+        object.__setattr__(self.settings, "registration_invite_code", self.original_registration_invite_code)
+        object.__setattr__(self.settings, "internal_email_domain", self.original_internal_email_domain)
         self.engine.dispose()
 
     def _db_user(self, email: str) -> User | None:
@@ -181,6 +184,55 @@ class AuthEmailVerificationTests(unittest.TestCase):
         pending_page = self.client.get("/register/pending?email=mailuser@example.com")
         self.assertIn("mailuser@example.com", pending_page.text)
         self.assertIsNotNone(verification_token)
+
+    def test_invite_registration_can_activate_without_email(self) -> None:
+        object.__setattr__(self.settings, "registration_invite_code", "server-invite")
+        object.__setattr__(self.settings, "internal_email_domain", "internal.local")
+
+        response = self.client.post(
+            "/register",
+            data={
+                "registration_mode": "invite",
+                "username": "invited",
+                "email": "",
+                "invite_code": "server-invite",
+                "password": "password123",
+                "confirm_password": "password123",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/system")
+
+        user = self._db_user_by_username("invited")
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertTrue(user.email_verified)
+        self.assertIsNone(user.email_verification_token)
+        self.assertTrue(user.email.endswith("@internal.local"))
+
+    def test_invalid_invite_code_is_rejected(self) -> None:
+        object.__setattr__(self.settings, "registration_invite_code", "server-invite")
+
+        response = self.client.post(
+            "/register",
+            data={
+                "registration_mode": "invite",
+                "username": "badinvite",
+                "email": "",
+                "invite_code": "wrong-code",
+                "password": "password123",
+                "confirm_password": "password123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(self._db_user_by_username("badinvite"))
+
+    def _db_user_by_username(self, username: str) -> User | None:
+        with self.session_factory() as db:
+            return db.scalar(select(User).where(User.username == username))
 
 
 if __name__ == "__main__":

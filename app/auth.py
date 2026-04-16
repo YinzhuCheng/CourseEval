@@ -120,6 +120,25 @@ def generate_email_verification_token() -> str:
     return secrets.token_urlsafe(EMAIL_VERIFICATION_TOKEN_BYTES)
 
 
+def invite_registration_enabled() -> bool:
+    return bool(get_settings().registration_invite_code)
+
+
+def valid_registration_invite_code(invite_code: str) -> bool:
+    configured_code = get_settings().registration_invite_code
+    normalized_invite_code = invite_code.strip()
+    return bool(
+        configured_code
+        and normalized_invite_code
+        and hmac.compare_digest(normalized_invite_code, configured_code)
+    )
+
+
+def generate_internal_email_address() -> str:
+    domain = get_settings().internal_email_domain.strip() or "invite.local"
+    return f"invite-{secrets.token_hex(12)}@{domain}"
+
+
 def initial_email_verification_state() -> dict[str, object]:
     return {
         "email_verified": False,

@@ -22,6 +22,8 @@ class Settings:
     app_name: str
     secret_key: str
     app_base_url: str
+    registration_invite_code: str
+    internal_email_domain: str
     database_url: str
     redis_url: str
     rq_queue_name: str
@@ -59,6 +61,8 @@ def get_settings() -> Settings:
         app_name=os.getenv("APP_NAME", "CourseEval"),
         secret_key=os.getenv("SECRET_KEY", "change-me-in-production"),
         app_base_url=os.getenv("APP_BASE_URL", "").strip(),
+        registration_invite_code=os.getenv("REGISTRATION_INVITE_CODE", "").strip(),
+        internal_email_domain=os.getenv("INTERNAL_EMAIL_DOMAIN", "invite.local").strip() or "invite.local",
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{(data_dir / 'app.db').as_posix()}"),
         redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         rq_queue_name=os.getenv("RQ_QUEUE_NAME", "notebook-jobs"),
