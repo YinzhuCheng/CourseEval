@@ -35,7 +35,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">{{ t("admin.llm.api_key") }}</label>
-            <input class="form-control" name="api_key" />
+            <input class="form-control" name="api_key" type="password" autocomplete="off" />
           </div>
           <div class="col-12">
             <label class="form-label">{{ t("admin.llm.model_name") }}</label>
@@ -52,6 +52,10 @@
           <div class="col-md-4">
             <label class="form-label">{{ t("admin.llm.temperature") }}</label>
             <input class="form-control" name="temperature" value="0.2" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">{{ t("admin.llm.queue_concurrency") }}</label>
+            <input class="form-control" type="number" min="1" name="queue_concurrency" value="1" />
           </div>
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ t("admin.llm.submit") }}</button>
@@ -75,6 +79,7 @@
                 <th>{{ t("admin.llm.column.model") }}</th>
                 <th>{{ t("admin.llm.column.status") }}</th>
                 <th>{{ t("admin.llm.column.api_key") }}</th>
+                <th>{{ t("admin.llm.column.concurrency") }}</th>
                 <th>{{ t("admin.llm.column.last_test") }}</th>
                 <th></th>
               </tr>
@@ -86,7 +91,8 @@
                 <td>{{ config.provider_type.value }}</td>
                 <td>{{ config.model_name }}</td>
                 <td>{{ config.last_test_status.value }}</td>
-                <td class="small text-muted">{{ config.api_key[:4] ~ "..." ~ config.api_key[-4:] if config.api_key and config.api_key|length > 8 else ("*" * (config.api_key|length) if config.api_key else "-") }}</td>
+                <td class="small text-muted">{{ "••••••••••••" if config.api_key else "-" }}</td>
+                <td>{{ config.queue_concurrency }}</td>
                 <td>{{ format_datetime(config.last_tested_at) if config.last_tested_at else "-" }}</td>
                 <td class="text-end">
                   <form method="post" action="/admin/llm-configs/{{ config.id }}/test">
@@ -95,7 +101,7 @@
                 </td>
               </tr>
               <tr>
-                <td colspan="6" class="small text-muted">
+                <td colspan="8" class="small text-muted">
                   {{ config.last_test_message or t("admin.llm.no_test") }}
                 </td>
               </tr>

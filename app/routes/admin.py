@@ -194,6 +194,7 @@ def admin_create_llm_config(
     timeout_seconds: int = Form(30),
     max_tokens: int = Form(512),
     temperature: str = Form("0.2"),
+    queue_concurrency: int = Form(1),
     db: Session = Depends(get_db),
 ):
     try:
@@ -213,6 +214,7 @@ def admin_create_llm_config(
         timeout_seconds=timeout_seconds,
         max_tokens=max_tokens,
         temperature=temperature.strip(),
+        queue_concurrency=max(queue_concurrency, 1),
         created_by=admin_user.id,
     )
     db.add(config)

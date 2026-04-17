@@ -112,19 +112,6 @@
       </div>
     </div>
 
-    {% if latest_result %}
-    <div class="card shadow-sm mt-4">
-      <div class="card-body">
-        <h2 class="h5 mb-3">{{ lx("Artifacts", "评测产物") }}</h2>
-        <div class="d-grid gap-2">
-          <a class="btn btn-outline-primary" href="/student/submissions/{{ submission.id }}/artifacts/executed_notebook">{{ lx("Download executed notebook", "下载执行后的 Notebook") }}</a>
-          <a class="btn btn-outline-primary" href="/student/submissions/{{ submission.id }}/artifacts/html" target="_blank" rel="noreferrer">{{ lx("Open HTML report", "打开 HTML 报告") }}</a>
-          <a class="btn btn-outline-secondary" href="/student/submissions/{{ submission.id }}/artifacts/stdout">{{ lx("Download stdout", "下载 stdout") }}</a>
-          <a class="btn btn-outline-secondary" href="/student/submissions/{{ submission.id }}/artifacts/stderr">{{ lx("Download stderr", "下载 stderr") }}</a>
-        </div>
-      </div>
-    </div>
-    {% endif %}
   </div>
 
   <div class="col-lg-8">

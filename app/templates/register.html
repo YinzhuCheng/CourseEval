@@ -6,7 +6,7 @@
 {% set form_data = form_data or {} %}
 <div class="row justify-content-center">
   <div class="col-lg-7 col-xl-6">
-    <div class="card shadow-sm">
+    <div class="card auth-card">
       <div class="card-body p-4 p-lg-5">
         <h1 class="h3 mb-2">{{ t("register.title") }}</h1>
         <p class="text-muted mb-4">{{ t("register.subtitle") }}</p>
@@ -18,6 +18,50 @@
         {% endif %}
 
         <form method="post" action="/register" class="row g-3" novalidate>
+          {% set registration_mode = form_data.get('registration_mode', 'email') %}
+          <div class="col-12">
+            <label class="form-label d-block">{{ t("register.method.title") }}</label>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="auth-choice h-100">
+                  <input
+                    class="form-check-input"
+                    type="radio"
+                    name="registration_mode"
+                    value="email"
+                    {% if registration_mode != 'invite' %}checked{% endif %}
+                  />
+                  <span class="auth-choice__body">
+                    <span class="fw-semibold d-block">{{ t("register.method.email") }}</span>
+                    <span class="small text-muted">{{ t("register.method.email_help") }}</span>
+                  </span>
+                </label>
+              </div>
+              <div class="col-md-6">
+                <label class="auth-choice h-100 {% if not invite_registration_enabled %}auth-choice--disabled{% endif %}">
+                  <input
+                    class="form-check-input"
+                    type="radio"
+                    name="registration_mode"
+                    value="invite"
+                    {% if registration_mode == 'invite' %}checked{% endif %}
+                    {% if not invite_registration_enabled %}disabled{% endif %}
+                  />
+                  <span class="auth-choice__body">
+                    <span class="fw-semibold d-block">{{ t("register.method.invite") }}</span>
+                    <span class="small text-muted">
+                      {% if invite_registration_enabled %}
+                      {{ t("register.method.invite_help") }}
+                      {% else %}
+                      {{ t("register.method.invite_disabled") }}
+                      {% endif %}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div class="col-md-6">
             <label class="form-label">{{ t("register.username") }}</label>
             <input
@@ -35,18 +79,38 @@
               class="form-control"
               name="email"
               type="email"
-              required
               maxlength="255"
               value="{{ form_data.get('email', '') }}"
               autocomplete="email"
             />
-            <div class="form-text">{{ t("register.email.help") }}</div>
+            <div class="form-text">{{ t("register.email.help_optional") }}</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">{{ t("register.invite_code") }}</label>
+            <input
+              class="form-control"
+              name="invite_code"
+              value="{{ form_data.get('invite_code', '') }}"
+              autocomplete="off"
+            />
+            <div class="form-text">{{ t("register.invite_code.help") }}</div>
           </div>
 
           <div class="col-12">
             <div class="alert alert-info mb-0">
               <strong>{{ t("register.account_type_label") }}</strong>
               {{ t("register.account_type_body") }}
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="auth-helper">
+              <div class="fw-semibold mb-2">{{ t("register.method.summary_title") }}</div>
+              <ul class="small text-muted mb-0 ps-3">
+                <li>{{ t("register.email_verification_note") }}</li>
+                <li>{{ t("register.invite_registration_note") }}</li>
+              </ul>
             </div>
           </div>
 

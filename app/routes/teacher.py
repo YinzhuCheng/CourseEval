@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Form
@@ -12,6 +13,7 @@ from app.constants import (
     AssignmentStatus,
     CourseRole,
     FeedbackSource,
+    LLMTestStatus,
     MembershipStatus,
     QuestionType,
     ScoringRule,
@@ -20,6 +22,7 @@ from app.constants import (
 )
 from app.db import get_db, utcnow
 from app.i18n import choose_text
+from app.config import get_settings
 from app.models import (
     Assignment,
     Course,
@@ -27,6 +30,7 @@ from app.models import (
     Feedback,
     FinalGradeSnapshot,
     FileQuestionConfig,
+    LLMConfig,
     PythonCodeQuestionConfig,
     Question,
     ShortAnswerQuestionConfig,
@@ -57,6 +61,8 @@ from app.web import render_template
 
 
 router = APIRouter(prefix="/teacher", tags=["teacher"])
+settings = get_settings()
+display_timezone = ZoneInfo(settings.timezone_name)
 
 
 def _redirect(location: str) -> RedirectResponse:
@@ -168,6 +174,16 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .order_by(CourseMember.joined_at.asc())
         .all()
     )
+    available_llm_configs = list(
+        db.query(LLMConfig)
+        .filter(
+            LLMConfig.enabled.is_(True),
+            LLMConfig.scope == "platform",
+            LLMConfig.last_test_status == LLMTestStatus.SUCCESS,
+        )
+        .order_by(LLMConfig.last_tested_at.desc(), LLMConfig.created_at.desc())
+        .all()
+    )
     course_role = get_course_role(db, course.id, user.id)
     return render_template(
         request,
@@ -179,8 +195,79 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "members": members,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
+            "available_llm_configs": available_llm_configs,
         },
     )
+
+
+@router.post("/courses/{course_id}/llm-config")
+def update_course_llm_config(
+    course_id: int,
+    request: Request,
+    llm_config_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this course.", "你没有该课程的教师端访问权限。"),
+            "danger",
+        )
+        return _redirect("/teacher/courses")
+
+    selected_id = llm_config_id.strip()
+    if not selected_id:
+        course.default_llm_config_id = None
+        course.use_global_llm_default = True
+        db.commit()
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "This course now follows the latest platform-tested LLM by default.",
+                "该课程已改为默认跟随平台最新测试成功的 LLM 配置。",
+            ),
+            "success",
+        )
+        return _redirect(f"/teacher/courses/{course.id}")
+
+    try:
+        config_id = int(selected_id)
+    except ValueError:
+        push_flash(
+            request,
+            choose_text(request, "Selected LLM config is invalid.", "所选 LLM 配置无效。"),
+            "danger",
+        )
+        return _redirect(f"/teacher/courses/{course.id}")
+
+    config = db.get(LLMConfig, config_id)
+    if config is None or not config.enabled or config.last_test_status != LLMTestStatus.SUCCESS:
+        push_flash(
+            request,
+            choose_text(request, "Selected LLM config is unavailable.", "所选 LLM 配置不可用。"),
+            "danger",
+        )
+        return _redirect(f"/teacher/courses/{course.id}")
+
+    course.default_llm_config_id = config.id
+    course.use_global_llm_default = False
+    db.commit()
+    push_flash(
+        request,
+        choose_text(
+            request,
+            f"This course now uses LLM config: {config.name}.",
+            f"该课程已切换为使用 LLM 配置：{config.name}。",
+        ),
+        "success",
+    )
+    return _redirect(f"/teacher/courses/{course.id}")
 
 
 @router.post("/courses/{course_id}/members")
@@ -550,6 +637,7 @@ def create_question(
                 accepted_extensions=",".join(normalized_extensions),
                 rubric_text=rubric_text.strip(),
                 reference_answer_text=reference_answer.strip(),
+                llm_suggestion_enabled=True,
                 teacher_confirmation_required=teacher_confirmation_required,
                 notebook_outputs_required=q_type == QuestionType.FORMATTED_TEXT_LLM,
                 updated_at=utcnow(),
@@ -743,6 +831,9 @@ def _parse_datetime_input(value: str):
         return None
     normalized = value.replace("T", " ")
     try:
-        return datetime.fromisoformat(normalized)
+        local_value = datetime.fromisoformat(normalized)
+        if local_value.tzinfo is None:
+            local_value = local_value.replace(tzinfo=display_timezone)
+        return local_value.astimezone(ZoneInfo("UTC"))
     except ValueError:
         return None

@@ -235,6 +235,95 @@ python worker.py
 - Upload size limit: 5 MB
 - Intended deployment profile: small single-machine Ubuntu setup
 
+## Registration deployment notes
+
+Public registration now supports two paths:
+
+1. **Email verification registration**
+   - The user submits the registration form with an email address
+   - The system creates a pending account with `email_verified = false`
+   - The system sends a verification email containing `/verify-email?token=...`
+   - The user clicks the email link
+   - The account becomes active and can sign in
+2. **Invitation-code registration**
+   - The user selects invitation-code registration
+   - The server validates the configured invitation code
+   - The account becomes active immediately
+   - If the user leaves the email blank, the system generates an internal placeholder email and the user can still sign in with the username
+
+### Required environment variables
+
+Set these values in `.env` for production:
+
+```bash
+APP_BASE_URL=https://your-domain.example.com
+REGISTRATION_INVITE_CODE=your-server-side-invite-code
+INTERNAL_EMAIL_DOMAIN=invite.local
+EMAIL_VERIFICATION_EXPIRE_HOURS=24
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your-smtp-user
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM_ADDRESS=no-reply@your-domain.example.com
+SMTP_FROM_NAME=CourseEval
+SMTP_STARTTLS=true
+SMTP_USE_SSL=false
+```
+
+### Deployment checklist
+
+- `APP_BASE_URL` must be the externally accessible HTTPS origin used by end users, otherwise verification links may point to an internal address
+- Configure a working SMTP account if you want email-verification registration to work in production
+- Set `REGISTRATION_INVITE_CODE` if you want to allow the faster invitation-code registration path
+- Keep the invitation code only on the server side; do not expose it in client-side assets or public docs
+- `INTERNAL_EMAIL_DOMAIN` should use a reserved internal-only domain because it is used for auto-generated placeholder emails when invite registrations skip the email field
+- Use HTTPS in front of the FastAPI app so email verification links and session cookies travel securely
+- Make sure the email sender domain and mailbox are allowed by your mail provider
+- If you run multiple app instances, they must share the same database so verification tokens stay valid across nodes
+- Keep `SECRET_KEY` stable across restarts so session handling remains consistent
+
+### Behavior when SMTP is not configured
+
+If SMTP is missing or delivery fails, email-based registrations stay pending until email sending works and the verification email is resent. Invitation-code registrations are not affected as long as `REGISTRATION_INVITE_CODE` is configured.
+
+## Queue and LLM deployment notes
+
+The platform now separates evaluation traffic into:
+
+- a dedicated Python evaluation queue
+- per-LLM-config queues for LLM review tasks
+
+Relevant environment variables:
+
+```bash
+PYTHON_QUEUE_NAME=python-evaluations
+LLM_QUEUE_PREFIX=llm-evaluations
+PDF_REVIEW_MAX_PAGES=8
+```
+
+### Worker behavior
+
+- Python Docker grading runs on its own queue
+- Each enabled LLM config has its own queue
+- `queue_concurrency` is configured per LLM config record in the admin UI
+- `worker.py` now works as a lightweight worker manager and starts:
+  - 1 Python worker process
+  - N LLM worker processes per enabled config, where N is that config's concurrency
+
+### Global default LLM behavior
+
+- The latest **platform** LLM config that has passed connectivity testing becomes the default for all courses still following the global platform default
+- Teachers can override a specific course to use a chosen enabled LLM config from the course detail page
+
+### PDF review behavior
+
+- PDF review no longer relies on OCR or text extraction
+- Uploaded PDFs are rendered page-by-page into images
+- Those page images are sent to the configured multimodal LLM for grading
+- `PDF_REVIEW_MAX_PAGES` limits how many pages are rendered per submission
+- Use a multimodal-capable model for PDF review; text-only models may fail for these tasks
+
 ## Data model notes
 
 Main teaching-domain tables include:

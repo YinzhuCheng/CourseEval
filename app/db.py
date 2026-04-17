@@ -62,7 +62,7 @@ def migrate_legacy_schema() -> None:
     if "users" in inspector.get_table_names():
         _ensure_column("users", "account_role", "VARCHAR(20) NOT NULL DEFAULT 'student'")
         _ensure_column("users", "platform_role", "VARCHAR(20) NOT NULL DEFAULT 'user'")
-        _ensure_column("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 1")
+        _ensure_column("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 0")
         _ensure_column("users", "email_verification_token", "VARCHAR(255)")
         _ensure_column("users", "email_verification_sent_at", "DATETIME")
         _ensure_column("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1")
@@ -88,9 +88,21 @@ def migrate_legacy_schema() -> None:
         )
     if "courses" in inspector.get_table_names():
         _ensure_column("courses", "join_code", "VARCHAR(32)")
+        _ensure_column("courses", "use_global_llm_default", "BOOLEAN NOT NULL DEFAULT 1")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE courses "
+                    "SET use_global_llm_default = 0 "
+                    "WHERE default_llm_config_id IS NOT NULL"
+                )
+            )
     if "notebook_question_configs" in inspector.get_table_names():
         _ensure_column("notebook_question_configs", "llm_score_weight", "NUMERIC(10,2) NOT NULL DEFAULT 0")
         _ensure_column("notebook_question_configs", "llm_scoring_rubric", "TEXT")
+    if "llm_configs" in inspector.get_table_names():
+        _ensure_column("llm_configs", "queue_concurrency", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column("llm_configs", "supports_vision", "BOOLEAN NOT NULL DEFAULT 0")
     if "submissions" in inspector.get_table_names():
         _ensure_column("submissions", "stored_file_path", "VARCHAR(512)")
 

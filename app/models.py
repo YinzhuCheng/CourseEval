@@ -67,7 +67,7 @@ class User(Base):
         default=PlatformRole.USER,
         index=True,
     )
-    email_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     email_verification_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -151,6 +151,7 @@ class Course(Base):
         ForeignKey("llm_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    use_global_llm_default: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -261,6 +262,7 @@ class LLMConfig(Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     max_tokens: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
     temperature: Mapped[str] = mapped_column(String(16), default="0.2", nullable=False)
+    queue_concurrency: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_test_status: Mapped[LLMTestStatus] = mapped_column(
         Enum(LLMTestStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),

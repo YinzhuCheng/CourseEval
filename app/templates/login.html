@@ -3,16 +3,18 @@
 {% block title %}{{ t("nav.login") }} - {{ t("site.title") }}{% endblock %}
 
 {% block content %}
+{% set login_value = login_value or "" %}
+{% set resend_email = resend_email or "" %}
 <div class="row justify-content-center">
-  <div class="col-lg-5">
-    <div class="card shadow-sm">
+  <div class="col-lg-5 col-xl-4">
+    <div class="card auth-card">
       <div class="card-body p-4">
         <h1 class="h3 mb-3">{{ t("login.title") }}</h1>
         <p class="text-muted">{{ t("login.subtitle") }}</p>
         <form method="post" action="/login" class="row g-3">
           <div class="col-12">
             <label class="form-label">{{ t("login.login") }}</label>
-            <input class="form-control" name="login" required autocomplete="username" />
+            <input class="form-control" name="login" required autocomplete="username" value="{{ login_value }}" />
           </div>
           <div class="col-12">
             <label class="form-label">{{ t("login.password") }}</label>
@@ -25,6 +27,27 @@
         <p class="mt-3 mb-0 small">
           {{ t("login.need_account") }} <a href="/register">{{ t("login.register_here") }}</a>.
         </p>
+
+        <div class="auth-helper mt-4">
+          <div class="fw-semibold mb-2">{{ t("login.resend_title") }}</div>
+          <p class="small text-muted mb-3">{{ t("login.resend_help") }}</p>
+          <form method="post" action="/verify-email/resend" class="row g-2">
+            <div class="col-12">
+              <input
+                class="form-control"
+                name="email"
+                type="email"
+                required
+                autocomplete="email"
+                value="{{ resend_email }}"
+                placeholder="{{ t('register.email') }}"
+              />
+            </div>
+            <div class="col-12 d-grid">
+              <button class="btn btn-outline-primary" type="submit">{{ t("login.resend_submit") }}</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>

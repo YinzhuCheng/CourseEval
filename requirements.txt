@@ -1,4 +1,5 @@
 fastapi
+httpx
 uvicorn[standard]
 sqlalchemy
 jinja2
@@ -9,3 +10,4 @@ email-validator
 itsdangerous
 nbformat
 PyPDF2
+pymupdf
