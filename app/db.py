@@ -246,6 +246,32 @@ def _ensure_question_version_schema() -> None:
     _backfill_unified_file_llm_types()
     _ensure_llm_grading_enhancements()
     _ensure_llm_token_policy_tables()
+    _bootstrap_file_llm_questions_disable_teacher_confirmation()
+
+
+def _bootstrap_file_llm_questions_disable_teacher_confirmation() -> None:
+    """Align seeded sample file_llm questions with default: LLM score effective without teacher confirmation."""
+    inspector = inspect(engine)
+    if "file_question_configs" not in inspector.get_table_names() or "questions" not in inspector.get_table_names():
+        return
+    titles = (
+        "栈与队列概念比较（PDF）",
+        "顺序表与链表复杂度分析（文本/TeX/ipynb）",
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE file_question_configs
+                SET teacher_confirmation_required = 0
+                WHERE question_id IN (
+                    SELECT id FROM questions
+                    WHERE title IN (:t1, :t2)
+                )
+                """
+            ),
+            {"t1": titles[0], "t2": titles[1]},
+        )
 
 
 def _ensure_llm_token_policy_tables() -> None:
