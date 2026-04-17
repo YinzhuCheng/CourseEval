@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Form
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -21,7 +22,7 @@ from app.constants import (
     SubmissionStatus,
 )
 from app.db import get_db, utcnow
-from app.i18n import choose_text
+from app.i18n import choose_text, get_locale
 from app.config import get_settings
 from app.models import (
     Assignment,
@@ -33,9 +34,12 @@ from app.models import (
     LLMConfig,
     PythonCodeQuestionConfig,
     Question,
+    QuestionVersion,
     ShortAnswerQuestionConfig,
     Submission,
+    User,
 )
+from app.runtime_support import default_allowed_python_libraries_text
 from app.services.courses import (
     DEFAULT_ALLOWED_PYTHON_LIBRARIES,
     get_assignment_for_staff,
@@ -43,6 +47,7 @@ from app.services.courses import (
     get_course_for_teacher,
     get_question_for_staff,
     get_question_for_teacher,
+    summarize_course_grade_matrix,
 )
 from app.services.permissions import (
     COURSE_STAFF_ROLES,
@@ -51,6 +56,7 @@ from app.services.permissions import (
     require_login,
     require_teacher_account,
 )
+from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
 from app.services.submissions import (
     get_submission_for_teacher,
     is_submission_pending_teacher_review,
@@ -185,6 +191,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .all()
     )
     course_role = get_course_role(db, course.id, user.id)
+    grade_matrix = summarize_course_grade_matrix(db, course.id) if course_role == CourseRole.TEACHER else None
     return render_template(
         request,
         db,
@@ -196,6 +203,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "available_llm_configs": available_llm_configs,
+            "grade_matrix": grade_matrix,
         },
     )
 
@@ -369,6 +377,14 @@ def create_assignment(
         )
         return _redirect(f"/teacher/courses/{course.id}")
 
+    limit_value = int(submission_limit_value) if submission_limit_value.strip() else None
+    if limit_value is None:
+        limit_mode = SubmissionLimitMode.UNLIMITED
+    elif limit_mode == SubmissionLimitMode.UNLIMITED:
+        limit_value = None
+    elif limit_mode in {SubmissionLimitMode.DAILY, SubmissionLimitMode.TOTAL} and limit_value is None:
+        limit_mode = SubmissionLimitMode.UNLIMITED
+
     assignment = Assignment(
         course_id=course.id,
         title=title.strip(),
@@ -380,7 +396,7 @@ def create_assignment(
         allow_late=allow_late == "true",
         default_scoring_rule=scoring_rule,
         submission_limit_mode=limit_mode,
-        submission_limit_value=int(submission_limit_value) if submission_limit_value.strip() else None,
+        submission_limit_value=limit_value,
         published_at=utcnow() if assignment_status == AssignmentStatus.PUBLISHED else None,
     )
     db.add(assignment)
@@ -438,6 +454,7 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "submissions": submissions,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
+            "default_allowed_python_libraries": default_allowed_python_libraries_text(get_locale(request)),
         },
     )
 
@@ -546,7 +563,6 @@ def create_question(
                 min_length=int(min_length) if min_length.strip() else None,
                 max_length=int(max_length) if max_length.strip() else None,
                 rubric_text=rubric_text.strip() or None,
-                reference_answer=reference_answer.strip() or None,
                 llm_suggestion_enabled=True,
                 teacher_confirmation_required=teacher_confirmation_required,
             )
@@ -611,7 +627,46 @@ def create_question(
                 allow_network=allow_network == "true",
             )
         )
-    else:
+    elif q_type == QuestionType.FILE_LLM:
+        normalized_extensions = [
+            ext.strip().lower() if ext.strip().lower().startswith(".") else f".{ext.strip().lower()}"
+            for ext in (accepted_extensions or "").replace(" ", "").split(",")
+            if ext.strip()
+        ]
+        if not normalized_extensions:
+            push_flash(
+                request,
+                choose_text(request, "Select at least one allowed file format.", "请至少选择一种允许提交的文件格式。"),
+                "danger",
+            )
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        if not rubric_text.strip() or not reference_answer.strip():
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Reference answer and rubric are required for file / LLM-reviewed questions.",
+                    "文件 / LLM 评测题必须填写参考答案和评分细则。",
+                ),
+                "danger",
+            )
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        notebook_outputs_required = ".ipynb" in set(normalized_extensions)
+        db.add(
+            FileQuestionConfig(
+                question_id=question.id,
+                accepted_extensions=",".join(normalized_extensions),
+                rubric_text=rubric_text.strip(),
+                reference_answer_text=reference_answer.strip(),
+                llm_suggestion_enabled=True,
+                teacher_confirmation_required=teacher_confirmation_required,
+                notebook_outputs_required=notebook_outputs_required,
+                updated_at=utcnow(),
+            )
+        )
+    elif q_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
         normalized_extensions = [
             ext.strip().lower()
             for ext in (accepted_extensions or ".txt,.tex,.ipynb").split(",")
@@ -644,6 +699,9 @@ def create_question(
             )
         )
 
+    db.commit()
+    db.refresh(question)
+    create_initial_question_version(db, question)
     db.commit()
     push_flash(
         request,
@@ -689,6 +747,12 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
         .all()
     )
     course_role = get_course_role(db, question.assignment.course_id, user.id)
+    versions = (
+        db.query(QuestionVersion)
+        .filter(QuestionVersion.question_id == question.id)
+        .order_by(QuestionVersion.version_number.desc())
+        .all()
+    )
     return render_template(
         request,
         db,
@@ -697,11 +761,255 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "question": question,
             "submissions": submissions,
             "snapshots": snapshots,
+            "versions": versions,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
-            "default_allowed_python_libraries": DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+            "default_allowed_python_libraries": default_allowed_python_libraries_text(get_locale(request)),
         },
     )
+
+
+@router.get("/courses/{course_id}/grades/student/{student_id}")
+def teacher_student_course_grades(course_id: int, student_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_staff(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        push_flash(request, choose_text(request, "You do not have access to this course.", "你没有该课程的访问权限。"), "danger")
+        return _redirect("/teacher/courses")
+    if course is None:
+        return _redirect("/teacher/courses")
+    student = db.get(User, student_id)
+    if student is None:
+        return _redirect(f"/teacher/courses/{course_id}")
+    membership = (
+        db.query(CourseMember)
+        .filter(
+            CourseMember.course_id == course_id,
+            CourseMember.user_id == student_id,
+            CourseMember.role == CourseRole.STUDENT,
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+        .first()
+    )
+    if membership is None:
+        push_flash(
+            request,
+            choose_text(request, "That user is not an active student in this course.", "该用户不是本课程的活跃学生。"),
+            "danger",
+        )
+        return _redirect(f"/teacher/courses/{course_id}")
+
+    assignments = (
+        db.query(Assignment).filter(Assignment.course_id == course_id).order_by(Assignment.created_at.desc()).all()
+    )
+    rows = []
+    for asn in assignments:
+        questions = (
+            db.query(Question).filter(Question.assignment_id == asn.id).order_by(Question.order_index.asc()).all()
+        )
+        q_cells = []
+        for q in questions:
+            sub = (
+                db.query(Submission)
+                .filter(Submission.question_id == q.id, Submission.user_id == student_id)
+                .order_by(Submission.submitted_at.desc())
+                .first()
+            )
+            snap = (
+                db.query(FinalGradeSnapshot)
+                .filter(
+                    FinalGradeSnapshot.question_id == q.id,
+                    FinalGradeSnapshot.student_id == student_id,
+                )
+                .first()
+            )
+            q_cells.append(
+                {
+                    "question": q,
+                    "submitted": sub is not None,
+                    "submission": sub,
+                    "snapshot": snap,
+                }
+            )
+        asn_total = (
+            db.scalar(
+                select(func.coalesce(func.sum(FinalGradeSnapshot.score), 0)).where(
+                    FinalGradeSnapshot.assignment_id == asn.id,
+                    FinalGradeSnapshot.student_id == student_id,
+                )
+            )
+            or 0
+        )
+        rows.append({"assignment": asn, "questions": q_cells, "assignment_total": asn_total})
+    return render_template(
+        request,
+        db,
+        "teacher_student_course_grades.html",
+        {"course": course, "student": student, "rows": rows},
+    )
+
+
+@router.post("/questions/{question_id}/historical-highest")
+def apply_historical_highest_grading(question_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_teacher_account(request, db)
+        question = get_question_for_teacher(db, question_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/teacher/courses")
+    if question is None:
+        push_flash(request, choose_text(request, "Question not found.", "题目不存在。"), "danger")
+        return _redirect("/teacher/courses")
+
+    for snap in db.query(FinalGradeSnapshot).filter(FinalGradeSnapshot.question_id == question.id).all():
+        snap.use_historical_highest = True
+    db.commit()
+    student_ids = list(
+        db.scalars(select(Submission.user_id).where(Submission.question_id == question.id).distinct()).all()
+    )
+    for uid in student_ids:
+        latest = (
+            db.query(Submission)
+            .filter(Submission.question_id == question.id, Submission.user_id == uid)
+            .order_by(Submission.submitted_at.desc())
+            .first()
+        )
+        if latest is not None:
+            refresh_final_grade_snapshot(db, question.id, uid)
+    push_flash(
+        request,
+        choose_text(
+            request,
+            "Historical highest scoring is now enabled for all students on this question.",
+            "已为本题所有学生启用按历史最高分计分。",
+        ),
+        "success",
+    )
+    return _redirect(f"/teacher/questions/{question.id}")
+
+
+@router.post("/questions/{question_id}/update")
+def update_question(
+    question_id: int,
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    max_score: str = Form("100"),
+    scoring_rule_override: str = Form(""),
+    input_spec: str = Form(""),
+    output_spec: str = Form(""),
+    visible_test_1_input: str = Form(""),
+    visible_test_1_output: str = Form(""),
+    visible_test_2_input: str = Form(""),
+    visible_test_2_output: str = Form(""),
+    visible_test_3_input: str = Form(""),
+    visible_test_3_output: str = Form(""),
+    hidden_test_1_input: str = Form(""),
+    hidden_test_1_output: str = Form(""),
+    hidden_test_2_input: str = Form(""),
+    hidden_test_2_output: str = Form(""),
+    allowed_libraries_note: str = Form(""),
+    time_limit_seconds: str = Form("300"),
+    memory_limit_mb: str = Form("1024"),
+    cpu_limit: str = Form("1"),
+    allow_network: str = Form("false"),
+    rubric_text: str = Form(""),
+    reference_answer: str = Form(""),
+    accepted_extensions: str = Form(""),
+    require_teacher_confirmation: str = Form("true"),
+    min_length: str = Form(""),
+    max_length: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        question = get_question_for_teacher(db, question_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/teacher/courses")
+    if question is None:
+        push_flash(request, choose_text(request, "Question not found.", "题目不存在。"), "danger")
+        return _redirect("/teacher/courses")
+
+    question.title = title.strip()
+    question.description = description.strip() or None
+    question.max_score = Decimal(max_score)
+    question.scoring_rule_override = ScoringRule(scoring_rule_override) if scoring_rule_override.strip() else None
+    question.updated_at = utcnow()
+    teacher_confirmation_required = require_teacher_confirmation == "true"
+
+    if question.question_type == QuestionType.SHORT_ANSWER and question.short_answer_config:
+        cfg = question.short_answer_config
+        cfg.min_length = int(min_length) if min_length.strip() else None
+        cfg.max_length = int(max_length) if max_length.strip() else None
+        cfg.rubric_text = rubric_text.strip() or None
+        cfg.teacher_confirmation_required = teacher_confirmation_required
+        cfg.updated_at = utcnow()
+    elif question.question_type == QuestionType.PYTHON_CODE and question.python_code_config:
+        cfg = question.python_code_config
+        visible_samples = [
+            {"input": visible_test_1_input.strip(), "expected_output": visible_test_1_output.strip(), "points": 20},
+            {"input": visible_test_2_input.strip(), "expected_output": visible_test_2_output.strip(), "points": 20},
+            {"input": visible_test_3_input.strip(), "expected_output": visible_test_3_output.strip(), "points": 20},
+        ]
+        hidden_samples = [
+            {"input": hidden_test_1_input.strip(), "expected_output": hidden_test_1_output.strip(), "points": 20},
+            {"input": hidden_test_2_input.strip(), "expected_output": hidden_test_2_output.strip(), "points": 20},
+        ]
+        cfg.input_spec = input_spec.strip()
+        cfg.output_spec = output_spec.strip()
+        cfg.visible_tests_json = json.dumps(visible_samples, ensure_ascii=True, indent=2)
+        cfg.hidden_tests_json = json.dumps(hidden_samples, ensure_ascii=True, indent=2)
+        cfg.allowed_libraries_note = allowed_libraries_note.strip() or DEFAULT_ALLOWED_PYTHON_LIBRARIES
+        cfg.time_limit_seconds = int(time_limit_seconds or 300)
+        cfg.memory_limit_mb = int(memory_limit_mb or 1024)
+        cfg.cpu_limit = cpu_limit or "1"
+        cfg.allow_network = allow_network == "true"
+        cfg.updated_at = utcnow()
+    elif question.file_question_config:
+        cfg = question.file_question_config
+        if question.question_type == QuestionType.FILE_LLM:
+            normalized = [
+                ext.strip().lower() if ext.strip().lower().startswith(".") else f".{ext.strip().lower()}"
+                for ext in (accepted_extensions or "").replace(" ", "").split(",")
+                if ext.strip()
+            ]
+            if not normalized:
+                push_flash(
+                    request,
+                    choose_text(request, "Select at least one allowed file format.", "请至少选择一种允许提交的文件格式。"),
+                    "danger",
+                )
+                return _redirect(f"/teacher/questions/{question.id}")
+            cfg.accepted_extensions = ",".join(normalized)
+            cfg.notebook_outputs_required = ".ipynb" in set(normalized)
+        cfg.rubric_text = rubric_text.strip()
+        cfg.reference_answer_text = reference_answer.strip()
+        cfg.teacher_confirmation_required = teacher_confirmation_required
+        cfg.updated_at = utcnow()
+
+    db.commit()
+    append_question_version_after_edit(db, question)
+    db.commit()
+    student_ids = list(
+        db.scalars(select(Submission.user_id).where(Submission.question_id == question.id).distinct()).all()
+    )
+    for uid in student_ids:
+        latest = (
+            db.query(Submission)
+            .filter(Submission.question_id == question.id, Submission.user_id == uid)
+            .order_by(Submission.submitted_at.desc())
+            .first()
+        )
+        if latest is not None:
+            refresh_final_grade_snapshot(db, question.id, uid)
+    push_flash(request, choose_text(request, "Question was updated.", "题目已更新。"), "success")
+    return _redirect(f"/teacher/questions/{question.id}")
 
 
 @router.get("/submissions/{submission_id}")

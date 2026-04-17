@@ -88,9 +88,9 @@
               {% for config in configs %}
               <tr>
                 <td>{{ config.name }}</td>
-                <td>{{ config.provider_type.value }}</td>
+                <td>{{ elabel("llm_provider", config.provider_type) }}</td>
                 <td>{{ config.model_name }}</td>
-                <td>{{ config.last_test_status.value }}</td>
+                <td>{{ elabel("llm_test_status", config.last_test_status) }}</td>
                 <td class="small text-muted">{{ "••••••••••••" if config.api_key else "-" }}</td>
                 <td>{{ config.queue_concurrency }}</td>
                 <td>{{ format_datetime(config.last_tested_at) if config.last_tested_at else "-" }}</td>

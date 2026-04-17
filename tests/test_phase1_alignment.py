@@ -157,7 +157,7 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertTrue(is_submission_pending_teacher_review(submission))
         self.assertIsNone(snapshot)
 
-    def test_pending_short_answer_does_not_treat_llm_suggestion_as_effective_score(self) -> None:
+    def test_pending_short_answer_surfaces_llm_suggestion_before_teacher(self) -> None:
         submission = create_short_answer_submission(
             self.db,
             user_id=self.student.id,
@@ -186,8 +186,8 @@ class Phase1AlignmentTests(unittest.TestCase):
 
         score, source = resolve_submission_score(pending_submission)
 
-        self.assertIsNone(score)
-        self.assertIsNone(source)
+        self.assertEqual(score, Decimal("18"))
+        self.assertEqual(source, FeedbackSource.LLM)
         self.assertTrue(is_submission_pending_teacher_review(pending_submission))
 
     def test_teacher_feedback_activates_snapshot(self) -> None:
@@ -289,8 +289,8 @@ class Phase1AlignmentTests(unittest.TestCase):
             [question.question_type for question in questions],
             [
                 QuestionType.PYTHON_CODE,
-                QuestionType.PDF_LLM,
-                QuestionType.FORMATTED_TEXT_LLM,
+                QuestionType.FILE_LLM,
+                QuestionType.FILE_LLM,
             ],
         )
         pdf_question = questions[1]

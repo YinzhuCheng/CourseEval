@@ -50,6 +50,7 @@ from app.models import (
     LLMConfig,
     PythonCodeQuestionConfig,
     Question,
+    QuestionVersion,
     RuntimeImage,
     Submission,
 )
@@ -157,9 +158,23 @@ def submission_requires_teacher_confirmation(submission: Submission) -> bool:
     if submission.submission_type == QuestionType.SHORT_ANSWER:
         config = question.short_answer_config if question is not None else None
         return config is None or config.teacher_confirmation_required
-    if submission.submission_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
+    if submission.submission_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM, QuestionType.FILE_LLM}:
         config = _file_question_config(question)
         return config is None or config.teacher_confirmation_required
+    return False
+
+
+def _submission_has_llm_score(submission: Submission) -> bool:
+    return any(
+        item.source == FeedbackSource.LLM and item.score_suggestion is not None for item in submission.feedback_items
+    )
+
+
+def submission_eligible_for_gradebook(submission: Submission) -> bool:
+    if submission.counts_toward_limit or submission.is_effective_submission:
+        return True
+    if submission_requires_teacher_confirmation(submission) and _submission_has_llm_score(submission):
+        return True
     return False
 
 
@@ -183,12 +198,12 @@ def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, Fe
     if latest_result is not None and latest_result.final_score is not None:
         return Decimal(str(latest_result.final_score)), FeedbackSource.AUTO
 
-    if submission_requires_teacher_confirmation(submission):
-        return None, None
-
     llm_feedback = _latest_feedback(submission, FeedbackSource.LLM)
     if llm_feedback is not None and llm_feedback.score_suggestion is not None:
         return Decimal(str(llm_feedback.score_suggestion)), FeedbackSource.LLM
+
+    if submission_requires_teacher_confirmation(submission):
+        return None, None
 
     auto_feedback = _latest_feedback(submission, FeedbackSource.AUTO)
     if auto_feedback is not None and auto_feedback.score_suggestion is not None:
@@ -841,6 +856,7 @@ def create_short_answer_submission(
         is_late=_is_late(question),
         counts_toward_limit=True,
         is_effective_submission=not teacher_confirmation_required,
+        question_version_id=question.current_question_version_id,
     )
     db.add(submission)
     db.flush()
@@ -906,6 +922,7 @@ def create_python_code_submission(
         is_late=_is_late(question),
         counts_toward_limit=False,
         is_effective_submission=False,
+        question_version_id=question.current_question_version_id,
     )
     db.add(submission)
     db.flush()
@@ -953,7 +970,11 @@ def create_file_submission(
     )
     stored_path = absolute_data_path(stored_relative_path)
     pdf_page_paths: list[Path] = []
-    if question.question_type == QuestionType.PDF_LLM:
+    use_pdf_pipeline = extension == ".pdf" and question.question_type in {
+        QuestionType.PDF_LLM,
+        QuestionType.FILE_LLM,
+    }
+    if use_pdf_pipeline:
         pdf_page_paths = _render_pdf_pages_to_images(stored_path)
         extracted_text = f"PDF rendered into {len(pdf_page_paths)} page image(s) for multimodal LLM review."
     else:
@@ -982,6 +1003,7 @@ def create_file_submission(
         is_late=_is_late(question),
         counts_toward_limit=True,
         is_effective_submission=not teacher_confirmation_required and not llm_enabled,
+        question_version_id=question.current_question_version_id,
     )
     db.add(submission)
     db.flush()
@@ -1686,8 +1708,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()
-        if not submission_requires_teacher_confirmation(submission):
-            refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
+        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Short-answer LLM evaluation failed for submission %s", submission_id)
         task = db.get(EvaluationTask, task_id)
@@ -1728,7 +1749,11 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         task.started_at = utcnow()
         db.commit()
 
-        if submission.submission_type == QuestionType.PDF_LLM and submission.stored_file_path:
+        ext = Path(submission.original_filename or "").suffix.lower()
+        if submission.stored_file_path and (
+            submission.submission_type == QuestionType.PDF_LLM
+            or (submission.submission_type == QuestionType.FILE_LLM and ext == ".pdf")
+        ):
             pdf_path = absolute_data_path(submission.stored_file_path)
             page_dir = pdf_path.parent / f"{pdf_path.stem}-pages"
             page_paths = sorted(page_dir.glob("page-*.png"))
@@ -1835,11 +1860,11 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
         .where(
             Submission.question_id == submission.question_id,
             Submission.user_id == submission.user_id,
-            Submission.is_effective_submission.is_(True),
         )
         .order_by(Submission.submitted_at.asc())
     )
-    submissions = list(db.scalars(statement).unique())
+    all_submissions = list(db.scalars(statement).unique())
+    submissions = [item for item in all_submissions if submission_eligible_for_gradebook(item)]
     effective: Submission | None = None
     effective_score = Decimal("0")
     feedback_source = None
@@ -1848,29 +1873,46 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
         resolved_score, _ = resolve_submission_score(item)
         return resolved_score if resolved_score is not None else Decimal("0")
 
-    for item in submissions:
-        current_score = score_for(item)
-        if effective is None:
-            effective = item
-            effective_score = current_score
-            continue
-        if rule == ScoringRule.LATEST:
-            if item.submitted_at >= effective.submitted_at:
-                effective = item
-                effective_score = current_score
-        elif current_score >= effective_score:
-            effective = item
-            effective_score = current_score
-
-    if effective is not None:
-        _, feedback_source = resolve_submission_score(effective)
-
     snapshot = db.scalar(
         select(FinalGradeSnapshot).where(
             FinalGradeSnapshot.student_id == submission.user_id,
             FinalGradeSnapshot.question_id == submission.question_id,
         )
     )
+    use_historical_highest = bool(snapshot.use_historical_highest) if snapshot is not None else False
+
+    if not submissions:
+        effective = None
+        effective_score = Decimal("0")
+        feedback_source = None
+    elif use_historical_highest:
+        for item in submissions:
+            current_score = score_for(item)
+            if effective is None or current_score > effective_score or (
+                current_score == effective_score and item.submitted_at >= effective.submitted_at
+            ):
+                effective = item
+                effective_score = current_score
+        if effective is not None:
+            _, feedback_source = resolve_submission_score(effective)
+    else:
+        for item in submissions:
+            current_score = score_for(item)
+            if effective is None:
+                effective = item
+                effective_score = current_score
+                continue
+            if rule == ScoringRule.LATEST:
+                if item.submitted_at >= effective.submitted_at:
+                    effective = item
+                    effective_score = current_score
+            elif current_score >= effective_score:
+                effective = item
+                effective_score = current_score
+
+        if effective is not None:
+            _, feedback_source = resolve_submission_score(effective)
+
     if snapshot is None:
         snapshot = FinalGradeSnapshot(
             student_id=submission.user_id,
@@ -1884,6 +1926,7 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
     snapshot.grading_rule_applied = rule
     snapshot.score = effective_score if effective else None
     snapshot.feedback_source = feedback_source
+    snapshot.question_version_id = effective.question_version_id if effective else None
     snapshot.updated_at = utcnow()
     db.commit()
 

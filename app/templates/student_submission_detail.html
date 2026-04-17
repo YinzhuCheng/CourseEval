@@ -28,7 +28,7 @@
         <h2 class="h5 mb-3">{{ lx("Submission status", "提交状态") }}</h2>
         <dl class="row mb-0">
           <dt class="col-sm-5">{{ lx("Status", "状态") }}</dt>
-          <dd class="col-sm-7"><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></dd>
+          <dd class="col-sm-7"><span class="badge status-badge status-{{ submission.status.value }}">{{ elabel("submission_status", submission.status) }}</span></dd>
 
           <dt class="col-sm-5">{{ lx("Submitted", "提交时间") }}</dt>
           <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
@@ -80,7 +80,7 @@
             {% endif %}
           </dd>
           <dt class="col-sm-6">{{ lx("Score source", "分数来源") }}</dt>
-          <dd class="col-sm-6">{{ result_view.score_source.value if result_view.score_source else "-" }}</dd>
+          <dd class="col-sm-6">{{ elabel("feedback_source", result_view.score_source) if result_view.score_source else "-" }}</dd>
           {% if result_view.run_success is not none %}
           <dt class="col-sm-6">{{ lx("Run success", "运行是否成功") }}</dt>
           <dd class="col-sm-6">{{ lx("Yes", "是") if result_view.run_success else lx("No", "否") }}</dd>
@@ -129,7 +129,7 @@
           {% for item in feedback_items %}
           <div class="list-group-item px-0">
             <div class="d-flex justify-content-between">
-              <strong>{{ item.source.value }}</strong>
+              <strong>{{ elabel("feedback_source", item.source) }}</strong>
               <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
             </div>
             <div class="small text-muted mb-1">{{ lx("Score suggestion", "建议分数") }}: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}</div>

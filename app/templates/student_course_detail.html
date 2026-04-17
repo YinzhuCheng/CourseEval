@@ -50,7 +50,7 @@
               <div class="small text-muted">{{ assignment.description }}</div>
               {% endif %}
             </td>
-            <td><span class="badge text-bg-secondary">{{ assignment.status.value }}</span></td>
+            <td><span class="badge text-bg-secondary">{{ elabel("assignment_status", assignment.status) }}</span></td>
             <td>{{ format_datetime(assignment.open_at, "%Y-%m-%d %H:%M") }}</td>
             <td>{{ format_datetime(assignment.due_at, "%Y-%m-%d %H:%M") }}</td>
             <td class="text-end">

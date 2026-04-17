@@ -299,7 +299,11 @@ async def submit_file_question(
         return RedirectResponse(url=redirect.location, status_code=303)
 
     question = get_question_for_student(db, question_id, user.id)
-    if question is None or question.question_type not in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
+    if question is None or question.question_type not in {
+        QuestionType.PDF_LLM,
+        QuestionType.FORMATTED_TEXT_LLM,
+        QuestionType.FILE_LLM,
+    }:
         push_flash(
             request,
             choose_text(request, "File question not found.", "未找到文件题。"),

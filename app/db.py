@@ -1,7 +1,7 @@
 from collections.abc import Generator
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -183,6 +183,84 @@ def migrate_legacy_schema() -> None:
             continue
         for column_name, replacements in columns.items():
             _normalize_enum_values(table_name, column_name, replacements)
+
+    _ensure_question_version_schema()
+
+
+def _ensure_question_version_schema() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "question_versions" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE question_versions (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        question_id INTEGER NOT NULL,
+                        version_number INTEGER NOT NULL,
+                        snapshot_json TEXT NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(question_id) REFERENCES questions (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX ix_question_versions_question_version "
+                    "ON question_versions (question_id, version_number)"
+                )
+            )
+    if "questions" in tables:
+        _ensure_column("questions", "current_question_version_id", "INTEGER")
+    if "submissions" in tables:
+        _ensure_column("submissions", "question_version_id", "INTEGER")
+    if "final_grade_snapshots" in tables:
+        _ensure_column("final_grade_snapshots", "question_version_id", "INTEGER")
+        _ensure_column("final_grade_snapshots", "use_historical_highest", "BOOLEAN NOT NULL DEFAULT 0")
+
+    if "question_versions" in set(inspect(engine).get_table_names()):
+        from sqlalchemy.orm import joinedload
+
+        from app.models import Question
+        from app.services.question_versions import create_initial_question_version
+
+        with SessionLocal() as db:
+            missing = list(
+                db.scalars(
+                    select(Question)
+                    .options(
+                        joinedload(Question.python_code_config),
+                        joinedload(Question.short_answer_config),
+                        joinedload(Question.file_question_config),
+                    )
+                    .where(Question.current_question_version_id.is_(None))
+                ).unique()
+            )
+            for question in missing:
+                create_initial_question_version(db, question)
+            if missing:
+                db.commit()
+
+    _backfill_unified_file_llm_types()
+
+
+def _backfill_unified_file_llm_types() -> None:
+    """Normalize legacy PDF / formatted-text LLM rows to file_llm for one grading pipeline."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE questions SET question_type = 'file_llm' "
+                "WHERE question_type IN ('pdf_llm', 'formatted_text_llm')"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE submissions SET submission_type = 'file_llm' "
+                "WHERE submission_type IN ('pdf_llm', 'formatted_text_llm')"
+            )
+        )
 
 
 def _ensure_column(table_name: str, column_name: str, definition_sql: str) -> None:

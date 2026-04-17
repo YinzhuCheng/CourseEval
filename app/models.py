@@ -404,9 +404,40 @@ class Question(Base):
         foreign_keys=[llm_config_id],
     )
     final_grade_snapshots: Mapped[list["FinalGradeSnapshot"]] = relationship(back_populates="question")
+    versions: Mapped[list["QuestionVersion"]] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="QuestionVersion.version_number",
+    )
+    current_question_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    current_version: Mapped["QuestionVersion | None"] = relationship(
+        "QuestionVersion",
+        primaryjoin="Question.current_question_version_id==QuestionVersion.id",
+        foreign_keys="QuestionVersion.id",
+        post_update=True,
+        uselist=False,
+    )
 
 
 Index("ix_questions_assignment_order", Question.assignment_id, Question.order_index)
+
+
+class QuestionVersion(Base):
+    __tablename__ = "question_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    question: Mapped["Question"] = relationship(
+        back_populates="versions",
+        foreign_keys=[question_id],
+    )
+
+
+Index("ix_question_versions_question_version", QuestionVersion.question_id, QuestionVersion.version_number, unique=True)
 
 
 class NotebookQuestionConfig(Base):
@@ -554,6 +585,11 @@ class Submission(Base):
     is_effective_submission: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     failure_reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    question_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     course: Mapped[Course] = relationship(back_populates="submissions")
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
@@ -567,6 +603,7 @@ class Submission(Base):
         back_populates="effective_submission",
         foreign_keys="FinalGradeSnapshot.effective_submission_id",
     )
+    question_version: Mapped["QuestionVersion | None"] = relationship(foreign_keys=[question_version_id])
 
 
 Index("ix_submissions_question_user_submitted", Submission.question_id, Submission.user_id, Submission.submitted_at)
@@ -680,6 +717,12 @@ class FinalGradeSnapshot(Base):
         nullable=True,
     )
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    question_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    use_historical_highest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     student: Mapped[User] = relationship(
         back_populates="final_grade_snapshots",
@@ -691,6 +734,7 @@ class FinalGradeSnapshot(Base):
         back_populates="grade_snapshots_using_submission",
         foreign_keys=[effective_submission_id],
     )
+    question_version: Mapped["QuestionVersion | None"] = relationship(foreign_keys=[question_version_id])
 
 
 Index("ix_final_grade_snapshot_unique", FinalGradeSnapshot.student_id, FinalGradeSnapshot.question_id, unique=True)

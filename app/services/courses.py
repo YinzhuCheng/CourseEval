@@ -29,6 +29,7 @@ from app.models import (
     NotebookQuestionConfig,
     PythonCodeQuestionConfig,
     Question,
+    QuestionVersion,
     RuntimeImage,
     ShortAnswerQuestionConfig,
     Submission,
@@ -49,6 +50,7 @@ def _question_loader_options():
         joinedload(Question.python_code_config),
         joinedload(Question.short_answer_config),
         joinedload(Question.file_question_config),
+        joinedload(Question.versions),
     )
 
 
@@ -657,6 +659,80 @@ def create_llm_config(
     return llm_config
 
 
+def summarize_course_grade_matrix(db: Session, course_id: int) -> dict:
+    """Students × assignments: submission flag and summed snapshot scores."""
+    student_rows = (
+        db.execute(
+            select(User.id, User.username)
+            .join(CourseMember, CourseMember.user_id == User.id)
+            .where(
+                CourseMember.course_id == course_id,
+                CourseMember.role == CourseRole.STUDENT,
+                CourseMember.status == MembershipStatus.ACTIVE,
+            )
+            .order_by(User.username.asc())
+        )
+        .all()
+    )
+    assignment_rows = (
+        db.execute(
+            select(Assignment.id, Assignment.title)
+            .where(Assignment.course_id == course_id)
+            .order_by(Assignment.created_at.desc())
+        )
+        .all()
+    )
+    students = [{"id": row[0], "username": row[1]} for row in student_rows]
+    assignments = [{"id": row[0], "title": row[1]} for row in assignment_rows]
+    if not students or not assignments:
+        return {"assignments": assignments, "rows": []}
+
+    assignment_ids = [a["id"] for a in assignments]
+    student_ids = [s["id"] for s in students]
+
+    totals_stmt = (
+        select(
+            FinalGradeSnapshot.student_id,
+            FinalGradeSnapshot.assignment_id,
+            func.coalesce(func.sum(FinalGradeSnapshot.score), 0),
+        )
+        .where(
+            FinalGradeSnapshot.assignment_id.in_(assignment_ids),
+            FinalGradeSnapshot.student_id.in_(student_ids),
+        )
+        .group_by(FinalGradeSnapshot.student_id, FinalGradeSnapshot.assignment_id)
+    )
+    totals_map: dict[tuple[int, int], Decimal] = {}
+    for row in db.execute(totals_stmt).all():
+        totals_map[(int(row[0]), int(row[1]))] = row[2] if isinstance(row[2], Decimal) else Decimal(str(row[2]))
+
+    sub_stmt = (
+        select(Submission.user_id, Submission.assignment_id, func.count(Submission.id))
+        .where(
+            Submission.assignment_id.in_(assignment_ids),
+            Submission.user_id.in_(student_ids),
+        )
+        .group_by(Submission.user_id, Submission.assignment_id)
+    )
+    submitted_map: dict[tuple[int, int], int] = {}
+    for row in db.execute(sub_stmt).all():
+        submitted_map[(int(row[0]), int(row[1]))] = int(row[2] or 0)
+
+    matrix_rows = []
+    for st in students:
+        row_cells = []
+        for asn in assignments:
+            key = (st["id"], asn["id"])
+            row_cells.append(
+                {
+                    "submitted": submitted_map.get(key, 0) > 0,
+                    "total_score": totals_map.get(key, Decimal("0")),
+                }
+            )
+        matrix_rows.append({"student": st, "cells": row_cells})
+    return {"assignments": assignments, "rows": matrix_rows}
+
+
 def summarize_course_grades(db: Session, assignment_id: int) -> list[dict]:
     assignment = get_assignment(db, assignment_id)
     if assignment is None:
@@ -810,7 +886,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
         order_index=2,
         title="栈与队列概念比较（PDF）",
         description="请提交 PDF，比较栈和队列的定义、典型操作以及一个实际应用场景。",
-        question_type=QuestionType.PDF_LLM,
+        question_type=QuestionType.FILE_LLM,
         max_score=Decimal("20"),
         updated_at=utcnow(),
     )
@@ -838,7 +914,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
         order_index=3,
         title="顺序表与链表复杂度分析（文本/TeX/ipynb）",
         description="请提交 txt、tex 或已执行输出的 ipynb，说明顺序表和链表在随机访问、插入、删除上的复杂度差异。",
-        question_type=QuestionType.FORMATTED_TEXT_LLM,
+        question_type=QuestionType.FILE_LLM,
         max_score=Decimal("20"),
         updated_at=utcnow(),
     )

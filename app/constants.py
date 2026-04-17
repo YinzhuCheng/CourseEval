@@ -55,6 +55,7 @@ class QuestionType(str, Enum):
     PYTHON_CODE = "python_code"
     PDF_LLM = "pdf_llm"
     FORMATTED_TEXT_LLM = "formatted_text_llm"
+    FILE_LLM = "file_llm"
 
 
 class ScoringRule(str, Enum):

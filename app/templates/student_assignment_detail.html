@@ -15,7 +15,7 @@
   <div class="card-body">
     <dl class="row mb-0">
       <dt class="col-sm-3">{{ lx("Status", "状态") }}</dt>
-      <dd class="col-sm-9">{{ assignment.status.value }}</dd>
+      <dd class="col-sm-9">{{ elabel("assignment_status", assignment.status) }}</dd>
       <dt class="col-sm-3">{{ lx("Open at", "开放时间") }}</dt>
       <dd class="col-sm-9">{{ format_datetime(assignment.open_at) if assignment.open_at else "-" }}</dd>
       <dt class="col-sm-3">{{ lx("Due at", "截止时间") }}</dt>
@@ -23,7 +23,7 @@
       <dt class="col-sm-3">{{ lx("Close at", "关闭时间") }}</dt>
       <dd class="col-sm-9">{{ format_datetime(assignment.close_at) if assignment.close_at else "-" }}</dd>
       <dt class="col-sm-3">{{ lx("Scoring rule", "计分规则") }}</dt>
-      <dd class="col-sm-9">{{ assignment.default_scoring_rule.value }}</dd>
+      <dd class="col-sm-9">{{ elabel("scoring_rule", assignment.default_scoring_rule) }}</dd>
     </dl>
     {% if assignment.description %}
     <hr />
@@ -42,7 +42,7 @@
         <div class="d-flex justify-content-between align-items-center">
           <div>
             <strong>Q{{ question.order_index }}. {{ question.title }}</strong>
-            <div class="small text-muted">{{ question.question_type.value }} · {{ lx("Max score", "满分") }} {{ question.max_score }}</div>
+            <div class="small text-muted">{{ elabel("question_type", question.question_type) }} · {{ lx("Max score", "满分") }} {{ question.max_score }}</div>
           </div>
           <span class="btn btn-sm btn-outline-primary">{{ lx("Open", "查看") }}</span>
         </div>
