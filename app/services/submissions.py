@@ -31,6 +31,7 @@ from app.constants import (
 )
 from app.db import SessionLocal, utcnow
 from app.services.llm import (
+    ImageInput,
     generate_notebook_evaluation_with_llm,
     generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
@@ -392,6 +393,10 @@ def _render_pdf_pages_to_images(file_path: Path) -> list[Path]:
     if not rendered_pages:
         raise ValueError("The uploaded PDF could not be rendered into images.")
     return rendered_pages
+
+
+def _image_inputs_from_png_paths(paths: list[Path]) -> list[ImageInput]:
+    return [ImageInput(mime_type="image/png", data=path.read_bytes()) for path in paths]
 
 
 def _render_notebook_as_text(file_path: Path, *, require_outputs: bool) -> str:
@@ -1735,8 +1740,8 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                 question_description=submission.question.description or "",
                 rubric_text=question_config.rubric_text,
                 reference_answer_text=question_config.reference_answer_text,
-                image_paths=page_paths,
                 max_score=float(submission.question.max_score),
+                images=_image_inputs_from_png_paths(page_paths),
             )
         else:
             result = generate_short_answer_evaluation(
@@ -1774,6 +1779,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             task.finished_at = utcnow()
             task.error_message = str(exc)
             db.commit()
+        raise
     finally:
         db.close()
 
