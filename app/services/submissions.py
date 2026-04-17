@@ -156,13 +156,18 @@ def _runner_script_path(script_name: str) -> Path:
 
 
 def submission_requires_teacher_confirmation(submission: Submission) -> bool:
+    """True only when the question explicitly opts into \"teacher must confirm before any score\".
+
+    Default product behavior: LLM scores (when present) are effective without teacher confirmation.
+    This flag is then an optional strict gate for rare courses that want no score until a teacher posts.
+    """
     question = submission.question
     if submission.submission_type == QuestionType.SHORT_ANSWER:
         config = question.short_answer_config if question is not None else None
-        return config is None or config.teacher_confirmation_required
+        return bool(config and config.teacher_confirmation_required)
     if submission.submission_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM, QuestionType.FILE_LLM}:
         config = _file_question_config(question)
-        return config is None or config.teacher_confirmation_required
+        return bool(config and config.teacher_confirmation_required)
     return False
 
 
@@ -185,7 +190,13 @@ def submission_has_teacher_feedback(submission: Submission) -> bool:
 
 
 def is_submission_pending_teacher_review(submission: Submission) -> bool:
-    return submission_requires_teacher_confirmation(submission) and not submission_has_teacher_feedback(submission)
+    """Pending only when the question opted into strict teacher-first grading and no teacher score yet.
+
+    With the default (no strict flag), LLM scores are effective and this is always False.
+    """
+    if not submission_requires_teacher_confirmation(submission):
+        return False
+    return not submission_has_teacher_feedback(submission)
 
 
 def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, FeedbackSource | None]:
@@ -202,10 +213,10 @@ def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, Fe
 
     llm_feedback = _latest_feedback(submission, FeedbackSource.LLM)
     if llm_feedback is not None and llm_feedback.score_suggestion is not None:
+        if submission_requires_teacher_confirmation(submission):
+            # Strict opt-in: no displayed/final score from LLM until a teacher posts feedback.
+            return None, None
         return Decimal(str(llm_feedback.score_suggestion)), FeedbackSource.LLM
-
-    if submission_requires_teacher_confirmation(submission):
-        return None, None
 
     auto_feedback = _latest_feedback(submission, FeedbackSource.AUTO)
     if auto_feedback is not None and auto_feedback.score_suggestion is not None:
@@ -1038,7 +1049,7 @@ def create_short_answer_submission(
         raise ValueError(message or "Submission limit reached.")
 
     config = question.short_answer_config
-    teacher_confirmation_required = True if config is None else config.teacher_confirmation_required
+    teacher_confirmation_required = False if config is None else bool(config.teacher_confirmation_required)
     cleaned = answer_text.strip()
     if not cleaned:
         raise ValueError("Answer cannot be empty.")
@@ -1047,19 +1058,29 @@ def create_short_answer_submission(
     if config and config.max_length and len(cleaned) > config.max_length:
         raise ValueError(f"Answer must be at most {config.max_length} characters long.")
 
+    llm_will_run = bool(config and config.llm_suggestion_enabled)
+    if llm_will_run:
+        initial_status = SubmissionStatus.SUBMITTED
+        initial_completed_at = None
+        initial_effective = False
+    else:
+        initial_status = SubmissionStatus.SUBMITTED if teacher_confirmation_required else SubmissionStatus.COMPLETED
+        initial_completed_at = None if teacher_confirmation_required else utcnow()
+        initial_effective = not teacher_confirmation_required
+
     submission = Submission(
         course_id=question.assignment.course_id,
         assignment_id=question.assignment_id,
         question_id=question.id,
         user_id=user_id,
         submission_type=QuestionType.SHORT_ANSWER,
-        status=SubmissionStatus.SUBMITTED if teacher_confirmation_required else SubmissionStatus.COMPLETED,
+        status=initial_status,
         answer_text=cleaned,
         submitted_at=utcnow(),
-        completed_at=None if teacher_confirmation_required else utcnow(),
+        completed_at=initial_completed_at,
         is_late=_is_late(question),
         counts_toward_limit=True,
-        is_effective_submission=not teacher_confirmation_required,
+        is_effective_submission=initial_effective,
         question_version_id=question.current_question_version_id,
     )
     db.add(submission)
@@ -1075,7 +1096,7 @@ def create_short_answer_submission(
         )
     db.commit()
     db.refresh(submission)
-    if not teacher_confirmation_required:
+    if not llm_will_run and not teacher_confirmation_required:
         update_final_grade_snapshot(db, submission)
     if config and config.llm_suggestion_enabled:
         enqueue_short_answer_llm(db, submission.id)
@@ -1968,6 +1989,10 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
                 comment_text=comment,
             )
         )
+        submission.status = SubmissionStatus.COMPLETED
+        submission.completed_at = utcnow()
+        submission.is_effective_submission = True
+        submission.failure_reason_code = None
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()
@@ -2099,11 +2124,10 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                 comment_text=comment,
             )
         )
-        if not question_config.teacher_confirmation_required:
-            submission.status = SubmissionStatus.COMPLETED
-            submission.completed_at = utcnow()
-            submission.is_effective_submission = True
-            submission.failure_reason_code = None
+        submission.status = SubmissionStatus.COMPLETED
+        submission.completed_at = utcnow()
+        submission.is_effective_submission = True
+        submission.failure_reason_code = None
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()

@@ -538,7 +538,7 @@ def create_question(
                 max_length=payload.get("max_length"),
                 rubric_text=payload.get("rubric_text") or None,
                 llm_suggestion_enabled=payload.get("llm_suggestion_enabled", False),
-                teacher_confirmation_required=payload.get("teacher_confirmation_required", True),
+                teacher_confirmation_required=payload.get("teacher_confirmation_required", False),
                 updated_at=utcnow(),
             )
         )
@@ -551,7 +551,7 @@ def create_question(
                 reference_answer_text=payload.get("reference_answer_text", ""),
                 rubric_text=payload.get("rubric_text", ""),
                 llm_suggestion_enabled=payload.get("llm_suggestion_enabled", True),
-                teacher_confirmation_required=payload.get("teacher_confirmation_required", True),
+                teacher_confirmation_required=payload.get("teacher_confirmation_required", False),
                 notebook_outputs_required=payload.get("notebook_outputs_required", True),
                 updated_at=utcnow(),
             )
@@ -905,7 +905,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 "应用场景可举函数调用栈、任务排队等。"
             ),
             llm_suggestion_enabled=True,
-            teacher_confirmation_required=True,
+            teacher_confirmation_required=False,
             notebook_outputs_required=False,
             updated_at=utcnow(),
         )
@@ -932,7 +932,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 "链表随机访问为 O(n)，但已定位节点后插入删除可达 O(1)。"
             ),
             llm_suggestion_enabled=True,
-            teacher_confirmation_required=True,
+            teacher_confirmation_required=False,
             notebook_outputs_required=True,
             updated_at=utcnow(),
         )

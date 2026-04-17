@@ -184,11 +184,12 @@ class Phase1AlignmentTests(unittest.TestCase):
         )
         assert pending_submission is not None
 
+        # Default product path: LLM score is effective without teacher confirmation.
+        pending_submission.question.short_answer_config.teacher_confirmation_required = False
         score, source = resolve_submission_score(pending_submission)
-
         self.assertEqual(score, Decimal("18"))
         self.assertEqual(source, FeedbackSource.LLM)
-        self.assertTrue(is_submission_pending_teacher_review(pending_submission))
+        self.assertFalse(is_submission_pending_teacher_review(pending_submission))
 
     def test_teacher_feedback_activates_snapshot(self) -> None:
         submission = create_short_answer_submission(

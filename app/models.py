@@ -561,7 +561,7 @@ class ShortAnswerQuestionConfig(Base):
     max_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rubric_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -583,7 +583,7 @@ class FileQuestionConfig(Base):
     reference_answer_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
     llm_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notebook_outputs_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
