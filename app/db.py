@@ -245,6 +245,52 @@ def _ensure_question_version_schema() -> None:
 
     _backfill_unified_file_llm_types()
     _ensure_llm_grading_enhancements()
+    _ensure_llm_token_policy_tables()
+
+
+def _ensure_llm_token_policy_tables() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "platform_llm_token_policy" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE platform_llm_token_policy (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        default_user_daily_llm_tokens INTEGER NOT NULL DEFAULT 100000,
+                        updated_at DATETIME
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text("INSERT INTO platform_llm_token_policy (id, default_user_daily_llm_tokens) VALUES (1, 100000)")
+            )
+    if "users" in tables:
+        _ensure_column("users", "llm_daily_token_limit", "INTEGER")
+    if "user_llm_token_daily" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE user_llm_token_daily (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        usage_date VARCHAR(10) NOT NULL,
+                        consumed_tokens INTEGER NOT NULL DEFAULT 0,
+                        updated_at DATETIME NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX ix_user_llm_token_daily_user_date "
+                    "ON user_llm_token_daily (user_id, usage_date)"
+                )
+            )
 
 
 def _ensure_llm_grading_enhancements() -> None:

@@ -1948,6 +1948,8 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
                 truncation_notice=trunc_notice,
                 course_llm_response_language=_course_llm_response_language(submission.question),
                 text_format_may_lose_images=False,
+                bill_user_id=submission.user_id,
+                bill_db=db,
             )
 
         result = retry_llm_grading_call(llm_config, _run_sa, label="short_answer_llm")
@@ -2053,6 +2055,8 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     previous_teacher_score_text=prev_score,
                     truncation_notice=trunc_notice,
                     course_llm_response_language=_course_llm_response_language(submission.question),
+                    bill_user_id=submission.user_id,
+                    bill_db=db,
                 )
 
             result = retry_llm_grading_call(llm_config, _run_pdf, label="file_llm_pdf")
@@ -2076,6 +2080,8 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     truncation_notice=trunc_notice,
                     course_llm_response_language=_course_llm_response_language(submission.question),
                     text_format_may_lose_images=ext in {".tex", ".ipynb", ".txt"},
+                    bill_user_id=submission.user_id,
+                    bill_db=db,
                 )
 
             result = retry_llm_grading_call(llm_config, _run_text, label="file_llm_text")
@@ -2199,6 +2205,8 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
                 previous_teacher_score_text=prev_score,
                 truncation_notice=trunc_notice,
                 course_llm_response_language=_course_llm_response_language(submission.question),
+                bill_user_id=submission.user_id,
+                bill_db=db,
             )
 
         result = retry_llm_grading_call(llm_config, _run_nb, label="notebook_llm")

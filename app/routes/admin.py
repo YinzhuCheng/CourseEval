@@ -15,7 +15,7 @@ from app.constants import (
     UserRole,
 )
 from app.db import get_db, utcnow
-from app.models import LLMConfig, RuntimeImage, User
+from app.models import LLMConfig, PlatformLlmTokenPolicy, RuntimeImage, User
 from app.auth import assign_user_role
 from app.i18n import choose_text, t
 from app.runtime_support import (
@@ -26,6 +26,12 @@ from app.runtime_support import (
     default_runtime_package_summary,
 )
 from app.services.llm import test_llm_connectivity
+from app.services.llm_token_usage import (
+    admin_total_usage_all_time,
+    admin_usage_rows,
+    beijing_today_str,
+    get_platform_default_daily_limit,
+)
 from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
 
@@ -180,7 +186,79 @@ def admin_llm_configs(request: Request, db: Session = Depends(get_db)):
         return _redirect("/login")
 
     configs = list(db.scalars(select(LLMConfig).order_by(LLMConfig.created_at.desc())).all())
-    return render_template(request, db, "admin_llm_configs.html", {"configs": configs})
+    platform_default = get_platform_default_daily_limit(db)
+    return render_template(
+        request,
+        db,
+        "admin_llm_configs.html",
+        {
+            "configs": configs,
+            "platform_default_daily_tokens": platform_default,
+            "beijing_usage_date": beijing_today_str(),
+            "token_usage_rows": admin_usage_rows(db),
+            "total_llm_tokens_recorded": admin_total_usage_all_time(db),
+        },
+    )
+
+
+@router.post("/llm-configs/token-policy")
+def admin_update_llm_token_policy(
+    request: Request,
+    default_user_daily_llm_tokens: int = Form(100000),
+    db: Session = Depends(get_db),
+):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    value = max(1_000, min(500_000_000, int(default_user_daily_llm_tokens)))
+    row = db.get(PlatformLlmTokenPolicy, 1)
+    if row is None:
+        row = PlatformLlmTokenPolicy(id=1, default_user_daily_llm_tokens=value)
+        db.add(row)
+    else:
+        row.default_user_daily_llm_tokens = value
+        row.updated_at = utcnow()
+    db.commit()
+    push_flash(request, t(request, "flash.llm_token_policy_updated"), "success")
+    return _redirect("/admin/llm-configs")
+
+
+@router.post("/llm-configs/user-token-limit")
+def admin_update_user_llm_token_limit(
+    request: Request,
+    user_id: int = Form(...),
+    daily_limit: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    user = db.get(User, user_id)
+    if user is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/llm-configs")
+    raw = (daily_limit or "").strip()
+    if raw == "":
+        user.llm_daily_token_limit = None
+    else:
+        try:
+            lim = int(raw)
+        except ValueError:
+            push_flash(request, t(request, "flash.llm_token_limit_invalid"), "danger")
+            return _redirect("/admin/llm-configs")
+        user.llm_daily_token_limit = max(1_000, min(500_000_000, lim))
+    user.updated_at = utcnow()
+    db.commit()
+    push_flash(request, t(request, "flash.llm_user_token_limit_updated"), "success")
+    return _redirect("/admin/llm-configs")
 
 
 @router.post("/llm-configs")

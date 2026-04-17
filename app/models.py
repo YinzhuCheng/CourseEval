@@ -71,6 +71,7 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     email_verification_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    llm_daily_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -103,6 +104,10 @@ class User(Base):
         back_populates="student",
         cascade="all, delete-orphan",
         foreign_keys="FinalGradeSnapshot.student_id",
+    )
+    llm_token_daily_rows: Mapped[list["UserLlmTokenDaily"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -242,6 +247,29 @@ class RuntimeImage(Base):
         foreign_keys="Question.runtime_image_id",
     )
     evaluation_tasks: Mapped[list["EvaluationTask"]] = relationship(back_populates="runtime_image")
+
+
+class PlatformLlmTokenPolicy(Base):
+    """Singleton row id=1: default daily LLM token budget per user (Beijing calendar day)."""
+
+    __tablename__ = "platform_llm_token_policy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    default_user_daily_llm_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=100000)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserLlmTokenDaily(Base):
+    __tablename__ = "user_llm_token_daily"
+    __table_args__ = (Index("ix_user_llm_token_daily_user_date", "user_id", "usage_date", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    usage_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    consumed_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="llm_token_daily_rows")
 
 
 class LLMConfig(Base):

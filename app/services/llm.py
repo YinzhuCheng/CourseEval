@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from sqlalchemy.orm import Session
+
 from app.constants import LLMProvider, LLMResponseLanguage
 from app.models import LLMConfig
 from app.services.llm_grading_prompts import language_and_quality_block, truncation_notice_block
@@ -61,14 +63,31 @@ def test_llm_config_connection(config: LLMConfig) -> str:
     return result.message
 
 
-def generate_text(config: LLMConfig, prompt: str, system_prompt: str | None = None) -> LLMGenerationResult:
+def generate_text(
+    config: LLMConfig,
+    prompt: str,
+    system_prompt: str | None = None,
+    *,
+    bill_user_id: int | None = None,
+    bill_db: Session | None = None,
+) -> LLMGenerationResult:
+    if bill_user_id is not None and bill_db is not None:
+        from app.services.llm_token_usage import assert_room_for_llm_call, record_llm_usage
+
+        assert_room_for_llm_call(bill_db, bill_user_id, config)
     if config.provider_type == LLMProvider.OPENAI_COMPATIBLE:
-        return _generate_openai_compatible(config, prompt, system_prompt)
-    if config.provider_type == LLMProvider.GEMINI:
-        return _generate_gemini(config, prompt, system_prompt)
-    if config.provider_type == LLMProvider.CLAUDE:
-        return _generate_claude(config, prompt, system_prompt)
-    raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
+        result = _generate_openai_compatible(config, prompt, system_prompt)
+    elif config.provider_type == LLMProvider.GEMINI:
+        result = _generate_gemini(config, prompt, system_prompt)
+    elif config.provider_type == LLMProvider.CLAUDE:
+        result = _generate_claude(config, prompt, system_prompt)
+    else:
+        raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
+    if bill_user_id is not None and bill_db is not None:
+        from app.services.llm_token_usage import record_llm_usage
+
+        record_llm_usage(bill_db, bill_user_id, config, result.raw_response)
+    return result
 
 
 def generate_multimodal(
@@ -77,15 +96,27 @@ def generate_multimodal(
     prompt: str,
     system_prompt: str | None = None,
     images: list[ImageInput] | None = None,
+    bill_user_id: int | None = None,
+    bill_db: Session | None = None,
 ) -> LLMGenerationResult:
     image_inputs = images or []
+    if bill_user_id is not None and bill_db is not None:
+        from app.services.llm_token_usage import assert_room_for_llm_call
+
+        assert_room_for_llm_call(bill_db, bill_user_id, config)
     if config.provider_type == LLMProvider.OPENAI_COMPATIBLE:
-        return _generate_openai_compatible(config, prompt, system_prompt, images=image_inputs)
-    if config.provider_type == LLMProvider.GEMINI:
-        return _generate_gemini(config, prompt, system_prompt, images=image_inputs)
-    if config.provider_type == LLMProvider.CLAUDE:
-        return _generate_claude(config, prompt, system_prompt, images=image_inputs)
-    raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
+        result = _generate_openai_compatible(config, prompt, system_prompt, images=image_inputs)
+    elif config.provider_type == LLMProvider.GEMINI:
+        result = _generate_gemini(config, prompt, system_prompt, images=image_inputs)
+    elif config.provider_type == LLMProvider.CLAUDE:
+        result = _generate_claude(config, prompt, system_prompt, images=image_inputs)
+    else:
+        raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
+    if bill_user_id is not None and bill_db is not None:
+        from app.services.llm_token_usage import record_llm_usage
+
+        record_llm_usage(bill_db, bill_user_id, config, result.raw_response)
+    return result
 
 
 def _response_language_instruction(course_override: str | None, student_submission_text: str) -> str:
@@ -135,6 +166,8 @@ def generate_notebook_evaluation_with_llm(
     previous_teacher_score_text: str = "",
     truncation_notice: str = "",
     course_llm_response_language: str | None = None,
+    bill_user_id: int | None = None,
+    bill_db: Session | None = None,
 ) -> dict:
     lang = _response_language_instruction(course_llm_response_language, student_submission_text)
     quality = language_and_quality_block(
@@ -167,7 +200,7 @@ def generate_notebook_evaluation_with_llm(
         + prev_block
         + "\nReturn valid JSON only."
     )
-    raw = generate_text(config, prompt, system_prompt).content
+    raw = generate_text(config, prompt, system_prompt, bill_user_id=bill_user_id, bill_db=bill_db).content
     return _parse_grading_json(raw)
 
 
@@ -186,6 +219,8 @@ def generate_short_answer_evaluation(
     truncation_notice: str = "",
     course_llm_response_language: str | None = None,
     text_format_may_lose_images: bool = False,
+    bill_user_id: int | None = None,
+    bill_db: Session | None = None,
 ) -> dict:
     lang = _response_language_instruction(course_llm_response_language, answer_text)
     quality = language_and_quality_block(
@@ -213,7 +248,7 @@ def generate_short_answer_evaluation(
         + prev_block
         + "\nReturn valid JSON only."
     )
-    raw = generate_text(config, prompt, system_prompt).content
+    raw = generate_text(config, prompt, system_prompt, bill_user_id=bill_user_id, bill_db=bill_db).content
     return _parse_grading_json(raw)
 
 
@@ -231,6 +266,8 @@ def generate_file_evaluation_from_images(
     previous_teacher_score_text: str = "",
     truncation_notice: str = "",
     course_llm_response_language: str | None = None,
+    bill_user_id: int | None = None,
+    bill_db: Session | None = None,
 ) -> dict:
     if not images:
         raise ValueError("At least one rendered PDF page image is required for multimodal grading.")
@@ -260,7 +297,14 @@ def generate_file_evaluation_from_images(
         "Review the pages and return valid JSON only."
         + prev_block
     )
-    raw = generate_multimodal(config, prompt=prompt, system_prompt=system_prompt, images=images).content
+    raw = generate_multimodal(
+        config,
+        prompt=prompt,
+        system_prompt=system_prompt,
+        images=images,
+        bill_user_id=bill_user_id,
+        bill_db=bill_db,
+    ).content
     return _parse_grading_json(raw)
 
 

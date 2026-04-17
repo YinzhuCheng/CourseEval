@@ -74,6 +74,62 @@
   </div>
 
   <div class="col-lg-7">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-2">{{ t("admin.llm.tokens.section_title") }}</h2>
+        <p class="text-muted small mb-3">{{ t("admin.llm.tokens.section_help") }}</p>
+        <p class="small mb-2">
+          <strong>{{ t("admin.llm.tokens.total_recorded") }}:</strong> {{ total_llm_tokens_recorded }}
+          <span class="text-muted">· {{ t("student.llm_usage.date_label") }}: {{ beijing_usage_date }}</span>
+        </p>
+        <form method="post" action="/admin/llm-configs/token-policy" class="row g-2 align-items-end mb-4">
+          <div class="col-md-8">
+            <label class="form-label">{{ t("admin.llm.tokens.platform_default") }}</label>
+            <input class="form-control" type="number" name="default_user_daily_llm_tokens" min="1000" value="{{ platform_default_daily_tokens }}" />
+          </div>
+          <div class="col-md-4 d-grid">
+            <button class="btn btn-outline-primary" type="submit">{{ t("admin.llm.tokens.save_platform") }}</button>
+          </div>
+        </form>
+        <h3 class="h6 mb-2">{{ t("admin.llm.tokens.usage_table") }}</h3>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>{{ t("admin.llm.tokens.column.user") }}</th>
+                <th>{{ t("admin.llm.tokens.column.used") }}</th>
+                <th>{{ t("admin.llm.tokens.column.limit") }}</th>
+                <th>{{ t("admin.llm.tokens.column.override") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in token_usage_rows %}
+              <tr>
+                <td>{{ row.user.username }}</td>
+                <td>{{ row.consumed_today }}</td>
+                <td>{{ row.daily_limit }}</td>
+                <td>
+                  <form method="post" action="/admin/llm-configs/user-token-limit" class="d-flex gap-1 flex-wrap">
+                    <input type="hidden" name="user_id" value="{{ row.user.id }}" />
+                    <input
+                      class="form-control form-control-sm"
+                      style="min-width: 8rem"
+                      type="number"
+                      name="daily_limit"
+                      min="1000"
+                      placeholder="{{ t('admin.llm.tokens.override_placeholder') }}"
+                      value="{% if row.override is not none %}{{ row.override }}{% endif %}"
+                    />
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">{{ t("admin.llm.tokens.save_user") }}</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
     <div class="card shadow-sm">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ t("admin.llm.list") }}</h2>

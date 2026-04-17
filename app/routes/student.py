@@ -22,6 +22,7 @@ from app.services.courses import (
     list_courses_for_student,
 )
 from app.services.permissions import RedirectRequired, require_student_access, require_user
+from app.services.llm_token_usage import usage_summary_for_user
 from app.services.submissions import (
     build_student_result_view,
     create_file_submission,
@@ -50,6 +51,17 @@ def student_courses(request: Request, db: Session = Depends(get_db)):
 
     courses = list_courses_for_student(db, user.id)
     return render_template(request, db, "student_courses.html", {"courses": courses})
+
+
+@router.get("/llm-usage")
+def student_llm_usage(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+
+    summary = usage_summary_for_user(db, user.id)
+    return render_template(request, db, "student_llm_usage.html", {"llm_usage": summary})
 
 
 @router.get("/help/python-runtime")
