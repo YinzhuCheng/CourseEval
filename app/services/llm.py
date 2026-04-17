@@ -70,11 +70,23 @@ def generate_text(
     *,
     bill_user_id: int | None = None,
     bill_db: Session | None = None,
+    bill_user_prompt: str | None = None,
+    bill_system_prompt: str | None = None,
 ) -> LLMGenerationResult:
     if bill_user_id is not None and bill_db is not None:
-        from app.services.llm_token_usage import assert_room_for_llm_call, record_llm_usage
+        from app.services.llm_token_usage import assert_room_for_llm_call, estimate_llm_call_budget, record_llm_usage
 
-        assert_room_for_llm_call(bill_db, bill_user_id, config)
+        up = bill_user_prompt if bill_user_prompt is not None else prompt
+        sp = bill_system_prompt if bill_system_prompt is not None else system_prompt
+        est = estimate_llm_call_budget(
+            system_prompt=sp,
+            user_prompt=up,
+            image_count=0,
+            multimodal=False,
+            image_bytes_total=0,
+            max_output_tokens_cap=int(config.max_tokens or 512),
+        )
+        assert_room_for_llm_call(bill_db, bill_user_id, config, estimated_budget=est)
     if config.provider_type == LLMProvider.OPENAI_COMPATIBLE:
         result = _generate_openai_compatible(config, prompt, system_prompt)
     elif config.provider_type == LLMProvider.GEMINI:
@@ -98,12 +110,22 @@ def generate_multimodal(
     images: list[ImageInput] | None = None,
     bill_user_id: int | None = None,
     bill_db: Session | None = None,
+    bill_image_bytes_total: int | None = None,
 ) -> LLMGenerationResult:
     image_inputs = images or []
     if bill_user_id is not None and bill_db is not None:
-        from app.services.llm_token_usage import assert_room_for_llm_call
+        from app.services.llm_token_usage import assert_room_for_llm_call, estimate_llm_call_budget
 
-        assert_room_for_llm_call(bill_db, bill_user_id, config)
+        img_bytes = bill_image_bytes_total if bill_image_bytes_total is not None else sum(len(im.data) for im in image_inputs)
+        est = estimate_llm_call_budget(
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+            image_count=len(image_inputs),
+            multimodal=bool(image_inputs),
+            image_bytes_total=img_bytes,
+            max_output_tokens_cap=int(config.max_tokens or 512),
+        )
+        assert_room_for_llm_call(bill_db, bill_user_id, config, estimated_budget=est)
     if config.provider_type == LLMProvider.OPENAI_COMPATIBLE:
         result = _generate_openai_compatible(config, prompt, system_prompt, images=image_inputs)
     elif config.provider_type == LLMProvider.GEMINI:
@@ -200,7 +222,15 @@ def generate_notebook_evaluation_with_llm(
         + prev_block
         + "\nReturn valid JSON only."
     )
-    raw = generate_text(config, prompt, system_prompt, bill_user_id=bill_user_id, bill_db=bill_db).content
+    raw = generate_text(
+        config,
+        prompt,
+        system_prompt,
+        bill_user_id=bill_user_id,
+        bill_db=bill_db,
+        bill_user_prompt=prompt,
+        bill_system_prompt=system_prompt,
+    ).content
     return _parse_grading_json(raw)
 
 
@@ -248,7 +278,15 @@ def generate_short_answer_evaluation(
         + prev_block
         + "\nReturn valid JSON only."
     )
-    raw = generate_text(config, prompt, system_prompt, bill_user_id=bill_user_id, bill_db=bill_db).content
+    raw = generate_text(
+        config,
+        prompt,
+        system_prompt,
+        bill_user_id=bill_user_id,
+        bill_db=bill_db,
+        bill_user_prompt=prompt,
+        bill_system_prompt=system_prompt,
+    ).content
     return _parse_grading_json(raw)
 
 

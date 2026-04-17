@@ -14,7 +14,10 @@
       <dt class="col-sm-5">{{ t("student.llm_usage.date_label") }}</dt>
       <dd class="col-sm-7">{{ llm_usage.usage_date }}</dd>
       <dt class="col-sm-5">{{ t("student.llm_usage.used") }}</dt>
-      <dd class="col-sm-7">{{ llm_usage.consumed_today }}</dd>
+      <dd class="col-sm-7">
+        {{ llm_usage.consumed_today }}
+        <div class="form-text mt-1 mb-0">{{ t("student.llm_usage.used_help") }}</div>
+      </dd>
       <dt class="col-sm-5">{{ t("student.llm_usage.limit") }}</dt>
       <dd class="col-sm-7">{{ llm_usage.daily_limit }}</dd>
       <dt class="col-sm-5">{{ t("student.llm_usage.remaining") }}</dt>
@@ -30,6 +33,7 @@
       <dt class="col-sm-5">{{ t("student.llm_usage.platform_default") }}</dt>
       <dd class="col-sm-7">{{ llm_usage.platform_default }}</dd>
     </dl>
+    <p class="text-muted small mb-0 mt-3">{{ t("student.llm_usage.footnote") }}</p>
   </div>
 </div>
 {% endblock %}
