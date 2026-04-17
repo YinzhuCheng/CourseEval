@@ -89,7 +89,7 @@
             "需要执行评测的编程题请使用原生 Python 代码题；需要上传并由 LLM 评分的题目请选择“允许提交的文件格式”（可多选，例如同时允许 PDF 与 TeX）。"
           ) }}
         </div>
-        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" class="row g-3" id="create-question-form">
+        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" enctype="multipart/form-data" class="row g-3" id="create-question-form">
           <div class="col-12">
             <label class="form-label">{{ lx("Title", "标题") }}</label>
             <input class="form-control" name="title" required />
@@ -102,6 +102,7 @@
             <label class="form-label">{{ lx("Question kind", "题目类型") }}</label>
             <select class="form-select" name="question_type">
               <option value="python_code">{{ lx("Native Python code", "原生 Python 代码题") }}</option>
+              <option value="notebook">{{ lx("Notebook (.ipynb) / LLM text review", "Notebook（.ipynb）/ LLM 文本评阅") }}</option>
               <option value="file_llm">{{ lx("File upload / LLM-reviewed", "文件上传 / LLM 评测题") }}</option>
             </select>
           </div>
@@ -192,9 +193,24 @@
             <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3" required></textarea>
           </div>
 
+          <div class="col-12 notebook-llm-only d-none">
+            <label class="form-label">{{ lx("LLM score weight (cap for LLM portion)", "LLM 分数上限（LLM 部分不超过此值）") }}</label>
+            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" min="0.01" value="20" />
+            <input type="hidden" name="notebook_llm_feedback_enabled" value="true" />
+            <div class="form-text">{{ lx("After auto tests, the notebook is converted to text and graded by the LLM.", "自动评测后，系统会将 ipynb 转为文本并由 LLM 评分。") }}</div>
+          </div>
+          <div class="col-12 notebook-llm-only d-none">
+            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
+            <textarea class="form-control" name="llm_scoring_rubric" rows="4"></textarea>
+          </div>
           <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
             <textarea class="form-control" name="reference_answer" rows="4"></textarea>
+          </div>
+          <div class="col-12 llm-graded-only d-none">
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            <div class="form-text">{{ lx("PDF and TeX are converted to text for the model.", "PDF 与 TeX 会先转为文本再送入模型。") }}</div>
           </div>
           <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>
@@ -221,7 +237,9 @@
                 <label class="form-check-label" for="fmt_ipynb">Jupyter (.ipynb)</label>
               </div>
             </div>
-            <div class="form-text">{{ lx("Select one or more. PDF submissions use page rendering for the LLM.", "可多选。勾选 PDF 时，系统会对 PDF 渲染页面供 LLM 评阅。") }}</div>
+            <div class="form-text">
+              {{ lx("Select one or more. PDF submissions use page rendering for the LLM. If your answer relies on diagrams, prefer PDF so images are preserved.", "可多选。勾选 PDF 时，系统会对 PDF 渲染页面供 LLM 评阅。若答案强依赖示意图，尽量提交 PDF 以保留图片信息。") }}
+            </div>
           </div>
           <div class="col-md-6 llm-graded-only d-none">
             <label class="form-label">{{ lx("Teacher confirmation required", "教师确认后生效") }}</label>
@@ -279,13 +297,17 @@
     const toggle = () => {
       const selected = typeSelect.value;
       const isPython = selected === "python_code";
+      const isNotebook = selected === "notebook";
       const isLlm = selected === "file_llm";
 
       document.querySelectorAll(".python-code-only").forEach((el) => {
         el.classList.toggle("d-none", !isPython);
       });
+      document.querySelectorAll(".notebook-llm-only").forEach((el) => {
+        el.classList.toggle("d-none", !isNotebook);
+      });
       document.querySelectorAll(".llm-graded-only").forEach((el) => {
-        el.classList.toggle("d-none", !isLlm);
+        el.classList.toggle("d-none", !(isLlm || isNotebook));
       });
       document.querySelectorAll(".legacy-notebook-only").forEach((el) => {
         el.classList.add("d-none");

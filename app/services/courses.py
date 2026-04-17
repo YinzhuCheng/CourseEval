@@ -649,6 +649,8 @@ def create_llm_config(
         timeout_seconds=timeout_seconds,
         max_tokens=max_tokens,
         temperature=temperature.strip() or "0.2",
+        max_llm_retries=3,
+        llm_retry_initial_seconds=5,
         enabled=enabled,
         created_by=creator_id,
         updated_at=utcnow(),

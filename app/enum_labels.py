@@ -13,7 +13,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "scoring_rule": {"latest": "Latest attempt", "highest": "Highest score"},
         "submission_limit_mode": {"daily": "Per day", "total": "Total cap", "unlimited": "No cap"},
         "question_type": {
-            "notebook": "Notebook (retired)",
+            "notebook": "Notebook (.ipynb) / LLM",
             "short_answer": "Short answer",
             "python_code": "Python code",
             "pdf_llm": "PDF / LLM",
@@ -52,7 +52,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "scoring_rule": {"latest": "按最后一次", "highest": "按最高分"},
         "submission_limit_mode": {"daily": "每日上限", "total": "总次数上限", "unlimited": "不限制"},
         "question_type": {
-            "notebook": "笔记本（已下线）",
+            "notebook": "Notebook（.ipynb）/ LLM",
             "short_answer": "简答题",
             "python_code": "Python 编程题",
             "pdf_llm": "PDF / LLM",

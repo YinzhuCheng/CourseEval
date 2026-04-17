@@ -85,7 +85,7 @@
       <div class="card-body">
         <h2 class="h5 mb-3">{{ lx("Edit question", "编辑题目") }}</h2>
         <p class="small text-muted">{{ lx("Saving creates a new immutable version snapshot. Existing submissions keep their version for grading history.", "保存会生成新的题目版本快照；已有提交仍关联其提交时的版本，便于追溯。") }}</p>
-        <form method="post" action="/teacher/questions/{{ question.id }}/update" class="row g-3">
+        <form method="post" action="/teacher/questions/{{ question.id }}/update" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
             <label class="form-label">{{ lx("Title", "标题") }}</label>
             <input class="form-control" name="title" value="{{ question.title }}" required />
@@ -203,12 +203,47 @@
             <label class="form-label">{{ lx("Hidden test 2 output", "隐藏测试 2 输出") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3">{{ ht[1].expected_output if ht|length > 1 else '' }}</textarea>
           </div>
+          {% elif question.question_type.value == 'notebook' and question.notebook_config %}
+          {% set nbc = question.notebook_config %}
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("LLM score weight", "LLM 分数权重") }}</label>
+            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" value="{{ nbc.llm_score_weight }}" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
+            <textarea class="form-control" name="notebook_llm_rubric" rows="5">{{ nbc.llm_scoring_rubric or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
+            <textarea class="form-control" name="reference_answer" rows="4">{{ nbc.reference_answer_text or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            {% if nbc.reference_answer_file_path %}
+            <div class="form-text small">{{ lx("Current file is stored on the server.", "当前已在服务器保存附件。") }}</div>
+            <div class="form-check mt-1">
+              <input class="form-check-input" type="checkbox" name="clear_reference_answer_file" value="true" id="clear_ref_nb" />
+              <label class="form-check-label" for="clear_ref_nb">{{ lx("Remove uploaded reference file", "删除已上传的参考答案附件") }}</label>
+            </div>
+            {% endif %}
+          </div>
           {% elif question.file_question_config %}
           {% set fqc = question.file_question_config %}
           {% set ext_csv = ',' ~ fqc.accepted_extensions.lower().replace(' ', '') ~ ',' %}
           <div class="col-12">
             <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
             <textarea class="form-control" name="reference_answer" rows="5" required>{{ fqc.reference_answer_text }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            {% if fqc.reference_answer_file_path %}
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" name="clear_reference_answer_file" value="true" id="clear_ref_fq" />
+              <label class="form-check-label" for="clear_ref_fq">{{ lx("Remove uploaded reference file", "删除已上传的参考答案附件") }}</label>
+            </div>
+            {% endif %}
           </div>
           <div class="col-12">
             <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>
@@ -241,7 +276,7 @@
           </div>
           {% endif %}
 
-          {% if question.short_answer_config or question.python_code_config or question.file_question_config %}
+          {% if question.short_answer_config or question.python_code_config or question.file_question_config or question.notebook_config %}
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Save changes", "保存修改") }}</button>
           </div>

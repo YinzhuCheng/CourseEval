@@ -1,11 +1,14 @@
 import base64
 import json
+import re
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from app.constants import LLMProvider
+from app.constants import LLMProvider, LLMResponseLanguage
 from app.models import LLMConfig
+from app.services.llm_grading_prompts import language_and_quality_block, truncation_notice_block
+from app.services.llm_retry import strip_json_fence
 
 
 class LLMConnectionTestError(Exception):
@@ -85,30 +88,33 @@ def generate_multimodal(
     raise ValueError(f"Unsupported LLM provider: {config.provider_type.value}")
 
 
-def generate_feedback_with_llm(
-    config: LLMConfig,
-    *,
-    question_title: str,
-    question_description: str,
-    summary_json: str,
-    stdout_text: str,
-    stderr_text: str,
-    auto_score: float,
-) -> str:
-    system_prompt = (
-        "You are a careful teaching assistant. Generate concise, actionable feedback for a notebook programming "
-        "submission. Do not reveal hidden test code. Mention strengths, failures, and next steps."
+def _response_language_instruction(course_override: str | None, student_submission_text: str) -> str:
+    raw = (course_override or LLMResponseLanguage.AUTO.value).strip().lower()
+    if raw == LLMResponseLanguage.ZH.value:
+        return "Use Chinese (zh)."
+    if raw == LLMResponseLanguage.EN.value:
+        return "Use English (en)."
+    sample = (student_submission_text or "")[:4000]
+    if re.search(r"[\u4e00-\u9fff]", sample):
+        return "The student's submission appears to use Chinese; use Chinese (zh) unless the rubric clearly requires another language."
+    return "The student's submission appears to be primarily non-Chinese; use English (en)."
+
+
+def _parse_grading_json(raw: str) -> dict:
+    cleaned = strip_json_fence(raw)
+    parsed = json.loads(cleaned)
+    if "score_suggestion" not in parsed or "comment_text" not in parsed:
+        raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
+    return parsed
+
+
+def _grading_system_preamble() -> str:
+    return (
+        "You grade student work. Return JSON only with keys `score_suggestion` (number) and `comment_text` (string). "
+        "Do not reveal hidden test code, secret test inputs, or internal staff-only rubric details. "
+        "Be concise and actionable in comment_text: strengths, failures, and concrete next steps. "
+        "If a previous round is provided, prioritize whether the student addressed the issues raised there."
     )
-    prompt = (
-        f"Question title: {question_title}\n"
-        f"Question description:\n{question_description}\n\n"
-        f"Automatic score: {auto_score}\n"
-        f"Evaluation summary JSON:\n{summary_json}\n\n"
-        f"stdout:\n{stdout_text[:8000]}\n\n"
-        f"stderr:\n{stderr_text[:8000]}\n\n"
-        "Return a short student-facing feedback message."
-    )
-    return generate_text(config, prompt, system_prompt).content
 
 
 def generate_notebook_evaluation_with_llm(
@@ -117,34 +123,52 @@ def generate_notebook_evaluation_with_llm(
     question_title: str,
     question_description: str,
     rubric_text: str,
+    reference_answer_text: str = "",
+    student_submission_text: str = "",
     summary_json: str,
     stdout_text: str,
     stderr_text: str,
+    auto_score: float,
     max_llm_score: float,
+    previous_submission_text: str = "",
+    previous_feedback_text: str = "",
+    previous_teacher_score_text: str = "",
+    truncation_notice: str = "",
+    course_llm_response_language: str | None = None,
 ) -> dict:
-    system_prompt = (
-        "You are grading a notebook programming submission. Return JSON only with keys "
-        "`score_suggestion` and `comment_text`. "
-        "score_suggestion must be a number between 0 and the provided maximum score."
+    lang = _response_language_instruction(course_llm_response_language, student_submission_text)
+    quality = language_and_quality_block(
+        lang,
+        text_submission_may_lose_images=bool(student_submission_text.strip()),
+        student_submission_is_pdf_pages=False,
     )
+    system_prompt = _grading_system_preamble() + " " + quality
+    prev_block = ""
+    if (previous_submission_text or "").strip() or (previous_feedback_text or "").strip():
+        prev_block = (
+            "\nPrevious graded attempt (for comparison; teacher final score on that attempt is authoritative):\n"
+            f"Teacher score on previous attempt: {previous_teacher_score_text or 'Not recorded.'}\n"
+            f"Previous submission excerpt:\n{previous_submission_text[:12000]}\n\n"
+            f"Previous feedback:\n{previous_feedback_text[:8000]}\n"
+        )
     prompt = (
-        f"Question title: {question_title}\n"
+        truncation_notice_block(truncation_notice)
+        + f"Question title: {question_title}\n"
         f"Question description:\n{question_description}\n\n"
+        f"Reference answer:\n{reference_answer_text or 'No reference answer provided.'}\n\n"
         f"Notebook grading rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
-        f"Maximum LLM score: {max_llm_score}\n\n"
-        f"Evaluation summary JSON:\n{summary_json}\n\n"
+        f"Automatic score from runner (code/tests, not your score): {auto_score}\n"
+        f"Maximum additional score you may assign (LLM portion cap): {max_llm_score}\n"
+        f"Your score_suggestion must be between 0 and {max_llm_score} (this is the LLM-weighted portion only).\n\n"
+        f"Student submission as text (e.g. ipynb or source extracted for review):\n{student_submission_text[:24000]}\n\n"
+        f"Evaluation summary JSON:\n{summary_json[:12000]}\n\n"
         f"stdout:\n{stdout_text[:8000]}\n\n"
-        f"stderr:\n{stderr_text[:8000]}\n\n"
-        "Return valid JSON only."
+        f"stderr:\n{stderr_text[:8000]}\n"
+        + prev_block
+        + "\nReturn valid JSON only."
     )
     raw = generate_text(config, prompt, system_prompt).content
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"LLM did not return valid JSON: {raw}") from exc
-    if "score_suggestion" not in parsed or "comment_text" not in parsed:
-        raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
-    return parsed
+    return _parse_grading_json(raw)
 
 
 def generate_short_answer_evaluation(
@@ -156,28 +180,41 @@ def generate_short_answer_evaluation(
     reference_answer_text: str = "",
     answer_text: str,
     max_score: float,
+    previous_submission_text: str = "",
+    previous_feedback_text: str = "",
+    previous_teacher_score_text: str = "",
+    truncation_notice: str = "",
+    course_llm_response_language: str | None = None,
+    text_format_may_lose_images: bool = False,
 ) -> dict:
-    system_prompt = (
-        "You are grading a student's short-answer response. Produce a JSON object with keys "
-        "`score_suggestion` and `comment_text`. The score must be between 0 and the maximum score."
+    lang = _response_language_instruction(course_llm_response_language, answer_text)
+    quality = language_and_quality_block(
+        lang,
+        text_submission_may_lose_images=text_format_may_lose_images,
+        student_submission_is_pdf_pages=False,
     )
+    system_prompt = _grading_system_preamble() + " " + quality
+    prev_block = ""
+    if (previous_submission_text or "").strip() or (previous_feedback_text or "").strip():
+        prev_block = (
+            "\nPrevious graded attempt:\n"
+            f"Teacher score on previous attempt: {previous_teacher_score_text or 'Not recorded.'}\n"
+            f"Previous submission excerpt:\n{previous_submission_text[:12000]}\n\n"
+            f"Previous feedback:\n{previous_feedback_text[:8000]}\n"
+        )
     prompt = (
-        f"Question title: {question_title}\n"
+        truncation_notice_block(truncation_notice)
+        + f"Question title: {question_title}\n"
         f"Question description:\n{question_description}\n\n"
         f"Reference answer:\n{reference_answer_text or 'No reference answer provided.'}\n\n"
         f"Rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
         f"Maximum score: {max_score}\n\n"
-        f"Student answer:\n{answer_text}\n\n"
-        "Return valid JSON only."
+        f"Student answer:\n{answer_text}\n"
+        + prev_block
+        + "\nReturn valid JSON only."
     )
     raw = generate_text(config, prompt, system_prompt).content
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"LLM did not return valid JSON: {raw}") from exc
-    if "score_suggestion" not in parsed or "comment_text" not in parsed:
-        raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
-    return parsed
+    return _parse_grading_json(raw)
 
 
 def generate_file_evaluation_from_images(
@@ -189,31 +226,42 @@ def generate_file_evaluation_from_images(
     reference_answer_text: str,
     max_score: float,
     images: list[ImageInput],
+    previous_submission_text: str = "",
+    previous_feedback_text: str = "",
+    previous_teacher_score_text: str = "",
+    truncation_notice: str = "",
+    course_llm_response_language: str | None = None,
 ) -> dict:
     if not images:
         raise ValueError("At least one rendered PDF page image is required for multimodal grading.")
-    system_prompt = (
-        "You are grading a student's PDF submission from rendered page images. "
-        "Produce a JSON object with keys `score_suggestion` and `comment_text`. "
-        "The score must be between 0 and the maximum score."
+    lang = _response_language_instruction(course_llm_response_language, reference_answer_text)
+    quality = language_and_quality_block(
+        lang,
+        text_submission_may_lose_images=False,
+        student_submission_is_pdf_pages=True,
     )
+    system_prompt = _grading_system_preamble() + " " + quality
+    prev_block = ""
+    if (previous_submission_text or "").strip() or (previous_feedback_text or "").strip():
+        prev_block = (
+            "\nPrevious graded attempt:\n"
+            f"Teacher score on previous attempt: {previous_teacher_score_text or 'Not recorded.'}\n"
+            f"Previous submission excerpt:\n{previous_submission_text[:12000]}\n\n"
+            f"Previous feedback:\n{previous_feedback_text[:8000]}\n"
+        )
     prompt = (
-        f"Question title: {question_title}\n"
+        truncation_notice_block(truncation_notice)
+        + f"Question title: {question_title}\n"
         f"Question description:\n{question_description}\n\n"
         f"Reference answer:\n{reference_answer_text or 'No reference answer provided.'}\n\n"
         f"Rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
         f"Maximum score: {max_score}\n\n"
         "The student's PDF has been rendered into page images attached to this request. "
         "Review the pages and return valid JSON only."
+        + prev_block
     )
     raw = generate_multimodal(config, prompt=prompt, system_prompt=system_prompt, images=images).content
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"LLM did not return valid JSON: {raw}") from exc
-    if "score_suggestion" not in parsed or "comment_text" not in parsed:
-        raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
-    return parsed
+    return _parse_grading_json(raw)
 
 
 def _generate_openai_compatible(

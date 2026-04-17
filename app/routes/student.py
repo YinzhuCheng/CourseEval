@@ -169,15 +169,34 @@ async def submit_notebook(
             "danger",
         )
         return RedirectResponse(url="/student/courses", status_code=303)
-    push_flash(
-        request,
-        choose_text(
+
+    file_bytes = await notebook_file.read()
+    filename = notebook_file.filename or "submission.ipynb"
+    try:
+        submission = create_notebook_submission(
+            db,
+            user_id=user.id,
+            question=question,
+            original_filename=filename,
+            notebook_bytes=file_bytes,
+        )
+        push_flash(
             request,
-            "Notebook execution has been retired. Ask course staff to migrate this activity to a native Python question or an ipynb file / LLM-reviewed question.",
-            "Notebook 执行流程已下线。请联系课程教师将该题迁移为原生 Python 代码题，或迁移为支持 ipynb 的文件 / LLM 评测题。",
-        ),
-        "warning",
-    )
+            choose_text(
+                request,
+                f"Submission #{submission.id} was received.",
+                f"已收到提交 #{submission.id}。",
+            ),
+            "success",
+        )
+    except ValueError as exc:
+        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+    except Exception as exc:
+        push_flash(
+            request,
+            choose_text(request, f"Notebook upload failed: {exc}", f"Notebook 上传失败：{exc}"),
+            "danger",
+        )
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
 
 

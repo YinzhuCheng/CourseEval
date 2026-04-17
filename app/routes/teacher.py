@@ -3,7 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -14,6 +14,7 @@ from app.constants import (
     AssignmentStatus,
     CourseRole,
     FeedbackSource,
+    LLMResponseLanguage,
     LLMTestStatus,
     MembershipStatus,
     QuestionType,
@@ -32,6 +33,7 @@ from app.models import (
     FinalGradeSnapshot,
     FileQuestionConfig,
     LLMConfig,
+    NotebookQuestionConfig,
     PythonCodeQuestionConfig,
     Question,
     QuestionVersion,
@@ -62,6 +64,7 @@ from app.services.submissions import (
     is_submission_pending_teacher_review,
     read_submission_artifact_text,
     refresh_final_grade_snapshot,
+    store_reference_answer_file,
 )
 from app.web import render_template
 
@@ -213,6 +216,7 @@ def update_course_llm_config(
     course_id: int,
     request: Request,
     llm_config_id: str = Form(""),
+    llm_response_language: str = Form(LLMResponseLanguage.AUTO.value),
     db: Session = Depends(get_db),
 ):
     try:
@@ -229,6 +233,11 @@ def update_course_llm_config(
         return _redirect("/teacher/courses")
 
     selected_id = llm_config_id.strip()
+    try:
+        course.llm_response_language = LLMResponseLanguage(llm_response_language.strip().lower()).value
+    except ValueError:
+        course.llm_response_language = LLMResponseLanguage.AUTO.value
+
     if not selected_id:
         course.default_llm_config_id = None
         course.use_global_llm_default = True
@@ -460,7 +469,7 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
 
 
 @router.post("/assignments/{assignment_id}/questions")
-def create_question(
+async def create_question(
     assignment_id: int,
     request: Request,
     title: str = Form(...),
@@ -493,8 +502,11 @@ def create_question(
     llm_score_weight: str = Form("0"),
     llm_scoring_rubric: str = Form(""),
     llm_feedback_enabled: str = Form("false"),
+    notebook_llm_score_weight: str = Form("20"),
+    notebook_llm_feedback_enabled: str = Form("true"),
     rubric_text: str = Form(""),
     reference_answer: str = Form(""),
+    reference_answer_file: UploadFile | None = File(None),
     accepted_extensions: str = Form(""),
     require_teacher_confirmation: str = Form("true"),
     min_length: str = Form(""),
@@ -529,18 +541,6 @@ def create_question(
         push_flash(request, choose_text(request, "Invalid question type.", "题目类型无效。"), "danger")
         return _redirect(f"/teacher/assignments/{assignment.id}")
 
-    if q_type == QuestionType.NOTEBOOK:
-        push_flash(
-            request,
-            choose_text(
-                request,
-                "Notebook execution has been retired. Use a native Python code question for executable tasks, or use a file / LLM-reviewed question for .ipynb submissions.",
-                "Notebook 执行流程已下线。需要可执行评测时请创建原生 Python 代码题；需要提交 .ipynb 时，请创建文件 / LLM 评测题。",
-            ),
-            "warning",
-        )
-        return _redirect(f"/teacher/assignments/{assignment.id}")
-
     max_score_decimal = Decimal(max_score)
     order_index = len(assignment.questions) + 1
     teacher_confirmation_required = require_teacher_confirmation == "true"
@@ -556,7 +556,82 @@ def create_question(
     db.add(question)
     db.flush()
 
-    if q_type == QuestionType.SHORT_ANSWER:
+    ref_file_rel: str | None = None
+    if reference_answer_file and reference_answer_file.filename:
+        try:
+            raw = await reference_answer_file.read()
+            ref_file_rel = store_reference_answer_file(
+                user_id=user.id,
+                question_id=question.id,
+                original_filename=reference_answer_file.filename,
+                file_bytes=raw,
+            )
+        except ValueError as exc:
+            push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+
+    if q_type == QuestionType.NOTEBOOK:
+        rubric = llm_scoring_rubric.strip() or rubric_text.strip()
+        if not rubric:
+            push_flash(
+                request,
+                choose_text(request, "Notebook LLM questions require an LLM scoring rubric.", "Notebook LLM 题必须填写 LLM 评分细则。"),
+                "danger",
+            )
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        n_weight = Decimal(notebook_llm_score_weight or "0")
+        if n_weight <= 0 or notebook_llm_feedback_enabled != "true":
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Notebook LLM questions require a positive LLM score weight and LLM feedback enabled.",
+                    "Notebook LLM 题需要填写大于 0 的 LLM 分数权重并启用 LLM 反馈。",
+                ),
+                "danger",
+            )
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        if n_weight > max_score_decimal:
+            push_flash(
+                request,
+                choose_text(request, "LLM score weight cannot exceed the question max score.", "LLM 分数权重不能超过题目满分。"),
+                "danger",
+            )
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        if not reference_answer.strip() and not ref_file_rel:
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Provide a reference answer (text and/or upload) for notebook LLM grading.",
+                    "请为 Notebook LLM 评阅提供参考答案（文本和/或上传附件）。",
+                ),
+                "danger",
+            )
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        db.add(
+            NotebookQuestionConfig(
+                question_id=question.id,
+                time_limit_seconds=300,
+                memory_limit_mb=1024,
+                cpu_limit="1",
+                allow_network=False,
+                execution_weight=Decimal("0"),
+                visible_weight=Decimal("100"),
+                hidden_weight=Decimal("0"),
+                llm_score_weight=n_weight,
+                llm_scoring_rubric=rubric,
+                llm_feedback_enabled=True,
+                reference_answer_text=reference_answer.strip(),
+                reference_answer_file_path=ref_file_rel,
+            )
+        )
+    elif q_type == QuestionType.SHORT_ANSWER:
         db.add(
             ShortAnswerQuestionConfig(
                 question_id=question.id,
@@ -641,13 +716,13 @@ def create_question(
             )
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
-        if not rubric_text.strip() or not reference_answer.strip():
+        if not rubric_text.strip() or (not reference_answer.strip() and not ref_file_rel):
             push_flash(
                 request,
                 choose_text(
                     request,
-                    "Reference answer and rubric are required for file / LLM-reviewed questions.",
-                    "文件 / LLM 评测题必须填写参考答案和评分细则。",
+                    "Rubric is required, and you must provide a reference answer (text and/or upload).",
+                    "必须填写评分细则，并提供参考答案（文本和/或上传附件）。",
                 ),
                 "danger",
             )
@@ -660,6 +735,7 @@ def create_question(
                 accepted_extensions=",".join(normalized_extensions),
                 rubric_text=rubric_text.strip(),
                 reference_answer_text=reference_answer.strip(),
+                reference_answer_file_path=ref_file_rel,
                 llm_suggestion_enabled=True,
                 teacher_confirmation_required=teacher_confirmation_required,
                 notebook_outputs_required=notebook_outputs_required,
@@ -674,13 +750,13 @@ def create_question(
         ]
         if q_type == QuestionType.PDF_LLM:
             normalized_extensions = [".pdf"]
-        if not rubric_text.strip() or not reference_answer.strip():
+        if not rubric_text.strip() or (not reference_answer.strip() and not ref_file_rel):
             push_flash(
                 request,
                 choose_text(
                     request,
-                    "Reference answer and rubric are required for file / LLM-reviewed questions.",
-                    "文件 / LLM 评测题必须填写参考答案和评分细则。",
+                    "Rubric is required, and you must provide a reference answer (text and/or upload).",
+                    "必须填写评分细则，并提供参考答案（文本和/或上传附件）。",
                 ),
                 "danger",
             )
@@ -692,6 +768,7 @@ def create_question(
                 accepted_extensions=",".join(normalized_extensions),
                 rubric_text=rubric_text.strip(),
                 reference_answer_text=reference_answer.strip(),
+                reference_answer_file_path=ref_file_rel,
                 llm_suggestion_enabled=True,
                 teacher_confirmation_required=teacher_confirmation_required,
                 notebook_outputs_required=q_type == QuestionType.FORMATTED_TEXT_LLM,
@@ -893,7 +970,7 @@ def apply_historical_highest_grading(question_id: int, request: Request, db: Ses
 
 
 @router.post("/questions/{question_id}/update")
-def update_question(
+async def update_question(
     question_id: int,
     request: Request,
     title: str = Form(...),
@@ -919,10 +996,14 @@ def update_question(
     allow_network: str = Form("false"),
     rubric_text: str = Form(""),
     reference_answer: str = Form(""),
+    reference_answer_file: UploadFile | None = File(None),
+    clear_reference_answer_file: str = Form("false"),
     accepted_extensions: str = Form(""),
     require_teacher_confirmation: str = Form("true"),
     min_length: str = Form(""),
     max_length: str = Form(""),
+    notebook_llm_score_weight: str = Form(""),
+    notebook_llm_rubric: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -942,6 +1023,22 @@ def update_question(
     question.scoring_rule_override = ScoringRule(scoring_rule_override) if scoring_rule_override.strip() else None
     question.updated_at = utcnow()
     teacher_confirmation_required = require_teacher_confirmation == "true"
+
+    new_reference_file_path: str | None = None
+    uploaded_ref = False
+    if reference_answer_file and reference_answer_file.filename:
+        try:
+            raw = await reference_answer_file.read()
+            new_reference_file_path = store_reference_answer_file(
+                user_id=user.id,
+                question_id=question.id,
+                original_filename=reference_answer_file.filename,
+                file_bytes=raw,
+            )
+            uploaded_ref = True
+        except ValueError as exc:
+            push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+            return _redirect(f"/teacher/questions/{question.id}")
 
     if question.question_type == QuestionType.SHORT_ANSWER and question.short_answer_config:
         cfg = question.short_answer_config
@@ -971,6 +1068,26 @@ def update_question(
         cfg.cpu_limit = cpu_limit or "1"
         cfg.allow_network = allow_network == "true"
         cfg.updated_at = utcnow()
+    elif question.question_type == QuestionType.NOTEBOOK and question.notebook_config:
+        cfg = question.notebook_config
+        if notebook_llm_score_weight.strip():
+            nw = Decimal(notebook_llm_score_weight.strip())
+            if nw <= 0 or nw > question.max_score:
+                push_flash(
+                    request,
+                    choose_text(request, "Invalid LLM score weight.", "LLM 分数权重无效。"),
+                    "danger",
+                )
+                return _redirect(f"/teacher/questions/{question.id}")
+            cfg.llm_score_weight = nw
+        if notebook_llm_rubric.strip():
+            cfg.llm_scoring_rubric = notebook_llm_rubric.strip()
+        cfg.reference_answer_text = reference_answer.strip()
+        if clear_reference_answer_file == "true":
+            cfg.reference_answer_file_path = None
+        elif uploaded_ref:
+            cfg.reference_answer_file_path = new_reference_file_path
+        cfg.updated_at = utcnow()
     elif question.file_question_config:
         cfg = question.file_question_config
         if question.question_type == QuestionType.FILE_LLM:
@@ -990,6 +1107,10 @@ def update_question(
             cfg.notebook_outputs_required = ".ipynb" in set(normalized)
         cfg.rubric_text = rubric_text.strip()
         cfg.reference_answer_text = reference_answer.strip()
+        if clear_reference_answer_file == "true":
+            cfg.reference_answer_file_path = None
+        elif uploaded_ref:
+            cfg.reference_answer_file_path = new_reference_file_path
         cfg.teacher_confirmation_required = teacher_confirmation_required
         cfg.updated_at = utcnow()
 

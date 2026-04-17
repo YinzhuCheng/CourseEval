@@ -195,6 +195,8 @@ def admin_create_llm_config(
     max_tokens: int = Form(512),
     temperature: str = Form("0.2"),
     queue_concurrency: int = Form(1),
+    max_llm_retries: int = Form(3),
+    llm_retry_initial_seconds: int = Form(5),
     db: Session = Depends(get_db),
 ):
     try:
@@ -215,6 +217,8 @@ def admin_create_llm_config(
         max_tokens=max_tokens,
         temperature=temperature.strip(),
         queue_concurrency=max(queue_concurrency, 1),
+        max_llm_retries=max(1, max_llm_retries),
+        llm_retry_initial_seconds=max(1, llm_retry_initial_seconds),
         created_by=admin_user.id,
     )
     db.add(config)

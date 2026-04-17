@@ -244,6 +244,22 @@ def _ensure_question_version_schema() -> None:
                 db.commit()
 
     _backfill_unified_file_llm_types()
+    _ensure_llm_grading_enhancements()
+
+
+def _ensure_llm_grading_enhancements() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "llm_configs" in tables:
+        _ensure_column("llm_configs", "max_llm_retries", "INTEGER NOT NULL DEFAULT 3")
+        _ensure_column("llm_configs", "llm_retry_initial_seconds", "INTEGER NOT NULL DEFAULT 5")
+    if "courses" in tables:
+        _ensure_column("courses", "llm_response_language", "VARCHAR(8) NOT NULL DEFAULT 'auto'")
+    if "file_question_configs" in tables:
+        _ensure_column("file_question_configs", "reference_answer_file_path", "VARCHAR(512)")
+    if "notebook_question_configs" in tables:
+        _ensure_column("notebook_question_configs", "reference_answer_text", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column("notebook_question_configs", "reference_answer_file_path", "VARCHAR(512)")
 
 
 def _backfill_unified_file_llm_types() -> None:

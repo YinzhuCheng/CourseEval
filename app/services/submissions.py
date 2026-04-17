@@ -36,6 +36,7 @@ from app.services.llm import (
     generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
 )
+from app.services.llm_retry import retry_llm_grading_call
 from app.models import (
     Assignment,
     CourseMember,
@@ -48,6 +49,7 @@ from app.models import (
     JobOutput,
     Notebook,
     LLMConfig,
+    NotebookQuestionConfig,
     PythonCodeQuestionConfig,
     Question,
     QuestionVersion,
@@ -371,6 +373,28 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+REFERENCE_ANSWER_UPLOAD_EXTENSIONS = frozenset({".pdf", ".tex", ".txt", ".md", ".ipynb"})
+
+
+def store_reference_answer_file(
+    *,
+    user_id: int,
+    question_id: int,
+    original_filename: str,
+    file_bytes: bytes,
+) -> str:
+    ext = Path(original_filename).suffix.lower()
+    if ext not in REFERENCE_ANSWER_UPLOAD_EXTENSIONS:
+        raise ValueError(f"Reference answer uploads must be one of: {', '.join(sorted(REFERENCE_ANSWER_UPLOAD_EXTENSIONS))}")
+    relative, _ = _store_uploaded_file(
+        user_id=user_id,
+        question_id=question_id,
+        original_filename=original_filename,
+        file_bytes=file_bytes,
+    )
+    return relative
+
+
 def _store_uploaded_file(*, user_id: int, question_id: int, original_filename: str, file_bytes: bytes) -> tuple[str, str]:
     suffix = Path(original_filename).suffix.lower() or ".bin"
     upload_dir = settings.uploads_dir / f"user-{user_id}" / f"question-{question_id}"
@@ -412,6 +436,124 @@ def _render_pdf_pages_to_images(file_path: Path) -> list[Path]:
 
 def _image_inputs_from_png_paths(paths: list[Path]) -> list[ImageInput]:
     return [ImageInput(mime_type="image/png", data=path.read_bytes()) for path in paths]
+
+
+def _extract_pdf_text(file_path: Path, *, max_chars: int = 120000) -> str:
+    doc = fitz.open(file_path)
+    try:
+        parts: list[str] = []
+        for page_index in range(min(doc.page_count, settings.pdf_review_max_pages)):
+            page = doc.load_page(page_index)
+            parts.append(page.get_text("text") or "")
+        text = "\n".join(parts).strip()
+        return text[:max_chars] if len(text) > max_chars else text
+    finally:
+        doc.close()
+
+
+def _merged_reference_answer_text(
+    *,
+    base_text: str,
+    file_relative_path: str | None,
+    notices: list[str],
+) -> str:
+    merged = (base_text or "").strip()
+    if not file_relative_path:
+        return merged
+    path = absolute_data_path(file_relative_path)
+    if not path.exists():
+        notices.append("Reference answer file is missing on disk; using text field only.")
+        return merged
+    ext = path.suffix.lower()
+    try:
+        if ext == ".pdf":
+            extracted = _extract_pdf_text(path)
+        elif ext in {".tex", ".txt", ".md"}:
+            extracted = path.read_text(encoding="utf-8", errors="replace").strip()
+        elif ext == ".ipynb":
+            extracted = _render_notebook_as_text(path, require_outputs=False)
+        else:
+            notices.append(f"Unsupported reference answer file type {ext}; using text field only.")
+            return merged
+        if not extracted:
+            notices.append("Reference answer file produced no extractable text; using text field only.")
+            return merged
+        if merged:
+            return f"{merged}\n\n--- From uploaded reference file ---\n{extracted}"
+        return extracted
+    except Exception as exc:
+        notices.append(f"Could not read reference answer file: {exc}")
+        return merged
+
+
+def _course_llm_response_language(question: Question) -> str | None:
+    course = question.assignment.course
+    return getattr(course, "llm_response_language", None) or "auto"
+
+
+def _latest_feedback_comment(submission: Submission) -> str:
+    items = [f for f in submission.feedback_items if f.source in {FeedbackSource.TEACHER, FeedbackSource.LLM}]
+    if not items:
+        return ""
+    latest = max(items, key=lambda f: f.created_at)
+    parts = []
+    if latest.comment_text:
+        parts.append(latest.comment_text.strip())
+    if latest.score_suggestion is not None:
+        parts.append(f"(suggested/recorded score: {latest.score_suggestion})")
+    return "\n".join(parts).strip()
+
+
+def _latest_teacher_score_text(submission: Submission) -> str:
+    teacher_items = [f for f in submission.feedback_items if f.source == FeedbackSource.TEACHER]
+    if not teacher_items:
+        return ""
+    latest = max(teacher_items, key=lambda f: f.created_at)
+    if latest.score_suggestion is None:
+        return ""
+    return str(latest.score_suggestion)
+
+
+def _submission_text_for_llm_context(submission: Submission) -> str:
+    text = (submission.answer_text or "").strip()
+    if text:
+        return text
+    if submission.notebook:
+        try:
+            return _render_notebook_as_text(
+                absolute_data_path(submission.notebook.stored_path),
+                require_outputs=False,
+            )
+        except Exception:
+            return ""
+    return ""
+
+
+def _find_previous_submission_with_feedback(db: Session, submission: Submission) -> Submission | None:
+    statement = (
+        select(Submission)
+        .options(
+            joinedload(Submission.feedback_items),
+            joinedload(Submission.notebook),
+        )
+        .where(
+            Submission.question_id == submission.question_id,
+            Submission.user_id == submission.user_id,
+            Submission.submitted_at < submission.submitted_at,
+        )
+        .order_by(Submission.submitted_at.desc())
+    )
+    for prev in db.scalars(statement).unique():
+        if any(f.source in {FeedbackSource.TEACHER, FeedbackSource.LLM} for f in prev.feedback_items):
+            return prev
+    return None
+
+
+def _truncate_for_llm(label: str, text: str, max_len: int, notices: list[str]) -> str:
+    if len(text) <= max_len:
+        return text
+    notices.append(f"{label} was truncated to {max_len} characters for the LLM prompt.")
+    return text[:max_len] + "\n...[truncated]"
 
 
 def _render_notebook_as_text(file_path: Path, *, require_outputs: bool) -> str:
@@ -812,10 +954,72 @@ def create_notebook_submission(
     original_filename: str,
     notebook_bytes: bytes,
 ) -> Submission:
-    raise ValueError(
-        "Notebook execution has been retired. Use a native Python code question for .py submissions, "
-        "or use a file / LLM-reviewed question for .ipynb submissions."
+    allowed, message = _submission_window_open(question)
+    if not allowed:
+        raise ValueError(message or "Submission window is closed.")
+
+    allowed, message = _check_submission_limit(db, question, user_id)
+    if not allowed:
+        raise ValueError(message or "Submission limit reached.")
+
+    ncfg = question.notebook_config
+    if ncfg is None:
+        raise ValueError("Notebook question configuration is missing.")
+
+    _ensure_text_file_extension(original_filename, {".ipynb"})
+    upload_dir = settings.uploads_dir / f"user-{user_id}"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = upload_dir / f"{uuid4().hex}.ipynb"
+    stored_path.write_bytes(notebook_bytes)
+    relative_nb = relative_to_data(stored_path)
+
+    notebook = Notebook(
+        user_id=user_id,
+        original_filename=original_filename,
+        stored_path=relative_nb,
     )
+    db.add(notebook)
+    db.flush()
+
+    extracted = _render_notebook_as_text(stored_path, require_outputs=False)
+    llm_enabled = ncfg.llm_feedback_enabled and _resolve_llm_config_for_question(question, db) is not None
+    submission = Submission(
+        course_id=question.assignment.course_id,
+        assignment_id=question.assignment_id,
+        question_id=question.id,
+        user_id=user_id,
+        submission_type=QuestionType.NOTEBOOK,
+        status=SubmissionStatus.SUBMITTED if llm_enabled else SubmissionStatus.COMPLETED,
+        original_filename=original_filename,
+        notebook_id=notebook.id,
+        answer_text=extracted,
+        submitted_at=utcnow(),
+        completed_at=utcnow() if not llm_enabled else None,
+        is_late=_is_late(question),
+        counts_toward_limit=True,
+        is_effective_submission=not llm_enabled,
+        question_version_id=question.current_question_version_id,
+    )
+    db.add(submission)
+    db.flush()
+    if llm_enabled:
+        db.add(
+            EvaluationTask(
+                submission_id=submission.id,
+                task_type=EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
+                backend_type="rq",
+                status=EvaluationTaskStatus.QUEUED,
+            )
+        )
+        db.commit()
+        db.refresh(submission)
+        enqueue_notebook_llm_feedback(db, submission.id)
+    else:
+        db.commit()
+        db.refresh(submission)
+    if submission.is_effective_submission:
+        update_final_grade_snapshot(db, submission)
+    return submission
 
 
 def create_short_answer_submission(
@@ -1129,7 +1333,36 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
 
 
 def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
-    raise ValueError(_RETIRED_NOTEBOOK_MESSAGE)
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise ValueError("Submission not found.")
+
+    task = db.scalar(
+        select(EvaluationTask)
+        .where(
+            EvaluationTask.submission_id == submission_id,
+            EvaluationTask.task_type == EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
+        )
+        .order_by(EvaluationTask.created_at.desc())
+    )
+    if task is None:
+        raise ValueError("Notebook LLM task not found.")
+
+    llm_config = _resolve_llm_config_for_question(submission.question, db)
+    if llm_config is None:
+        raise ValueError("No enabled LLM config available.")
+    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+        process_notebook_llm_feedback,
+        submission_id,
+        task.id,
+        job_timeout=120,
+        result_ttl=86400,
+        failure_ttl=86400,
+    )
+    task.backend_job_id = rq_job.id
+    task.status = EvaluationTaskStatus.QUEUED
+    db.commit()
+    return rq_job.id
 
 
 def cleanup_stale_running_items() -> int:
@@ -1688,21 +1921,49 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         task.started_at = utcnow()
         db.commit()
 
-        result = generate_short_answer_evaluation(
-            llm_config,
-            question_title=submission.question.title,
-            question_description=submission.question.description or "",
-            rubric_text=submission.question.short_answer_config.rubric_text if submission.question.short_answer_config else "",
-            reference_answer_text="",
-            answer_text=submission.answer_text or "",
-            max_score=float(submission.question.max_score),
-        )
+        notices: list[str] = []
+        prev = _find_previous_submission_with_feedback(db, submission)
+        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
+        prev_fb = _latest_feedback_comment(prev) if prev else ""
+        prev_score = _latest_teacher_score_text(prev) if prev else ""
+        trunc_notice = ""
+        answer_text = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
+        if notices:
+            trunc_notice = " ".join(notices)
+
+        def _run_sa() -> dict:
+            return generate_short_answer_evaluation(
+                llm_config,
+                question_title=submission.question.title,
+                question_description=submission.question.description or "",
+                rubric_text=submission.question.short_answer_config.rubric_text
+                if submission.question.short_answer_config
+                else "",
+                reference_answer_text="",
+                answer_text=answer_text,
+                max_score=float(submission.question.max_score),
+                previous_submission_text=prev_answer,
+                previous_feedback_text=prev_fb,
+                previous_teacher_score_text=prev_score,
+                truncation_notice=trunc_notice,
+                course_llm_response_language=_course_llm_response_language(submission.question),
+                text_format_may_lose_images=False,
+            )
+
+        result = retry_llm_grading_call(llm_config, _run_sa, label="short_answer_llm")
+        comment = result.get("comment_text") or ""
+        if notices:
+            comment = (
+                comment
+                + "\n\n"
+                + "\n".join(f"[Grading system notice] {item}" for item in notices)
+            ).strip()
         db.add(
             Feedback(
                 submission_id=submission.id,
                 source=FeedbackSource.LLM,
                 score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
-                comment_text=result.get("comment_text"),
+                comment_text=comment,
             )
         )
         task.status = EvaluationTaskStatus.SUCCEEDED
@@ -1717,6 +1978,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
             task.finished_at = utcnow()
             task.error_message = str(exc)
             db.commit()
+        raise
     finally:
         db.close()
 
@@ -1749,6 +2011,23 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         task.started_at = utcnow()
         db.commit()
 
+        notices: list[str] = []
+        ref_merged = _merged_reference_answer_text(
+            base_text=question_config.reference_answer_text,
+            file_relative_path=question_config.reference_answer_file_path,
+            notices=notices,
+        )
+        prev = _find_previous_submission_with_feedback(db, submission)
+        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
+        prev_fb = _latest_feedback_comment(prev) if prev else ""
+        prev_score = _latest_teacher_score_text(prev) if prev else ""
+        trunc_notice = ""
+        prev_answer = _truncate_for_llm("Previous submission", prev_answer, 12000, notices)
+        prev_fb = _truncate_for_llm("Previous feedback", prev_fb, 8000, notices)
+        ref_for_prompt = _truncate_for_llm("Reference answer", ref_merged, 24000, notices)
+        if notices:
+            trunc_notice = " ".join(notices)
+
         ext = Path(submission.original_filename or "").suffix.lower()
         if submission.stored_file_path and (
             submission.submission_type == QuestionType.PDF_LLM
@@ -1759,32 +2038,59 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             page_paths = sorted(page_dir.glob("page-*.png"))
             if not page_paths:
                 page_paths = _render_pdf_pages_to_images(pdf_path)
-            result = generate_file_evaluation_from_images(
-                llm_config,
-                question_title=submission.question.title,
-                question_description=submission.question.description or "",
-                rubric_text=question_config.rubric_text,
-                reference_answer_text=question_config.reference_answer_text,
-                max_score=float(submission.question.max_score),
-                images=_image_inputs_from_png_paths(page_paths),
-            )
-        else:
-            result = generate_short_answer_evaluation(
-                llm_config,
-                question_title=submission.question.title,
-                question_description=submission.question.description or "",
-                rubric_text=question_config.rubric_text,
-                reference_answer_text=question_config.reference_answer_text,
-                answer_text=submission.answer_text or "",
-                max_score=float(submission.question.max_score),
-            )
 
+            def _run_pdf() -> dict:
+                return generate_file_evaluation_from_images(
+                    llm_config,
+                    question_title=submission.question.title,
+                    question_description=submission.question.description or "",
+                    rubric_text=question_config.rubric_text,
+                    reference_answer_text=ref_for_prompt,
+                    max_score=float(submission.question.max_score),
+                    images=_image_inputs_from_png_paths(page_paths),
+                    previous_submission_text=prev_answer,
+                    previous_feedback_text=prev_fb,
+                    previous_teacher_score_text=prev_score,
+                    truncation_notice=trunc_notice,
+                    course_llm_response_language=_course_llm_response_language(submission.question),
+                )
+
+            result = retry_llm_grading_call(llm_config, _run_pdf, label="file_llm_pdf")
+        else:
+            ans = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
+            if notices and not trunc_notice:
+                trunc_notice = " ".join(notices)
+
+            def _run_text() -> dict:
+                return generate_short_answer_evaluation(
+                    llm_config,
+                    question_title=submission.question.title,
+                    question_description=submission.question.description or "",
+                    rubric_text=question_config.rubric_text,
+                    reference_answer_text=ref_for_prompt,
+                    answer_text=ans,
+                    max_score=float(submission.question.max_score),
+                    previous_submission_text=prev_answer,
+                    previous_feedback_text=prev_fb,
+                    previous_teacher_score_text=prev_score,
+                    truncation_notice=trunc_notice,
+                    course_llm_response_language=_course_llm_response_language(submission.question),
+                    text_format_may_lose_images=ext in {".tex", ".ipynb", ".txt"},
+                )
+
+            result = retry_llm_grading_call(llm_config, _run_text, label="file_llm_text")
+
+        comment = result.get("comment_text") or ""
+        if notices:
+            comment = (
+                comment + "\n\n" + "\n".join(f"[Grading system notice] {item}" for item in notices)
+            ).strip()
         db.add(
             Feedback(
                 submission_id=submission.id,
                 source=FeedbackSource.LLM,
                 score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
-                comment_text=result.get("comment_text"),
+                comment_text=comment,
             )
         )
         if not question_config.teacher_confirmation_required:
@@ -1812,14 +2118,116 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
 def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
     db = SessionLocal()
     try:
+        submission = db.scalar(
+            select(Submission)
+            .options(
+                joinedload(Submission.question).joinedload(Question.notebook_config),
+                joinedload(Submission.assignment).joinedload(Assignment.course),
+                joinedload(Submission.notebook),
+                joinedload(Submission.evaluation_results),
+                joinedload(Submission.feedback_items),
+            )
+            .where(Submission.id == submission_id)
+        )
         task = db.get(EvaluationTask, task_id)
-        if task is None:
+        if submission is None or task is None:
             return
 
-        task.status = EvaluationTaskStatus.FAILED
-        task.finished_at = utcnow()
-        task.error_message = _RETIRED_NOTEBOOK_MESSAGE
+        llm_config = _resolve_llm_config_for_question(submission.question, db)
+        ncfg = submission.question.notebook_config if submission.question else None
+        if llm_config is None or not llm_config.enabled or ncfg is None:
+            task.status = EvaluationTaskStatus.FAILED
+            task.error_message = "No enabled LLM config or notebook question config."
+            task.finished_at = utcnow()
+            db.commit()
+            return
+
+        if submission.notebook is None:
+            task.status = EvaluationTaskStatus.FAILED
+            task.error_message = "Notebook file is missing for this submission."
+            task.finished_at = utcnow()
+            db.commit()
+            return
+
+        task.status = EvaluationTaskStatus.RUNNING
+        task.started_at = utcnow()
         db.commit()
+
+        nb_path = absolute_data_path(submission.notebook.stored_path)
+        student_text = _render_notebook_as_text(nb_path, require_outputs=False)
+        latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
+        summary_payload = _parsed_summary_json(latest_result)
+        summary_json = json.dumps(summary_payload, ensure_ascii=True, indent=2) if summary_payload else "{}"
+        stdout_text = read_submission_artifact_text(latest_result, "stdout", max_chars=8000) if latest_result else ""
+        stderr_text = read_submission_artifact_text(latest_result, "stderr", max_chars=8000) if latest_result else ""
+        auto_score = float(latest_result.auto_score) if latest_result and latest_result.auto_score is not None else 0.0
+        max_llm = float(ncfg.llm_score_weight or 0)
+
+        notices: list[str] = []
+        ref_merged = _merged_reference_answer_text(
+            base_text=ncfg.reference_answer_text or "",
+            file_relative_path=ncfg.reference_answer_file_path,
+            notices=notices,
+        )
+        prev = _find_previous_submission_with_feedback(db, submission)
+        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
+        prev_answer = _truncate_for_llm("Previous submission", prev_answer, 12000, notices)
+        prev_fb = _truncate_for_llm("Previous feedback", _latest_feedback_comment(prev) if prev else "", 8000, notices)
+        prev_score = _latest_teacher_score_text(prev) if prev else ""
+        student_text = _truncate_for_llm("Student submission", student_text, 24000, notices)
+        ref_for_prompt = _truncate_for_llm("Reference answer", ref_merged, 24000, notices)
+        summary_json = _truncate_for_llm("Evaluation summary JSON", summary_json, 12000, notices)
+        stdout_text = _truncate_for_llm("stdout", stdout_text, 8000, notices)
+        stderr_text = _truncate_for_llm("stderr", stderr_text, 8000, notices)
+        trunc_notice = " ".join(notices) if notices else ""
+
+        def _run_nb() -> dict:
+            return generate_notebook_evaluation_with_llm(
+                llm_config,
+                question_title=submission.question.title,
+                question_description=submission.question.description or "",
+                rubric_text=ncfg.llm_scoring_rubric or "",
+                reference_answer_text=ref_for_prompt,
+                student_submission_text=student_text,
+                summary_json=summary_json,
+                stdout_text=stdout_text,
+                stderr_text=stderr_text,
+                auto_score=auto_score,
+                max_llm_score=max_llm,
+                previous_submission_text=prev_answer,
+                previous_feedback_text=prev_fb,
+                previous_teacher_score_text=prev_score,
+                truncation_notice=trunc_notice,
+                course_llm_response_language=_course_llm_response_language(submission.question),
+            )
+
+        result = retry_llm_grading_call(llm_config, _run_nb, label="notebook_llm")
+        comment = result.get("comment_text") or ""
+        if notices:
+            comment = (
+                comment + "\n\n" + "\n".join(f"[Grading system notice] {item}" for item in notices)
+            ).strip()
+        db.add(
+            Feedback(
+                submission_id=submission.id,
+                evaluation_result_id=latest_result.id if latest_result else None,
+                source=FeedbackSource.LLM,
+                score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
+                comment_text=comment,
+            )
+        )
+        db.flush()
+        if latest_result is not None:
+            db.refresh(submission)
+            latest_result.final_score = _recompute_notebook_final_score(submission, latest_result)
+        submission.status = SubmissionStatus.COMPLETED
+        submission.completed_at = utcnow()
+        submission.is_effective_submission = True
+        submission.failure_reason_code = None
+        task.status = EvaluationTaskStatus.SUCCEEDED
+        task.finished_at = utcnow()
+        db.commit()
+        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Notebook LLM feedback failed for submission %s", submission_id)
         task = db.get(EvaluationTask, task_id)
@@ -1828,6 +2236,7 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
             task.finished_at = utcnow()
             task.error_message = str(exc)
             db.commit()
+        raise
     finally:
         db.close()
 

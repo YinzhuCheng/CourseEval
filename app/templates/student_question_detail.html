@@ -43,13 +43,23 @@
         <h2 class="h5 mb-3">{{ lx("Submit your work", "提交作业") }}</h2>
 
         {% if question.question_type.value == "notebook" %}
-        <div class="alert alert-warning mb-0">
-          <strong>{{ lx("Notebook execution has been retired.", "Notebook 执行流程已下线。") }}</strong>
-          {{ lx(
-            "Please ask course staff to migrate this activity to a native Python code question or a file / LLM-reviewed ipynb workflow.",
-            "请联系课程教师，将该题迁移为原生 Python 代码题，或迁移为支持 ipynb 的文件 / LLM 评测题。"
-          ) }}
-        </div>
+        <form method="post" action="/student/questions/{{ question.id }}/submit-notebook" enctype="multipart/form-data" class="row g-3">
+          <div class="col-12">
+            <div class="section-note">
+              {{ lx(
+                "Upload your .ipynb file. It will be converted to text for automated tests (if any) and LLM review. Diagram-heavy answers may lose image detail in text form—consider a PDF-based question if you rely on figures.",
+                "请上传 .ipynb 文件。系统会先转为文本用于自动测试（如有）和 LLM 评阅。若答案强依赖示意图，纯文本可能丢失图片信息，可考虑使用支持 PDF 的题目。",
+              ) }}
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Notebook file", "Notebook 文件") }}</label>
+            <input class="form-control" type="file" name="notebook_file" accept=".ipynb,application/x-ipynb+json" required />
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">{{ lx("Upload notebook", "上传 Notebook") }}</button>
+          </div>
+        </form>
         {% elif question.question_type.value == "python_code" %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-python" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">

@@ -121,6 +121,12 @@ class LLMTestStatus(str, Enum):
     FAILED = "failed"
 
 
+class LLMResponseLanguage(str, Enum):
+    AUTO = "auto"
+    ZH = "zh"
+    EN = "en"
+
+
 class JobStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"

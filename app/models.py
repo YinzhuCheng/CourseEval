@@ -8,6 +8,7 @@ from app.constants import (
     AssignmentStatus,
     CourseRole,
     CourseStatus,
+    LLMResponseLanguage,
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
@@ -152,6 +153,9 @@ class Course(Base):
         nullable=True,
     )
     use_global_llm_default: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    llm_response_language: Mapped[str] = mapped_column(
+        String(8), nullable=False, default=LLMResponseLanguage.AUTO.value
+    )
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -263,6 +267,8 @@ class LLMConfig(Base):
     max_tokens: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
     temperature: Mapped[str] = mapped_column(String(16), default="0.2", nullable=False)
     queue_concurrency: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    max_llm_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    llm_retry_initial_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_test_status: Mapped[LLMTestStatus] = mapped_column(
         Enum(LLMTestStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
@@ -462,6 +468,8 @@ class NotebookQuestionConfig(Base):
     llm_score_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     llm_scoring_rubric: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_feedback_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reference_answer_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_answer_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -544,6 +552,7 @@ class FileQuestionConfig(Base):
     )
     accepted_extensions: Mapped[str] = mapped_column(String(255), nullable=False)
     reference_answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    reference_answer_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
     llm_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

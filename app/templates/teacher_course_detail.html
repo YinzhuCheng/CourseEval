@@ -209,6 +209,14 @@
               {% endfor %}
             </select>
           </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM response language", "LLM 回复语言") }}</label>
+            <select class="form-select" name="llm_response_language">
+              <option value="auto" {% if (course.llm_response_language or 'auto') == 'auto' %}selected{% endif %}>{{ lx("Auto (match student submission)", "自动（跟随学生作业语言）") }}</option>
+              <option value="zh" {% if course.llm_response_language == 'zh' %}selected{% endif %}>{{ lx("Chinese", "中文") }}</option>
+              <option value="en" {% if course.llm_response_language == 'en' %}selected{% endif %}>{{ lx("English", "English") }}</option>
+            </select>
+          </div>
           <div class="col-12 d-grid">
             <button class="btn btn-outline-primary" type="submit">{{ lx("Save LLM setting", "保存 LLM 设置") }}</button>
           </div>
