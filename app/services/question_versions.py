@@ -21,14 +21,18 @@ def _serialize_question(question: Question) -> dict[str, Any]:
         "max_score": str(question.max_score),
         "scoring_rule_override": question.scoring_rule_override.value if question.scoring_rule_override else None,
     }
-    if question.python_code_config:
-        cfg = question.python_code_config
-        payload["python_code_config"] = {
+    if question.code_config:
+        cfg = question.code_config
+        payload["code_config"] = {
             "input_spec": cfg.input_spec,
             "output_spec": cfg.output_spec,
             "visible_tests_json": cfg.visible_tests_json,
             "hidden_tests_json": cfg.hidden_tests_json,
             "allowed_libraries_note": cfg.allowed_libraries_note,
+            "allowed_languages_json": cfg.allowed_languages_json,
+            "reference_solution_python": cfg.reference_solution_python,
+            "reference_solution_c": cfg.reference_solution_c,
+            "reference_solution_cpp": cfg.reference_solution_cpp,
             "time_limit_seconds": cfg.time_limit_seconds,
             "memory_limit_mb": cfg.memory_limit_mb,
             "cpu_limit": cfg.cpu_limit,
@@ -110,14 +114,18 @@ def restore_question_from_version_payload(db: Session, question: Question, paylo
     override = payload.get("scoring_rule_override")
     question.scoring_rule_override = ScoringRule(override) if override else None
 
-    py = payload.get("python_code_config")
-    if py and question.python_code_config:
-        cfg = question.python_code_config
+    py = payload.get("code_config") or payload.get("python_code_config")
+    if py and question.code_config:
+        cfg = question.code_config
         cfg.input_spec = py.get("input_spec")
         cfg.output_spec = py.get("output_spec")
         cfg.visible_tests_json = py.get("visible_tests_json") or "[]"
         cfg.hidden_tests_json = py.get("hidden_tests_json") or "[]"
         cfg.allowed_libraries_note = py.get("allowed_libraries_note")
+        cfg.allowed_languages_json = py.get("allowed_languages_json") or '["python"]'
+        cfg.reference_solution_python = py.get("reference_solution_python") or ""
+        cfg.reference_solution_c = py.get("reference_solution_c") or ""
+        cfg.reference_solution_cpp = py.get("reference_solution_cpp") or ""
         if py.get("time_limit_seconds") is not None:
             cfg.time_limit_seconds = int(py["time_limit_seconds"])
         if py.get("memory_limit_mb") is not None:

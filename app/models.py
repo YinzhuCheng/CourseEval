@@ -6,6 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.constants import (
     AccountRole,
     AssignmentStatus,
+    CodeLanguage,
+    CodeSubmissionMode,
     CourseRole,
     CourseStatus,
     LLMResponseLanguage,
@@ -47,6 +49,29 @@ def _normalize_python_test_case(item: dict, index: int) -> dict:
         "output": expected_output,
         "points": points,
     }
+
+
+def _normalize_code_language(value: str | CodeLanguage | None) -> str:
+    raw = value.value if isinstance(value, CodeLanguage) else str(value or "").strip().lower()
+    return raw if raw in {item.value for item in CodeLanguage} else CodeLanguage.PYTHON.value
+
+
+def _normalize_code_language_list(raw: str | None) -> list[CodeLanguage]:
+    try:
+        payload = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        payload = []
+    if not isinstance(payload, list):
+        payload = []
+    result: list[CodeLanguage] = []
+    for item in payload:
+        try:
+            language = CodeLanguage(str(item).strip().lower())
+        except ValueError:
+            continue
+        if language not in result:
+            result.append(language)
+    return result or [CodeLanguage.PYTHON]
 
 
 class User(Base):
@@ -435,7 +460,7 @@ class Question(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
-    python_code_config: Mapped["PythonCodeQuestionConfig | None"] = relationship(
+    code_config: Mapped["CodeQuestionConfig | None"] = relationship(
         back_populates="question",
         cascade="all, delete-orphan",
         uselist=False,
@@ -473,6 +498,10 @@ class Question(Base):
         post_update=True,
         uselist=False,
     )
+
+    @property
+    def python_code_config(self) -> "CodeQuestionConfig | None":
+        return self.code_config
 
 
 Index("ix_questions_assignment_order", Question.assignment_id, Question.order_index)
@@ -526,8 +555,8 @@ class NotebookQuestionConfig(Base):
     question: Mapped[Question] = relationship(back_populates="notebook_config")
 
 
-class PythonCodeQuestionConfig(Base):
-    __tablename__ = "python_code_question_configs"
+class CodeQuestionConfig(Base):
+    __tablename__ = "code_question_configs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     question_id: Mapped[int] = mapped_column(
@@ -541,6 +570,10 @@ class PythonCodeQuestionConfig(Base):
     visible_tests_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     hidden_tests_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     allowed_libraries_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_languages_json: Mapped[str] = mapped_column(Text, nullable=False, default='["python"]')
+    reference_solution_python: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_solution_c: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_solution_cpp: Mapped[str] = mapped_column(Text, nullable=False, default="")
     time_limit_seconds: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     memory_limit_mb: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
     cpu_limit: Mapped[str] = mapped_column(String(16), default="1", nullable=False)
@@ -548,7 +581,17 @@ class PythonCodeQuestionConfig(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    question: Mapped[Question] = relationship(back_populates="python_code_config")
+    question: Mapped[Question] = relationship(back_populates="code_config")
+
+    def allowed_languages(self) -> list[CodeLanguage]:
+        return _normalize_code_language_list(self.allowed_languages_json)
+
+    def allowed_language_values(self) -> list[str]:
+        return [language.value for language in self.allowed_languages()]
+
+    def allows_language(self, language: CodeLanguage | str) -> bool:
+        normalized = CodeLanguage(_normalize_code_language(language))
+        return normalized in self.allowed_languages()
 
     def visible_tests(self) -> list[dict]:
         try:
@@ -567,6 +610,10 @@ class PythonCodeQuestionConfig(Base):
         if not isinstance(payload, list):
             return []
         return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
+
+
+# Backward-compatible import alias while the codebase migrates away from Python-only naming.
+PythonCodeQuestionConfig = CodeQuestionConfig
 
 
 class ShortAnswerQuestionConfig(Base):
@@ -635,6 +682,15 @@ class Submission(Base):
     notebook_id: Mapped[int | None] = mapped_column(ForeignKey("notebooks.id", ondelete="SET NULL"), nullable=True)
     stored_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_language: Mapped[CodeLanguage | None] = mapped_column(
+        Enum(CodeLanguage, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=True,
+        index=True,
+    )
+    code_submission_mode: Mapped[CodeSubmissionMode | None] = mapped_column(
+        Enum(CodeSubmissionMode, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=True,
+    )
     submitted_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     queued_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)

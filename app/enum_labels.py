@@ -15,7 +15,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "question_type": {
             "notebook": "Notebook (.ipynb) / LLM",
             "short_answer": "Short answer",
-            "python_code": "Python code",
+            "code": "Code question",
             "pdf_llm": "PDF / LLM",
             "formatted_text_llm": "Formatted text / LLM",
             "file_llm": "File upload / LLM",
@@ -54,7 +54,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "question_type": {
             "notebook": "Notebook（.ipynb）/ LLM",
             "short_answer": "简答题",
-            "python_code": "Python 编程题",
+            "code": "代码题",
             "pdf_llm": "PDF / LLM",
             "formatted_text_llm": "格式化文本 / LLM",
             "file_llm": "文件上传 / LLM",

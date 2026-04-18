@@ -2,6 +2,7 @@ import json
 import logging
 import shutil
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -21,6 +22,8 @@ from app.constants import (
     EvaluationTaskType,
     FeedbackSource,
     JobStatus,
+    CodeLanguage,
+    CodeSubmissionMode,
     LLMScope,
     LLMTestStatus,
     MembershipStatus,
@@ -50,7 +53,7 @@ from app.models import (
     Notebook,
     LLMConfig,
     NotebookQuestionConfig,
-    PythonCodeQuestionConfig,
+    CodeQuestionConfig,
     Question,
     QuestionVersion,
     RuntimeImage,
@@ -111,7 +114,7 @@ def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
 _HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
 _HIDDEN_STDERR_MARKER = "=== Hidden Test stderr ==="
 _RETIRED_NOTEBOOK_MESSAGE = (
-    "Notebook execution has been retired. Use native Python code questions for .py submissions, "
+    "Notebook execution has been retired. Use code questions for Python, C, or C++ submissions, "
     "or use file / LLM-reviewed questions for .ipynb submissions."
 )
 
@@ -136,8 +139,12 @@ def _file_question_config(question: Question | None) -> FileQuestionConfig | Non
     return question.file_question_config if question is not None else None
 
 
-def _python_code_config(question: Question | None) -> PythonCodeQuestionConfig | None:
-    return question.python_code_config if question is not None else None
+def _code_config(question: Question | None) -> CodeQuestionConfig | None:
+    return question.code_config if question is not None else None
+
+
+def _python_code_config(question: Question | None) -> CodeQuestionConfig | None:
+    return _code_config(question)
 
 
 def _resolve_runtime_image_for_question(question: Question) -> RuntimeImage | None:
@@ -615,13 +622,13 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
     try:
         payload = json.loads(raw_json or "[]")
     except json.JSONDecodeError as exc:
-        raise ValueError("Stored Python code test cases are not valid JSON.") from exc
+        raise ValueError("Stored code test cases are not valid JSON.") from exc
     if not isinstance(payload, list):
-        raise ValueError("Stored Python code test cases must be a JSON list.")
+        raise ValueError("Stored code test cases must be a JSON list.")
     normalized: list[dict] = []
     for index, item in enumerate(payload, start=1):
         if not isinstance(item, dict):
-            raise ValueError("Each Python code test case must be a JSON object.")
+            raise ValueError("Each code test case must be a JSON object.")
         normalized.append(
             {
                 "name": item.get("name") or f"Test {index}",
@@ -763,7 +770,7 @@ def get_question_for_student(db: Session, question_id: int, user_id: int) -> Que
         .options(
             joinedload(Question.assignment).joinedload(Assignment.course),
             joinedload(Question.notebook_config),
-            joinedload(Question.python_code_config),
+            joinedload(Question.code_config),
             joinedload(Question.file_question_config),
             joinedload(Question.short_answer_config),
         )
@@ -796,7 +803,7 @@ def get_submission_for_student(db: Session, submission_id: int, user_id: int) ->
         .options(
             joinedload(Submission.question).joinedload(Question.assignment).joinedload(Assignment.course),
             joinedload(Submission.question).joinedload(Question.notebook_config),
-            joinedload(Submission.question).joinedload(Question.python_code_config),
+            joinedload(Submission.question).joinedload(Question.code_config),
             joinedload(Submission.question).joinedload(Question.file_question_config),
             joinedload(Submission.question).joinedload(Question.short_answer_config),
             joinedload(Submission.evaluation_tasks),
@@ -816,7 +823,7 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
             joinedload(Submission.user),
             joinedload(Submission.question).joinedload(Question.assignment).joinedload(Assignment.course),
             joinedload(Submission.question).joinedload(Question.notebook_config),
-            joinedload(Submission.question).joinedload(Question.python_code_config),
+            joinedload(Submission.question).joinedload(Question.code_config),
             joinedload(Submission.question).joinedload(Question.file_question_config),
             joinedload(Submission.question).joinedload(Question.short_answer_config),
             joinedload(Submission.evaluation_tasks),
@@ -1111,6 +1118,60 @@ def create_python_code_submission(
     original_filename: str,
     submission_bytes: bytes,
 ) -> Submission:
+    return create_code_submission(
+        db,
+        user_id=user_id,
+        question=question,
+        original_filename=original_filename,
+        submission_bytes=submission_bytes,
+        language=CodeLanguage.PYTHON,
+    )
+
+
+def _code_language_from_value(value: str | CodeLanguage) -> CodeLanguage:
+    try:
+        return value if isinstance(value, CodeLanguage) else CodeLanguage(str(value).strip().lower())
+    except ValueError as exc:
+        raise ValueError("Unsupported code language.") from exc
+
+
+def _code_submission_mode_for_filename(filename: str) -> CodeSubmissionMode:
+    return CodeSubmissionMode.ZIP if Path(filename).suffix.lower() == ".zip" else CodeSubmissionMode.SINGLE_FILE
+
+
+def _allowed_suffixes_for_language(language: CodeLanguage) -> set[str]:
+    if language == CodeLanguage.PYTHON:
+        return {".py", ".zip"}
+    if language == CodeLanguage.C:
+        return {".c", ".zip"}
+    return {".cpp", ".cc", ".cxx", ".zip"}
+
+
+def _read_code_preview(path: Path, language: CodeLanguage, mode: CodeSubmissionMode) -> str:
+    if mode == CodeSubmissionMode.SINGLE_FILE:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    entrypoint = {
+        CodeLanguage.PYTHON: "main.py",
+        CodeLanguage.C: "main.c",
+        CodeLanguage.CPP: "main.cpp",
+    }[language]
+    try:
+        with zipfile.ZipFile(path) as archive:
+            with archive.open(entrypoint) as source:
+                return source.read(256 * 1024).decode("utf-8", errors="replace").strip()
+    except Exception:
+        return f"Multi-file {language.value} submission: {path.name}"
+
+
+def create_code_submission(
+    db: Session,
+    *,
+    user_id: int,
+    question: Question,
+    original_filename: str,
+    submission_bytes: bytes,
+    language: str | CodeLanguage,
+) -> Submission:
     allowed, message = _submission_window_open(question)
     if not allowed:
         raise ValueError(message or "Submission window is closed.")
@@ -1119,30 +1180,36 @@ def create_python_code_submission(
     if not allowed:
         raise ValueError(message or "Submission limit reached.")
 
-    config = _python_code_config(question)
+    config = _code_config(question)
     if config is None:
-        raise ValueError("Python code configuration is missing for this question.")
-    _ensure_text_file_extension(original_filename, {".py"})
+        raise ValueError("Code question configuration is missing for this question.")
+    code_language = _code_language_from_value(language)
+    if not config.allows_language(code_language):
+        raise ValueError("This language is not allowed for the question.")
+    _ensure_text_file_extension(original_filename, _allowed_suffixes_for_language(code_language))
+    submission_mode = _code_submission_mode_for_filename(original_filename)
     stored_relative_path, _ = _store_uploaded_file(
         user_id=user_id,
         question_id=question.id,
         original_filename=original_filename,
         file_bytes=submission_bytes,
     )
-    source_text = absolute_data_path(stored_relative_path).read_text(encoding="utf-8", errors="replace").strip()
+    source_text = _read_code_preview(absolute_data_path(stored_relative_path), code_language, submission_mode)
     if not source_text:
-        raise ValueError("Uploaded Python file is empty.")
+        raise ValueError("Uploaded code file is empty.")
 
     submission = Submission(
         course_id=question.assignment.course_id,
         assignment_id=question.assignment_id,
         question_id=question.id,
         user_id=user_id,
-        submission_type=QuestionType.PYTHON_CODE,
+        submission_type=QuestionType.CODE,
         status=SubmissionStatus.SUBMITTED,
         original_filename=original_filename,
         stored_file_path=stored_relative_path,
         answer_text=source_text,
+        code_language=code_language,
+        code_submission_mode=submission_mode,
         submitted_at=utcnow(),
         is_late=_is_late(question),
         counts_toward_limit=False,
@@ -1155,7 +1222,7 @@ def create_python_code_submission(
     db.add(
         EvaluationTask(
             submission_id=submission.id,
-            task_type=EvaluationTaskType.PYTHON_CODE_EVALUATION,
+            task_type=EvaluationTaskType.CODE_EVALUATION,
             backend_type="rq",
             status=EvaluationTaskStatus.QUEUED,
         )
@@ -1264,8 +1331,8 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
     if task is None:
         raise ValueError("Evaluation task not found.")
 
-    if task.task_type == EvaluationTaskType.PYTHON_CODE_EVALUATION:
-        target_func = process_python_code_evaluation
+    if task.task_type == EvaluationTaskType.CODE_EVALUATION:
+        target_func = process_code_evaluation
         timeout_seconds = settings.execution_timeout_seconds + 60
     else:
         target_func = process_submission_evaluation
@@ -1623,13 +1690,13 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
         db.close()
 
 
-def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
+def process_code_evaluation(submission_id: int, task_id: int) -> None:
     db = SessionLocal()
     try:
         statement = (
             select(Submission)
             .options(
-                joinedload(Submission.question).joinedload(Question.python_code_config),
+                joinedload(Submission.question).joinedload(Question.code_config),
                 joinedload(Submission.assignment),
                 joinedload(Submission.evaluation_results),
                 joinedload(Submission.evaluation_tasks),
@@ -1639,15 +1706,15 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
         submission = db.scalar(statement)
         task = db.get(EvaluationTask, task_id)
         if submission is None or task is None or not submission.stored_file_path:
-            logger.error("Python code submission %s or task %s could not be loaded.", submission_id, task_id)
+            logger.error("Code submission %s or task %s could not be loaded.", submission_id, task_id)
             return
 
         question = submission.question
-        config = _python_code_config(question)
+        config = _code_config(question)
         if config is None:
             task.status = EvaluationTaskStatus.FAILED
             task.finished_at = utcnow()
-            task.error_message = "Python code question config is missing."
+            task.error_message = "Code question config is missing."
             submission.status = SubmissionStatus.FAILED_SYSTEM
             submission.completed_at = utcnow()
             submission.counts_toward_limit = False
@@ -1667,8 +1734,10 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
         ensure_writable_directory(output_dir)
         runtime_image_tag, runtime_image = _resolve_runner_image_tag(question)
         task.runtime_image_id = runtime_image.id if runtime_image is not None else None
-        result = run_python_code_in_docker(
+        result = run_code_in_docker(
             input_relative_path=submission.stored_file_path,
+            language=(submission.code_language or CodeLanguage.PYTHON).value,
+            submission_mode=(submission.code_submission_mode or CodeSubmissionMode.SINGLE_FILE).value,
             output_dir_relative_path=relative_to_data(output_dir),
             runner_image=runtime_image_tag,
             timeout_seconds=config.time_limit_seconds,
@@ -1723,13 +1792,13 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
                 evaluation_result=evaluation_result,
                 source=FeedbackSource.AUTO,
                 score_suggestion=evaluation_result.auto_score,
-                comment_text=(result.summary_json or {}).get("message", "Python code evaluation completed."),
+                comment_text=(result.summary_json or {}).get("message", "Code evaluation completed."),
             )
         )
         db.commit()
         update_final_grade_snapshot(db, submission)
     except Exception as exc:  # pragma: no cover
-        logger.exception("Unexpected error while processing Python code submission %s", submission_id)
+        logger.exception("Unexpected error while processing code submission %s", submission_id)
         submission = db.get(Submission, submission_id)
         task = db.get(EvaluationTask, task_id)
         if task is not None:
@@ -1786,9 +1855,11 @@ def run_job_in_docker(
     return RunnerResult(exit_code=1, error_message=_RETIRED_NOTEBOOK_MESSAGE, summary_json=summary)
 
 
-def run_python_code_in_docker(
+def run_code_in_docker(
     *,
     input_relative_path: str,
+    language: str,
+    submission_mode: str,
     output_dir_relative_path: str,
     runner_image: str,
     timeout_seconds: int,
@@ -1800,7 +1871,7 @@ def run_python_code_in_docker(
 ) -> RunnerResult:
     input_path = absolute_data_path(input_relative_path)
     output_dir = absolute_data_path(output_dir_relative_path)
-    runner_script_path = _runner_script_path("execute_python_code.py")
+    runner_script_path = _runner_script_path("execute_code.py")
     stdout_path = output_dir / "stdout.txt"
     stderr_path = output_dir / "stderr.txt"
     summary_path = output_dir / "summary.json"
@@ -1817,7 +1888,7 @@ def run_python_code_in_docker(
         summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
         return RunnerResult(exit_code=127, error_message=message, summary_json=summary)
 
-    container_name = f"python-submission-runner-{uuid4().hex[:8]}"
+    container_name = f"code-submission-runner-{uuid4().hex[:8]}"
     command = [
         "docker",
         "run",
@@ -1833,11 +1904,11 @@ def run_python_code_in_docker(
         "--entrypoint",
         "python",
         "-v",
-        f"{input_path.resolve().as_posix()}:/job/input.py:ro",
+        f"{input_path.resolve().as_posix()}:/job/input{submission_mode == 'zip' and '.zip' or Path(input_path).suffix}:ro",
         "-v",
         f"{output_dir.resolve().as_posix()}:/job/output",
         "-v",
-        f"{runner_script_path.resolve().as_posix()}:/runner/execute_python_code.py:ro",
+        f"{runner_script_path.resolve().as_posix()}:/runner/execute_code.py:ro",
         "-w",
         "/job",
     ]
@@ -1847,9 +1918,13 @@ def run_python_code_in_docker(
     command.extend(
         [
             runner_image,
-            "/runner/execute_python_code.py",
+            "/runner/execute_code.py",
             "--input",
-            "/job/input.py",
+            f"/job/input{submission_mode == 'zip' and '.zip' or Path(input_path).suffix}",
+            "--language",
+            language,
+            "--submission-mode",
+            submission_mode,
             "--stdout",
             "/job/output/stdout.txt",
             "--stderr",
@@ -1875,7 +1950,7 @@ def run_python_code_in_docker(
         )
     except subprocess.TimeoutExpired:
         _force_remove_container(container_name)
-        message = f"Python code execution timed out after {timeout_seconds} seconds per test."
+        message = f"Code execution timed out after {timeout_seconds} seconds per test."
         write_text(stderr_path, f"{message}\n")
         summary = {"failure_type": "answer_timeout", "message": message, "run_success": False, "auto_score": 0}
         summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
@@ -1900,7 +1975,7 @@ def run_python_code_in_docker(
             summary_json = {}
 
     if completed.returncode != 0:
-        message = summary_json.get("message") or "Python code runner exited with a non-zero status."
+        message = summary_json.get("message") or "Code runner exited with a non-zero status."
         summary_json.setdefault("failure_type", "answer_error")
         summary_json.setdefault("auto_score", 0)
         return RunnerResult(exit_code=completed.returncode, error_message=message, summary_json=summary_json)
@@ -1916,6 +1991,12 @@ def run_python_code_in_docker(
         return RunnerResult(exit_code=1, error_message=message, summary_json=summary_json)
 
     return RunnerResult(exit_code=0, summary_json=summary_json)
+
+
+def run_python_code_in_docker(**kwargs) -> RunnerResult:
+    kwargs.setdefault("language", CodeLanguage.PYTHON.value)
+    kwargs.setdefault("submission_mode", CodeSubmissionMode.SINGLE_FILE.value)
+    return run_code_in_docker(**kwargs)
 
 
 def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> None:

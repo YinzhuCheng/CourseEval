@@ -27,7 +27,7 @@ from app.models import (
     FinalGradeSnapshot,
     LLMConfig,
     NotebookQuestionConfig,
-    PythonCodeQuestionConfig,
+    CodeQuestionConfig,
     Question,
     QuestionVersion,
     RuntimeImage,
@@ -35,11 +35,12 @@ from app.models import (
     Submission,
     User,
 )
-from app.runtime_support import default_allowed_python_libraries_text
+from app.runtime_support import default_allowed_code_libraries_text
 
 
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
-DEFAULT_ALLOWED_PYTHON_LIBRARIES = default_allowed_python_libraries_text("en")
+DEFAULT_ALLOWED_CODE_LIBRARIES = default_allowed_code_libraries_text("en")
+DEFAULT_ALLOWED_PYTHON_LIBRARIES = DEFAULT_ALLOWED_CODE_LIBRARIES
 # Keep the legacy name as an alias so older imports and payload builders stay valid.
 DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
@@ -47,7 +48,7 @@ DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 def _question_loader_options():
     return (
         joinedload(Question.notebook_config),
-        joinedload(Question.python_code_config),
+        joinedload(Question.code_config),
         joinedload(Question.short_answer_config),
         joinedload(Question.file_question_config),
         joinedload(Question.versions),
@@ -57,7 +58,7 @@ def _question_loader_options():
 def _assignment_question_loader_options():
     return (
         joinedload(Assignment.questions).joinedload(Question.notebook_config),
-        joinedload(Assignment.questions).joinedload(Question.python_code_config),
+        joinedload(Assignment.questions).joinedload(Question.code_config),
         joinedload(Assignment.questions).joinedload(Question.short_answer_config),
         joinedload(Assignment.questions).joinedload(Question.file_question_config),
     )
@@ -489,7 +490,7 @@ def create_question(
     runtime_image_id: int | None,
     llm_config_id: int | None,
     notebook_config_payload: dict | None,
-    python_code_config_payload: dict | None,
+    code_config_payload: dict | None,
     short_answer_payload: dict | None,
     file_question_payload: dict | None,
 ) -> Question:
@@ -511,17 +512,21 @@ def create_question(
     db.add(question)
     db.flush()
 
-    if question_type == QuestionType.PYTHON_CODE:
-        payload = python_code_config_payload or {}
+    if question_type == QuestionType.CODE:
+        payload = code_config_payload or {}
         db.add(
-            PythonCodeQuestionConfig(
+            CodeQuestionConfig(
                 question_id=question.id,
                 input_spec=payload.get("input_spec") or None,
                 output_spec=payload.get("output_spec") or None,
                 visible_tests_json=payload.get("visible_tests_json", "[]"),
                 hidden_tests_json=payload.get("hidden_tests_json", "[]"),
                 allowed_libraries_note=payload.get("allowed_libraries_note")
-                or DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+                or DEFAULT_ALLOWED_CODE_LIBRARIES,
+                allowed_languages_json=payload.get("allowed_languages_json", '["python"]'),
+                reference_solution_python=payload.get("reference_solution_python", ""),
+                reference_solution_c=payload.get("reference_solution_c", ""),
+                reference_solution_cpp=payload.get("reference_solution_cpp", ""),
                 time_limit_seconds=payload.get("time_limit_seconds", 10),
                 memory_limit_mb=payload.get("memory_limit_mb", 512),
                 cpu_limit=payload.get("cpu_limit", "1"),
@@ -838,23 +843,23 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
     db.add(assignment)
     db.flush()
 
-    python_question = Question(
+    code_question = Question(
         assignment_id=assignment.id,
         order_index=1,
         title="括号匹配判断",
         description=(
             "输入一行只包含 ()[]{} 的字符串，输出 YES 或 NO，判断括号是否完全匹配。"
-            "\n请严格按照输入输出格式编写 Python 程序。"
+            "\n请严格按照输入输出格式编写程序，可使用 Python、C 或 C++。"
         ),
-        question_type=QuestionType.PYTHON_CODE,
+        question_type=QuestionType.CODE,
         max_score=Decimal("100"),
         updated_at=utcnow(),
     )
-    db.add(python_question)
+    db.add(code_question)
     db.flush()
     db.add(
-        PythonCodeQuestionConfig(
-            question_id=python_question.id,
+        CodeQuestionConfig(
+            question_id=code_question.id,
             input_spec="输入一行括号字符串，例如 ()[]{}",
             output_spec="若括号完全匹配输出 YES，否则输出 NO",
             visible_tests_json=json.dumps(
@@ -874,7 +879,64 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 ensure_ascii=False,
                 indent=2,
             ),
-            allowed_libraries_note=DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+            allowed_libraries_note=DEFAULT_ALLOWED_CODE_LIBRARIES,
+            allowed_languages_json='["python", "c", "cpp"]',
+            reference_solution_python=(
+                "s = input().strip()\n"
+                "stack = []\n"
+                "pairs = {')': '(', ']': '[', '}': '{'}\n"
+                "ok = True\n"
+                "for ch in s:\n"
+                "    if ch in '([{':\n"
+                "        stack.append(ch)\n"
+                "    elif not stack or stack.pop() != pairs[ch]:\n"
+                "        ok = False\n"
+                "        break\n"
+                "print('YES' if ok and not stack else 'NO')\n"
+            ),
+            reference_solution_c=(
+                "#include <stdio.h>\n"
+                "#include <string.h>\n\n"
+                "int main(void) {\n"
+                "    char s[10005], st[10005];\n"
+                "    if (scanf(\"%10004s\", s) != 1) return 0;\n"
+                "    int top = 0, ok = 1;\n"
+                "    for (int i = 0; s[i]; ++i) {\n"
+                "        char c = s[i];\n"
+                "        if (c == '(' || c == '[' || c == '{') st[top++] = c;\n"
+                "        else {\n"
+                "            if (top == 0) { ok = 0; break; }\n"
+                "            char p = st[--top];\n"
+                "            if ((c == ')' && p != '(') || (c == ']' && p != '[') || (c == '}' && p != '{')) { ok = 0; break; }\n"
+                "        }\n"
+                "    }\n"
+                "    printf(\"%s\\n\", ok && top == 0 ? \"YES\" : \"NO\");\n"
+                "    return 0;\n"
+                "}\n"
+            ),
+            reference_solution_cpp=(
+                "#include <iostream>\n"
+                "#include <map>\n"
+                "#include <string>\n"
+                "#include <vector>\n"
+                "using namespace std;\n\n"
+                "int main() {\n"
+                "    string s;\n"
+                "    if (!(cin >> s)) return 0;\n"
+                "    vector<char> st;\n"
+                "    map<char, char> pairs{{')','('}, {']','['}, {'}','{'}};\n"
+                "    bool ok = true;\n"
+                "    for (char c : s) {\n"
+                "        if (c == '(' || c == '[' || c == '{') st.push_back(c);\n"
+                "        else {\n"
+                "            if (st.empty() || st.back() != pairs[c]) { ok = false; break; }\n"
+                "            st.pop_back();\n"
+                "        }\n"
+                "    }\n"
+                "    cout << (ok && st.empty() ? \"YES\" : \"NO\") << '\\n';\n"
+                "    return 0;\n"
+                "}\n"
+            ),
             time_limit_seconds=300,
             memory_limit_mb=1024,
             cpu_limit="1",

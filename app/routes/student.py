@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.auth import push_flash
-from app.constants import QuestionType
+from app.constants import CodeLanguage, QuestionType
 from app.db import get_db
 from app.i18n import choose_text
 from app.runtime_support import (
@@ -12,7 +12,7 @@ from app.runtime_support import (
     SUPPORTED_PYTHON_VERSION,
     UNSUPPORTED_PACKAGE_NOTE_EN,
     UNSUPPORTED_PACKAGE_NOTE_ZH,
-    default_allowed_python_libraries_text,
+    default_allowed_code_libraries_text,
 )
 from app.services.courses import (
     get_assignment_for_student,
@@ -27,7 +27,7 @@ from app.services.submissions import (
     build_student_result_view,
     create_file_submission,
     create_notebook_submission,
-    create_python_code_submission,
+    create_code_submission,
     create_short_answer_submission,
     enqueue_submission_evaluation,
     get_submission_for_student,
@@ -78,8 +78,8 @@ def student_python_runtime_help(request: Request, db: Session = Depends(get_db))
         {
             "supported_python_version": SUPPORTED_PYTHON_VERSION,
             "supported_python_packages": SUPPORTED_PYTHON_PACKAGES,
-            "default_allowed_libraries_en": default_allowed_python_libraries_text("en"),
-            "default_allowed_libraries_zh": default_allowed_python_libraries_text("zh"),
+            "default_allowed_libraries_en": default_allowed_code_libraries_text("en"),
+            "default_allowed_libraries_zh": default_allowed_code_libraries_text("zh"),
             "unsupported_package_note_en": UNSUPPORTED_PACKAGE_NOTE_EN,
             "unsupported_package_note_zh": UNSUPPORTED_PACKAGE_NOTE_ZH,
         },
@@ -219,16 +219,27 @@ async def submit_python_code(
     code_file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    return await submit_code(question_id, request, code_file, CodeLanguage.PYTHON.value, db)
+
+
+@router.post("/questions/{question_id}/submit-code")
+async def submit_code(
+    question_id: int,
+    request: Request,
+    code_file: UploadFile = File(...),
+    code_language: str = Form(...),
+    db: Session = Depends(get_db),
+):
     try:
         user = require_user(request, db)
     except RedirectRequired as redirect:
         return RedirectResponse(url=redirect.location, status_code=303)
 
     question = get_question_for_student(db, question_id, user.id)
-    if question is None or question.question_type != QuestionType.PYTHON_CODE:
+    if question is None or question.question_type != QuestionType.CODE:
         push_flash(
             request,
-            choose_text(request, "Python code question not found.", "未找到 Python 代码题。"),
+            choose_text(request, "Code question not found.", "未找到代码题。"),
             "danger",
         )
         return RedirectResponse(url="/student/courses", status_code=303)
@@ -236,12 +247,13 @@ async def submit_python_code(
     file_bytes = await code_file.read()
     filename = code_file.filename or "solution.py"
     try:
-        submission = create_python_code_submission(
+        submission = create_code_submission(
             db,
             user_id=user.id,
             question=question,
             original_filename=filename,
             submission_bytes=file_bytes,
+            language=code_language,
         )
         enqueue_submission_evaluation(db, submission.id)
         push_flash(
@@ -260,8 +272,8 @@ async def submit_python_code(
             request,
             choose_text(
                 request,
-                f"Failed to submit Python code: {exc}",
-                f"提交 Python 代码失败：{exc}",
+                f"Failed to submit code: {exc}",
+                f"提交代码失败：{exc}",
             ),
             "danger",
         )

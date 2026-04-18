@@ -104,8 +104,8 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">
-          {% if submission.submission_type.value == "python_code" %}
-          {{ lx("Submitted Python code", "提交的 Python 代码") }}
+          {% if submission.submission_type.value == "code" %}
+          {{ lx("Submitted code", "提交的代码") }}
           {% elif submission.submission_type.value in ["pdf_llm", "formatted_text_llm", "file_llm"] %}
           {{ lx("Extracted submission text", "提取后的提交文本") }}
           {% else %}

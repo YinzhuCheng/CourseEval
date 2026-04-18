@@ -4,11 +4,11 @@ CourseEval is a lightweight course-assignment evaluation platform for teaching t
 
 The current product direction is:
 
-- **Native Python evaluation** for executable programming questions using `.py` submissions
+- **Code evaluation** for executable Python, C, and C++ programming questions
 - **File / LLM-reviewed evaluation** for `.pdf`, `.txt`, `.tex`, and `.ipynb` submissions
 - **Teacher-confirmed grading** for workflows where automatic suggestions should not directly become final grades
 
-The old standalone Notebook execution workflow has been retired. Existing `/dashboard` and `/jobs/*` links now redirect users to the in-product Python runtime help page so they can move to the supported flows.
+The old standalone Notebook execution workflow has been retired. Existing `/dashboard` and `/jobs/*` links now redirect users to the in-product code runtime help page so they can move to the supported flows.
 
 ## What the system supports
 
@@ -18,11 +18,11 @@ The old standalone Notebook execution workflow has been retired. Existing `/dash
 - Join a course with a join code
 - View courses, assignments, questions, and submission history
 - Submit:
-  - `.py` files for native Python code questions
+  - `.py`, `.c`, `.cpp`, `.cc`, `.cxx`, or `.zip` files for code questions
   - `.pdf` files for PDF / LLM-reviewed questions
   - `.txt`, `.tex`, or `.ipynb` files for formatted-text / LLM-reviewed questions
 - View evaluation progress, feedback, and downloadable artifacts
-- Read built-in Python runtime help inside the product UI
+- Read built-in code runtime help inside the product UI
 
 ### Teacher workflows
 
@@ -30,10 +30,10 @@ The old standalone Notebook execution workflow has been retired. Existing `/dash
 - Share course join codes with students
 - Create assignments
 - Create question types for:
-  - native Python code evaluation
+  - Python, C, and C++ code evaluation
   - PDF file / LLM-reviewed evaluation
   - formatted text or `.ipynb` / LLM-reviewed evaluation
-- Configure Python test cases, scoring rules, and submission limits
+- Configure code test cases, allowed language sets, reference solutions, scoring rules, and submission limits
 - Review submissions and confirm final grades
 
 ### Admin workflows
@@ -43,11 +43,13 @@ The old standalone Notebook execution workflow has been retired. Existing `/dash
 - Manage LLM configuration records
 - Review system overview data
 
-## Supported Python runtime
+## Supported code runtime
 
-The default native Python evaluation runtime currently provides:
+The default code evaluation runtime currently provides:
 
 - **Python** `3.12`
+- **C** `C11` through `gcc`
+- **C++** `C++17` through `g++`
 
 ### Preinstalled Python packages
 
@@ -62,23 +64,39 @@ The default native Python evaluation runtime currently provides:
 Notes:
 
 - Python standard library imports are supported
+- C submissions may use the C11 standard library
+- C++ submissions may use the C++17 standard library
+- Third-party C/C++ libraries, Makefile, CMake, and custom build commands are not supported by the default runner
 - The default runtime image does **not** preinstall deep-learning frameworks such as `torch`, `tensorflow`, `jax`, `paddle`, `mxnet`, or `transformers`
 - Students can also view the same information inside the product at `/student/help/python-runtime`
+- The UI package support matrix is defined in `app/runtime_support.py`
+- The runner Docker image installs Python packages from `runner/requirements.txt`; update both files and rebuild the runner image when expanding the preinstalled Python package set
 
 ## Submission model
 
-### 1. Native Python code questions
+### 1. Code questions
 
-Use this when students should submit executable `.py` files and receive test-based automatic evaluation.
+Use this when students should submit executable Python, C, or C++ code and receive test-based automatic evaluation.
 
 Typical flow:
 
-1. Teacher creates a **Python code** question
-2. Teacher configures visible and hidden test cases
-3. Student uploads a `.py` file
-4. The worker runs the code in an isolated Docker container
-5. The system stores structured evaluation results and feedback
-6. The final grade snapshot is updated
+1. Teacher creates a **code** question
+2. Teacher chooses the allowed language set: Python, C, C++, or any combination
+3. Teacher configures visible and hidden test cases
+4. Teacher may provide reference solutions for Python, C, and C++
+5. Student chooses one allowed language and uploads a source file or zip archive
+6. The worker runs the code in an isolated Docker container
+7. The system stores structured evaluation results and feedback
+8. The final grade snapshot is updated
+
+Submission rules:
+
+- Single-file Python submissions use `.py`
+- Single-file C submissions use `.c`
+- Single-file C++ submissions use `.cpp`, `.cc`, or `.cxx`
+- Multi-file submissions use `.zip`
+- Zip submissions must contain `main.py`, `main.c`, or `main.cpp` as the entry file
+- Programs read from standard input and write answers to standard output
 
 ### 2. File / LLM-reviewed questions
 
@@ -114,7 +132,7 @@ Typical flow:
 - **SQLAlchemy** ORM
 - **SQLite** as the default database
 - **Redis + RQ** for background tasks
-- **Docker** for isolated execution of native Python code questions
+- **Docker** for isolated execution of code questions
 - **Bootstrap 5** for the UI
 
 ## Important modules
@@ -127,8 +145,9 @@ Typical flow:
 - `app/routes/jobs.py`: compatibility redirects for the retired notebook runner routes
 - `app/services/submissions.py`: submission orchestration and background evaluation logic
 - `app/services/courses.py`: course, assignment, and question helpers
-- `app/runtime_support.py`: canonical Python version and package support matrix
-- `runner/execute_python_code.py`: helper script used inside the Python runner container
+- `app/runtime_support.py`: canonical language and package support matrix used by the help UI
+- `runner/requirements.txt`: Python packages installed into the default runner image
+- `runner/execute_code.py`: helper script used inside the code runner container
 - `runner/Dockerfile`: default runtime image definition
 - `worker.py`: background worker process
 
@@ -159,7 +178,8 @@ Typical flow:
 ├── data/
 ├── runner/
 │   ├── Dockerfile
-│   └── execute_python_code.py
+│   ├── execute_code.py
+│   └── requirements.txt
 ├── scripts/
 ├── tests/
 ├── worker.py
@@ -206,10 +226,10 @@ docker run --rm -p 6379:6379 redis:7-alpine
 ### 5. Build the default runner image
 
 ```bash
-docker build -t courseeval-python-runner:latest runner
+docker build -t notebook-runner-mvp:latest runner
 ```
 
-This image contains the default native Python runtime used for `.py` evaluation.
+This image contains the default Docker-isolated code runtime used for Python, C, and C++ evaluation. To add Python packages to the default runtime, update both `app/runtime_support.py` and `runner/requirements.txt`, then rebuild this image.
 
 ### 6. Start the web service
 
@@ -299,7 +319,7 @@ If SMTP is missing or delivery fails, email-based registrations stay pending unt
 
 The platform now separates evaluation traffic into:
 
-- a dedicated Python evaluation queue
+- a dedicated code evaluation queue
 - per-LLM-config queues for LLM review tasks
 
 Relevant environment variables:
@@ -312,7 +332,7 @@ PDF_REVIEW_MAX_PAGES=8
 
 ### Worker behavior
 
-- Python Docker grading runs on its own queue
+- Docker code grading runs on its own queue
 - Each enabled LLM config has its own queue
 - `queue_concurrency` is configured per LLM config record in the admin UI
 - `worker.py` now works as a lightweight worker manager and starts:
@@ -340,7 +360,7 @@ Main teaching-domain tables include:
 - `course_members`
 - `assignments`
 - `questions`
-- `python_code_question_configs`
+- `code_question_configs`
 - `file_question_configs`
 - `short_answer_question_configs`
 - `runtime_images`
@@ -389,7 +409,7 @@ Check:
 - `REDIS_URL` is correct
 - `python worker.py` is running
 
-### Python evaluation fails immediately with Docker-related errors
+### Code evaluation fails immediately with Docker-related errors
 
 Check:
 
@@ -398,7 +418,7 @@ Check:
 - The runner image exists:
 
 ```bash
-docker images | rg courseeval-python-runner
+docker images | rg notebook-runner-mvp
 ```
 
 ### Session login does not persist

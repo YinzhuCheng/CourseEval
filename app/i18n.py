@@ -14,7 +14,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "site.title": "CourseEval",
         "nav.my_courses": "My Courses",
-        "nav.python_runtime_help": "Python Runtime Help",
+        "nav.python_runtime_help": "Code Runtime Help",
         "nav.teacher": "Teacher",
         "nav.admin": "Admin",
         "nav.user_management": "User Management",
@@ -68,7 +68,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "register.pending.resend": "Resend verification email",
         "register.pending.back_to_login": "Back to login",
         "login.title": "Sign in",
-        "login.subtitle": "Use your username or email to access your courses, submissions, and Python evaluation results.",
+        "login.subtitle": "Use your username or email to access your courses, submissions, and code evaluation results.",
         "login.login": "Username or email",
         "login.password": "Password",
         "login.submit": "Login",
@@ -263,7 +263,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "zh": {
         "site.title": "CourseEval",
         "nav.my_courses": "我的课程",
-        "nav.python_runtime_help": "Python 运行环境帮助",
+        "nav.python_runtime_help": "代码运行环境帮助",
         "nav.teacher": "教师端",
         "nav.admin": "管理端",
         "nav.user_management": "用户管理",

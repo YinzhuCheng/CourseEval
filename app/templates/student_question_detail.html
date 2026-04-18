@@ -60,27 +60,43 @@
             <button class="btn btn-primary" type="submit">{{ lx("Upload notebook", "上传 Notebook") }}</button>
           </div>
         </form>
-        {% elif question.question_type.value == "python_code" %}
-        <form method="post" action="/student/questions/{{ question.id }}/submit-python" enctype="multipart/form-data" class="row g-3">
+        {% elif question.question_type.value == "code" %}
+        <form method="post" action="/student/questions/{{ question.id }}/submit-code" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
             <div class="section-note">
               {{ lx(
-                "This question runs .py files directly in the platform's native Python runtime.",
-                "该题会在平台原生 Python 运行环境中直接执行 .py 文件。"
+                "This question runs Python, C, or C++ code in an isolated Docker runner. Single-file submissions and zip archives are supported.",
+                "该题会在 Docker 隔离环境中运行 Python、C 或 C++ 代码，支持单文件提交和 zip 多文件提交。"
               ) }}
-              <a href="/student/help/python-runtime">{{ lx("View supported Python version and packages", "查看支持的 Python 版本与预装包") }}</a>.
+              <a href="/student/help/python-runtime">{{ lx("View language rules and allowed libraries", "查看语言规则与允许使用的库") }}</a>.
             </div>
           </div>
           <div class="col-12">
-            <label class="form-label">{{ lx("Python file", "Python 文件") }}</label>
-            <input class="form-control" type="file" name="code_file" accept=".py,text/x-python" required />
+            <label class="form-label">{{ lx("Language", "语言") }}</label>
+            <select class="form-select" name="code_language">
+              {% for language in question.code_config.allowed_languages() %}
+              <option value="{{ language.value }}">
+                {% if language.value == "cpp" %}C++{% elif language.value == "c" %}C{% else %}Python{% endif %}
+              </option>
+              {% endfor %}
+            </select>
           </div>
-          {% if question.python_code_config %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Code file or zip archive", "代码文件或 zip 压缩包") }}</label>
+            <input class="form-control" type="file" name="code_file" accept=".py,.c,.cpp,.cc,.cxx,.zip,text/x-python,text/x-c,text/x-c++" required />
+            <div class="form-text">
+              {{ lx(
+                "For zip submissions include main.py, main.c, or main.cpp as the entry file. The program must read stdin and write stdout.",
+                "zip 多文件提交必须包含入口文件 main.py、main.c 或 main.cpp。程序必须读取标准输入并写入标准输出。"
+              ) }}
+            </div>
+          </div>
+          {% if question.code_config %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
-              <div><strong>{{ lx("Input format", "输入格式") }}:</strong> {{ question.python_code_config.input_spec }}</div>
-              <div class="mt-2"><strong>{{ lx("Output format", "输出格式") }}:</strong> {{ question.python_code_config.output_spec }}</div>
-              <div class="mt-2"><strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong> {{ question.python_code_config.allowed_libraries_note }}</div>
+              <div><strong>{{ lx("Input format", "输入格式") }}:</strong> {{ question.code_config.input_spec }}</div>
+              <div class="mt-2"><strong>{{ lx("Output format", "输出格式") }}:</strong> {{ question.code_config.output_spec }}</div>
+              <div class="mt-2"><strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong> {{ question.code_config.allowed_libraries_note }}</div>
               <div class="mt-2 small text-muted">
                 {{ lx(
                   "This question uses 5 tests worth 20 points each. Three sample tests are visible below and two hidden tests are staff-only.",
@@ -92,7 +108,7 @@
           <div class="col-12">
             <div class="border rounded-4 p-3 bg-light-subtle">
               <div class="fw-semibold mb-2">{{ lx("Visible test cases", "可见测试样例") }}</div>
-              {% for sample in question.python_code_config.visible_tests() %}
+              {% for sample in question.code_config.visible_tests() %}
               <div class="mb-3 {% if not loop.last %}border-bottom pb-3{% endif %}">
                 <div class="small text-muted">{{ lx("Visible test", "可见测试") }} {{ loop.index }} · 20 {{ lx("points", "分") }}</div>
                 <div><strong>{{ lx("Input", "输入") }}</strong></div>
@@ -105,7 +121,7 @@
           </div>
           {% endif %}
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">{{ lx("Upload Python solution", "上传 Python 解答") }}</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Upload code solution", "上传代码解答") }}</button>
           </div>
         </form>
         {% elif question.question_type.value in ["pdf_llm", "formatted_text_llm", "file_llm"] %}

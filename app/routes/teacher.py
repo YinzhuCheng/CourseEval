@@ -12,6 +12,7 @@ from starlette.responses import RedirectResponse
 from app.auth import push_flash
 from app.constants import (
     AssignmentStatus,
+    CodeLanguage,
     CourseRole,
     FeedbackSource,
     LLMResponseLanguage,
@@ -34,16 +35,16 @@ from app.models import (
     FileQuestionConfig,
     LLMConfig,
     NotebookQuestionConfig,
-    PythonCodeQuestionConfig,
+    CodeQuestionConfig,
     Question,
     QuestionVersion,
     ShortAnswerQuestionConfig,
     Submission,
     User,
 )
-from app.runtime_support import default_allowed_python_libraries_text
+from app.runtime_support import default_allowed_code_libraries_text
 from app.services.courses import (
-    DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+    DEFAULT_ALLOWED_CODE_LIBRARIES,
     get_assignment_for_staff,
     get_course_for_staff,
     get_course_for_teacher,
@@ -463,7 +464,7 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "submissions": submissions,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
-            "default_allowed_python_libraries": default_allowed_python_libraries_text(get_locale(request)),
+            "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
         },
     )
 
@@ -490,6 +491,10 @@ async def create_question(
     hidden_test_2_input: str = Form(""),
     hidden_test_2_output: str = Form(""),
     allowed_libraries_note: str = Form(""),
+    allowed_languages: list[str] = Form(["python"]),
+    reference_solution_python: str = Form(""),
+    reference_solution_c: str = Form(""),
+    reference_solution_cpp: str = Form(""),
     time_limit_seconds: str = Form("300"),
     memory_limit_mb: str = Form("1024"),
     cpu_limit: str = Form("1"),
@@ -642,7 +647,17 @@ async def create_question(
                 teacher_confirmation_required=teacher_confirmation_required,
             )
         )
-    elif q_type == QuestionType.PYTHON_CODE:
+    elif q_type == QuestionType.CODE:
+        normalized_languages = []
+        for raw_language in allowed_languages:
+            try:
+                language = CodeLanguage(raw_language)
+            except ValueError:
+                continue
+            if language not in normalized_languages:
+                normalized_languages.append(language)
+        if not normalized_languages:
+            normalized_languages = [CodeLanguage.PYTHON]
         visible_samples = [
             {"input": visible_test_1_input.strip(), "expected_output": visible_test_1_output.strip(), "points": 20},
             {"input": visible_test_2_input.strip(), "expected_output": visible_test_2_output.strip(), "points": 20},
@@ -657,8 +672,8 @@ async def create_question(
                 request,
                 choose_text(
                     request,
-                    "Python code questions must define both input and output specifications.",
-                    "Python 代码题必须同时填写输入说明和输出说明。",
+                    "Code questions must define both input and output specifications.",
+                    "代码题必须同时填写输入说明和输出说明。",
                 ),
                 "danger",
             )
@@ -669,8 +684,8 @@ async def create_question(
                 request,
                 choose_text(
                     request,
-                    "Python code questions require 5 complete test cases (3 visible, 2 hidden).",
-                    "Python 代码题需要完整填写 5 个测试点（3 个可见测试，2 个隐藏测试）。",
+                    "Code questions require 5 complete test cases (3 visible, 2 hidden).",
+                    "代码题需要完整填写 5 个测试点（3 个可见测试，2 个隐藏测试）。",
                 ),
                 "danger",
             )
@@ -681,21 +696,25 @@ async def create_question(
                 request,
                 choose_text(
                     request,
-                    "Python code questions currently use a fixed 100-point rubric (5 tests x 20 points).",
-                    "当前 Python 代码题固定按 100 分计分（5 个测试点，每个 20 分）。",
+                    "Code questions currently use a fixed 100-point rubric (5 tests x 20 points).",
+                    "当前代码题固定按 100 分计分（5 个测试点，每个 20 分）。",
                 ),
                 "warning",
             )
             question.max_score = Decimal("100")
         db.add(
-            PythonCodeQuestionConfig(
+            CodeQuestionConfig(
                 question_id=question.id,
                 input_spec=input_spec.strip(),
                 output_spec=output_spec.strip(),
                 visible_tests_json=json.dumps(visible_samples, ensure_ascii=True, indent=2),
                 hidden_tests_json=json.dumps(hidden_samples, ensure_ascii=True, indent=2),
                 allowed_libraries_note=allowed_libraries_note.strip()
-                or DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+                or DEFAULT_ALLOWED_CODE_LIBRARIES,
+                allowed_languages_json=json.dumps([language.value for language in normalized_languages], ensure_ascii=True),
+                reference_solution_python=reference_solution_python.strip(),
+                reference_solution_c=reference_solution_c.strip(),
+                reference_solution_cpp=reference_solution_cpp.strip(),
                 time_limit_seconds=int(time_limit_seconds or 300),
                 memory_limit_mb=int(memory_limit_mb or 1024),
                 cpu_limit=cpu_limit or "1",
@@ -841,7 +860,7 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "versions": versions,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
-            "default_allowed_python_libraries": default_allowed_python_libraries_text(get_locale(request)),
+            "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
         },
     )
 
@@ -990,6 +1009,10 @@ async def update_question(
     hidden_test_2_input: str = Form(""),
     hidden_test_2_output: str = Form(""),
     allowed_libraries_note: str = Form(""),
+    allowed_languages: list[str] = Form(["python"]),
+    reference_solution_python: str = Form(""),
+    reference_solution_c: str = Form(""),
+    reference_solution_cpp: str = Form(""),
     time_limit_seconds: str = Form("300"),
     memory_limit_mb: str = Form("1024"),
     cpu_limit: str = Form("1"),
@@ -1047,8 +1070,18 @@ async def update_question(
         cfg.rubric_text = rubric_text.strip() or None
         cfg.teacher_confirmation_required = teacher_confirmation_required
         cfg.updated_at = utcnow()
-    elif question.question_type == QuestionType.PYTHON_CODE and question.python_code_config:
-        cfg = question.python_code_config
+    elif question.question_type == QuestionType.CODE and question.code_config:
+        cfg = question.code_config
+        normalized_languages = []
+        for raw_language in allowed_languages:
+            try:
+                language = CodeLanguage(raw_language)
+            except ValueError:
+                continue
+            if language not in normalized_languages:
+                normalized_languages.append(language)
+        if not normalized_languages:
+            normalized_languages = [CodeLanguage.PYTHON]
         visible_samples = [
             {"input": visible_test_1_input.strip(), "expected_output": visible_test_1_output.strip(), "points": 20},
             {"input": visible_test_2_input.strip(), "expected_output": visible_test_2_output.strip(), "points": 20},
@@ -1062,7 +1095,11 @@ async def update_question(
         cfg.output_spec = output_spec.strip()
         cfg.visible_tests_json = json.dumps(visible_samples, ensure_ascii=True, indent=2)
         cfg.hidden_tests_json = json.dumps(hidden_samples, ensure_ascii=True, indent=2)
-        cfg.allowed_libraries_note = allowed_libraries_note.strip() or DEFAULT_ALLOWED_PYTHON_LIBRARIES
+        cfg.allowed_libraries_note = allowed_libraries_note.strip() or DEFAULT_ALLOWED_CODE_LIBRARIES
+        cfg.allowed_languages_json = json.dumps([language.value for language in normalized_languages], ensure_ascii=True)
+        cfg.reference_solution_python = reference_solution_python.strip()
+        cfg.reference_solution_c = reference_solution_c.strip()
+        cfg.reference_solution_cpp = reference_solution_cpp.strip()
         cfg.time_limit_seconds = int(time_limit_seconds or 300)
         cfg.memory_limit_mb = int(memory_limit_mb or 1024)
         cfg.cpu_limit = cpu_limit or "1"

@@ -128,8 +128,26 @@
               <option value="false" {% if not sac.teacher_confirmation_required %}selected{% endif %}>{{ lx("No", "否") }}</option>
             </select>
           </div>
-          {% elif question.question_type.value == 'python_code' and question.python_code_config %}
-          {% set pyc = question.python_code_config %}
+          {% elif question.question_type.value == 'code' and question.code_config %}
+          {% set pyc = question.code_config %}
+          {% set allowed_values = pyc.allowed_language_values() %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Allowed languages", "允许语言") }}</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="python" id="lang_python_edit" {% if 'python' in allowed_values %}checked{% endif %} />
+                <label class="form-check-label" for="lang_python_edit">Python</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="c" id="lang_c_edit" {% if 'c' in allowed_values %}checked{% endif %} />
+                <label class="form-check-label" for="lang_c_edit">C</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="cpp" id="lang_cpp_edit" {% if 'cpp' in allowed_values %}checked{% endif %} />
+                <label class="form-check-label" for="lang_cpp_edit">C++</label>
+              </div>
+            </div>
+          </div>
           <div class="col-12">
             <label class="form-label">{{ lx("Input specification", "输入格式") }}</label>
             <textarea class="form-control" name="input_spec" rows="3" required>{{ pyc.input_spec or '' }}</textarea>
@@ -140,7 +158,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">{{ lx("Allowed libraries note", "允许库备注") }}</label>
-            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ pyc.allowed_libraries_note or default_allowed_python_libraries }}</textarea>
+            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ pyc.allowed_libraries_note or default_allowed_code_libraries }}</textarea>
           </div>
           <div class="col-md-4">
             <label class="form-label">{{ lx("Timeout (seconds)", "超时秒数") }}</label>
@@ -202,6 +220,18 @@
           <div class="col-md-6">
             <label class="form-label">{{ lx("Hidden test 2 output", "隐藏测试 2 输出") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3">{{ ht[1].expected_output if ht|length > 1 else '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference solution - Python", "参考答案 - Python") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_python" rows="5">{{ pyc.reference_solution_python }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference solution - C", "参考答案 - C") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_c" rows="5">{{ pyc.reference_solution_c }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference solution - C++", "参考答案 - C++") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5">{{ pyc.reference_solution_cpp }}</textarea>
           </div>
           {% elif question.question_type.value == 'notebook' and question.notebook_config %}
           {% set nbc = question.notebook_config %}
@@ -276,7 +306,7 @@
           </div>
           {% endif %}
 
-          {% if question.short_answer_config or question.python_code_config or question.file_question_config or question.notebook_config %}
+          {% if question.short_answer_config or question.code_config or question.file_question_config or question.notebook_config %}
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Save changes", "保存修改") }}</button>
           </div>

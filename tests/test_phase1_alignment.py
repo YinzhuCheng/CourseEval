@@ -289,7 +289,7 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertEqual(
             [question.question_type for question in questions],
             [
-                QuestionType.PYTHON_CODE,
+                QuestionType.CODE,
                 QuestionType.FILE_LLM,
                 QuestionType.FILE_LLM,
             ],

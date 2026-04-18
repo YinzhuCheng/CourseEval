@@ -85,8 +85,8 @@
         <div class="alert alert-info">
           <strong>{{ lx("Question type guidance", "题型说明") }}:</strong>
           {{ lx(
-            "Use native Python code questions for executable .py submissions. For uploads graded by the LLM, pick allowed file formats (you may allow more than one, for example PDF and TeX together).",
-            "需要执行评测的编程题请使用原生 Python 代码题；需要上传并由 LLM 评分的题目请选择“允许提交的文件格式”（可多选，例如同时允许 PDF 与 TeX）。"
+            "Use code questions for executable Python, C, or C++ submissions. For uploads graded by the LLM, pick allowed file formats (you may allow more than one, for example PDF and TeX together).",
+            "需要执行评测的编程题请使用代码题，可允许 Python、C 或 C++；需要上传并由 LLM 评分的题目请选择“允许提交的文件格式”（可多选，例如同时允许 PDF 与 TeX）。"
           ) }}
         </div>
         <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" enctype="multipart/form-data" class="row g-3" id="create-question-form">
@@ -101,7 +101,7 @@
           <div class="col-md-6">
             <label class="form-label">{{ lx("Question kind", "题目类型") }}</label>
             <select class="form-select" name="question_type">
-              <option value="python_code">{{ lx("Native Python code", "原生 Python 代码题") }}</option>
+              <option value="code">{{ lx("Code question", "代码题") }}</option>
               <option value="notebook">{{ lx("Notebook (.ipynb) / LLM text review", "Notebook（.ipynb）/ LLM 文本评阅") }}</option>
               <option value="file_llm">{{ lx("File upload / LLM-reviewed", "文件上传 / LLM 评测题") }}</option>
             </select>
@@ -119,78 +119,107 @@
             </select>
           </div>
 
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <div class="alert alert-info mb-0">
               <strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong>
-              {{ default_allowed_python_libraries }}
+              {{ default_allowed_code_libraries }}
             </div>
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Allowed languages", "允许语言") }}</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="python" id="lang_python_create" checked />
+                <label class="form-check-label" for="lang_python_create">Python</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="c" id="lang_c_create" />
+                <label class="form-check-label" for="lang_c_create">C</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="cpp" id="lang_cpp_create" />
+                <label class="form-check-label" for="lang_cpp_create">C++</label>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 code-only">
             <label class="form-label">{{ lx("Input specification", "输入格式") }}</label>
             <textarea class="form-control" name="input_spec" rows="3" required></textarea>
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <label class="form-label">{{ lx("Output specification", "输出格式") }}</label>
             <textarea class="form-control" name="output_spec" rows="3" required></textarea>
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <label class="form-label">{{ lx("Allowed libraries note", "允许库备注") }}</label>
-            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ default_allowed_python_libraries }}</textarea>
+            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ default_allowed_code_libraries }}</textarea>
           </div>
-          <div class="col-md-4 python-code-only">
+          <div class="col-md-4 code-only">
             <label class="form-label">{{ lx("Timeout (seconds)", "超时秒数") }}</label>
             <input class="form-control" name="time_limit_seconds" value="300" />
           </div>
-          <div class="col-md-4 python-code-only">
+          <div class="col-md-4 code-only">
             <label class="form-label">{{ lx("Memory MB", "内存 MB") }}</label>
             <input class="form-control" name="memory_limit_mb" value="1024" />
           </div>
-          <div class="col-md-4 python-code-only">
+          <div class="col-md-4 code-only">
             <label class="form-label">{{ lx("CPU", "CPU") }}</label>
             <input class="form-control" name="cpu_limit" value="1" />
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <h3 class="h6 mb-2">{{ lx("5 test cases (20 points each)", "5 个测试点（默认每个 20 分）") }}</h3>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 1 input", "可见测试 1 输入") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_1_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 1 output", "可见测试 1 输出") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_1_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 2 input", "可见测试 2 输入") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_2_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 2 output", "可见测试 2 输出") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_2_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 3 input", "可见测试 3 输入") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_3_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 3 output", "可见测试 3 输出") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_3_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 1 input", "隐藏测试 1 输入") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_1_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 1 output", "隐藏测试 1 输出") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_1_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 2 input", "隐藏测试 2 输入") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_2_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 2 output", "隐藏测试 2 输出") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3" required></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - Python", "参考答案 - Python") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_python" rows="5"></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - C", "参考答案 - C") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_c" rows="5"></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - C++", "参考答案 - C++") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5"></textarea>
           </div>
 
           <div class="col-12 notebook-llm-only d-none">
@@ -296,12 +325,12 @@
 
     const toggle = () => {
       const selected = typeSelect.value;
-      const isPython = selected === "python_code";
+      const isCode = selected === "code";
       const isNotebook = selected === "notebook";
       const isLlm = selected === "file_llm";
 
-      document.querySelectorAll(".python-code-only").forEach((el) => {
-        el.classList.toggle("d-none", !isPython);
+      document.querySelectorAll(".code-only").forEach((el) => {
+        el.classList.toggle("d-none", !isCode);
       });
       document.querySelectorAll(".notebook-llm-only").forEach((el) => {
         el.classList.toggle("d-none", !isNotebook);

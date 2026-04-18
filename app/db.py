@@ -89,6 +89,34 @@ def migrate_legacy_schema() -> None:
                 "SUPER_ADMIN": "super_admin",
             },
         )
+    _ensure_code_question_config_table()
+    table_names = set(inspector.get_table_names())
+    if "submissions" in table_names:
+        _ensure_column("submissions", "code_language", "VARCHAR(16)")
+        _ensure_column("submissions", "code_submission_mode", "VARCHAR(16)")
+    with engine.begin() as connection:
+        if "questions" in table_names:
+            connection.execute(text("UPDATE questions SET question_type = 'code' WHERE question_type = 'python_code'"))
+        if "submissions" in table_names:
+            connection.execute(
+                text(
+                    "UPDATE submissions "
+                    "SET code_language = 'python' "
+                    "WHERE submission_type = 'python_code' AND (code_language IS NULL OR code_language = '')"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE submissions "
+                    "SET code_submission_mode = 'single_file' "
+                    "WHERE submission_type = 'python_code' AND (code_submission_mode IS NULL OR code_submission_mode = '')"
+                )
+            )
+            connection.execute(text("UPDATE submissions SET submission_type = 'code' WHERE submission_type = 'python_code'"))
+        if "evaluation_tasks" in table_names:
+            connection.execute(
+                text("UPDATE evaluation_tasks SET task_type = 'code_evaluation' WHERE task_type = 'python_code_evaluation'")
+            )
     if "courses" in inspector.get_table_names():
         _ensure_column("courses", "join_code", "VARCHAR(32)")
         _ensure_column("courses", "use_global_llm_default", "BOOLEAN NOT NULL DEFAULT 1")
@@ -148,24 +176,28 @@ def migrate_legacy_schema() -> None:
             "default_scoring_rule": {"LATEST": "latest", "HIGHEST": "highest"},
             "submission_limit_mode": {"UNLIMITED": "unlimited", "DAILY": "daily", "TOTAL": "total"},
         },
-        "questions": {
-            "question_type": {
-                "NOTEBOOK": "notebook",
-                "SHORT_ANSWER": "short_answer",
-                "PYTHON_CODE": "python_code",
-                "PDF": "pdf_llm",
-                "FORMATTED_TEXT": "formatted_text_llm",
-            },
+            "questions": {
+                "question_type": {
+                    "NOTEBOOK": "notebook",
+                    "SHORT_ANSWER": "short_answer",
+                    "PYTHON_CODE": "code",
+                    "python_code": "code",
+                    "CODE": "code",
+                    "PDF": "pdf_llm",
+                    "FORMATTED_TEXT": "formatted_text_llm",
+                },
             "scoring_rule_override": {"LATEST": "latest", "HIGHEST": "highest"},
         },
         "submissions": {
             "submission_type": {
-                "NOTEBOOK": "notebook",
-                "SHORT_ANSWER": "short_answer",
-                "PYTHON_CODE": "python_code",
-                "PDF": "pdf_llm",
-                "FORMATTED_TEXT": "formatted_text_llm",
-            },
+                    "NOTEBOOK": "notebook",
+                    "SHORT_ANSWER": "short_answer",
+                    "PYTHON_CODE": "code",
+                    "python_code": "code",
+                    "CODE": "code",
+                    "PDF": "pdf_llm",
+                    "FORMATTED_TEXT": "formatted_text_llm",
+                },
             "status": {
                 "SUBMITTED": "submitted",
                 "QUEUED": "queued",
@@ -179,10 +211,12 @@ def migrate_legacy_schema() -> None:
             "task_type": {
                 "NOTEBOOK_EVALUATION": "notebook_evaluation",
                 "SHORT_ANSWER_LLM": "short_answer_llm",
-                "NOTEBOOK_LLM_FEEDBACK": "notebook_llm_feedback",
-                "PYTHON_CODE_EVALUATION": "python_code_evaluation",
-                "FILE_LLM_EVALUATION": "file_llm_evaluation",
-            },
+                    "NOTEBOOK_LLM_FEEDBACK": "notebook_llm_feedback",
+                    "PYTHON_CODE_EVALUATION": "code_evaluation",
+                    "python_code_evaluation": "code_evaluation",
+                    "CODE_EVALUATION": "code_evaluation",
+                    "FILE_LLM_EVALUATION": "file_llm_evaluation",
+                },
             "status": {"QUEUED": "queued", "RUNNING": "running", "SUCCEEDED": "succeeded", "FAILED": "failed"},
         },
         "feedback": {"source": {"AUTO": "auto", "LLM": "llm", "TEACHER": "teacher"}},
@@ -257,7 +291,7 @@ def _ensure_question_version_schema() -> None:
                 db.scalars(
                     select(Question)
                     .options(
-                        joinedload(Question.python_code_config),
+                        joinedload(Question.code_config),
                         joinedload(Question.short_answer_config),
                         joinedload(Question.file_question_config),
                     )
@@ -273,6 +307,59 @@ def _ensure_question_version_schema() -> None:
     _ensure_llm_grading_enhancements()
     _ensure_llm_token_policy_tables()
     _bootstrap_file_llm_questions_disable_teacher_confirmation()
+
+
+def _ensure_code_question_config_table() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "python_code_question_configs" in tables and "code_question_configs" not in tables:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE python_code_question_configs RENAME TO code_question_configs"))
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+    elif "python_code_question_configs" in tables and "code_question_configs" in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO code_question_configs (
+                        id,
+                        question_id,
+                        input_spec,
+                        output_spec,
+                        visible_tests_json,
+                        hidden_tests_json,
+                        allowed_libraries_note,
+                        time_limit_seconds,
+                        memory_limit_mb,
+                        cpu_limit,
+                        allow_network,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        id,
+                        question_id,
+                        input_spec,
+                        output_spec,
+                        visible_tests_json,
+                        hidden_tests_json,
+                        allowed_libraries_note,
+                        time_limit_seconds,
+                        memory_limit_mb,
+                        cpu_limit,
+                        allow_network,
+                        created_at,
+                        updated_at
+                    FROM python_code_question_configs
+                    """
+                )
+            )
+    if "code_question_configs" in tables:
+        _ensure_column("code_question_configs", "allowed_languages_json", "TEXT NOT NULL DEFAULT '[\"python\"]'")
+        _ensure_column("code_question_configs", "reference_solution_python", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column("code_question_configs", "reference_solution_c", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column("code_question_configs", "reference_solution_cpp", "TEXT NOT NULL DEFAULT ''")
 
 
 def _bootstrap_file_llm_questions_disable_teacher_confirmation() -> None:
