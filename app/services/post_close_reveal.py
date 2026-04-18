@@ -10,14 +10,14 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.constants import QuestionType
 from app.models import FinalGradeSnapshot, Question, Submission
-from app.services.discussions import assignment_past_close_for_discussion
+from app.services.assignment_visibility import assignment_reference_bundle_public
 from app.services.submissions import absolute_data_path, read_submission_text_artifact
 
 
 def reveal_bundle_for_question(db: Session, question: Question) -> dict:
-    """Public-safe content for students after close_at."""
+    """Public-safe content for students after the reference bundle deadline (close_at, else due_at)."""
     asn = question.assignment
-    if not assignment_past_close_for_discussion(asn):
+    if not assignment_reference_bundle_public(asn):
         return {"open": False, "reference_text": None, "rubric_text": None, "sample": None}
 
     reference_text: str | None = None
