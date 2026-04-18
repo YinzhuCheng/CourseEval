@@ -1,6 +1,9 @@
+import html
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+
+from markupsafe import Markup
 
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -27,6 +30,12 @@ def format_datetime(value: datetime | None, pattern: str = "%Y-%m-%d %H:%M:%S") 
     return value.astimezone(display_timezone).strftime(pattern)
 
 
+def format_discussion_body(text: str | None) -> Markup:
+    """Escape HTML and preserve line breaks for plain-text discussion posts."""
+    safe = html.escape((text or "").strip())
+    return Markup("<br/>".join(safe.splitlines())) if safe else Markup("")
+
+
 def render_template(
     request: Request,
     db: Session,
@@ -48,6 +57,7 @@ def render_template(
         "t": template_translator(request),
         "lx": template_localizer(request),
         "format_datetime": format_datetime,
+        "format_discussion_body": format_discussion_body,
         "elabel": elabel,
     }
     base_context["can_use_teacher_features"] = is_teacher_account(base_context["current_user"])

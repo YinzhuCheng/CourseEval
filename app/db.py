@@ -307,6 +307,94 @@ def _ensure_question_version_schema() -> None:
     _ensure_llm_grading_enhancements()
     _ensure_llm_token_policy_tables()
     _bootstrap_file_llm_questions_disable_teacher_confirmation()
+    _ensure_discussion_tables()
+
+
+def _ensure_discussion_tables() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "course_materials" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE course_materials (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        course_id INTEGER NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        body_markdown TEXT,
+                        external_url VARCHAR(2048),
+                        sort_order INTEGER NOT NULL DEFAULT 0,
+                        created_by INTEGER,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME,
+                        FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE,
+                        FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX ix_course_materials_course_id ON course_materials (course_id)"))
+    if "discussion_topics" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE discussion_topics (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        course_id INTEGER NOT NULL,
+                        kind VARCHAR(32) NOT NULL,
+                        course_material_id INTEGER,
+                        question_id INTEGER,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE,
+                        FOREIGN KEY(course_material_id) REFERENCES course_materials (id) ON DELETE CASCADE,
+                        FOREIGN KEY(question_id) REFERENCES questions (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE UNIQUE INDEX uq_discussion_topics_material ON discussion_topics (course_material_id)"))
+            connection.execute(text("CREATE UNIQUE INDEX uq_discussion_topics_question ON discussion_topics (question_id)"))
+            connection.execute(text("CREATE INDEX ix_discussion_topics_course_kind ON discussion_topics (course_id, kind)"))
+    if "discussion_posts" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE discussion_posts (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        topic_id INTEGER NOT NULL,
+                        author_id INTEGER NOT NULL,
+                        parent_post_id INTEGER,
+                        body_text TEXT NOT NULL,
+                        is_anonymous INTEGER NOT NULL DEFAULT 0,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(topic_id) REFERENCES discussion_topics (id) ON DELETE CASCADE,
+                        FOREIGN KEY(author_id) REFERENCES users (id) ON DELETE CASCADE,
+                        FOREIGN KEY(parent_post_id) REFERENCES discussion_posts (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX ix_discussion_posts_topic_id ON discussion_posts (topic_id)"))
+            connection.execute(text("CREATE INDEX ix_discussion_posts_topic_created ON discussion_posts (topic_id, created_at)"))
+    tables = set(inspect(engine).get_table_names())
+    if "discussion_topics" in tables and "questions" in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO discussion_topics (course_id, kind, question_id, course_material_id, created_at)
+                    SELECT a.course_id, 'question', q.id, NULL, datetime('now')
+                    FROM questions q
+                    JOIN assignments a ON a.id = q.assignment_id
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM discussion_topics dt WHERE dt.question_id = q.id
+                    )
+                    """
+                )
+            )
 
 
 def _ensure_code_question_config_table() -> None:

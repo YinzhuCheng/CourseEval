@@ -210,6 +210,37 @@
         {% endif %}
       </div>
     </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <h2 class="h5 mb-0">{{ lx("Learning materials", "学习资料") }}</h2>
+          {% if can_manage_course %}
+          <a class="btn btn-sm btn-primary" href="/teacher/courses/{{ course.id }}/materials/new">{{ lx("New material", "新建资料") }}</a>
+          {% endif %}
+        </div>
+        {% if materials %}
+        <ul class="list-group list-group-flush">
+          {% for m in materials %}
+          <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+              <a class="fw-semibold" href="/teacher/courses/{{ course.id }}/materials/{{ m.id }}">{{ m.title }}</a>
+              {% if m.external_url %}<div class="small text-muted text-truncate" style="max-width: 28rem;">{{ m.external_url }}</div>{% endif %}
+            </div>
+            <div class="d-flex gap-2">
+              {% if can_manage_course %}
+              <a class="btn btn-sm btn-outline-secondary" href="/teacher/courses/{{ course.id }}/materials/{{ m.id }}/edit">{{ lx("Edit", "编辑") }}</a>
+              {% endif %}
+              <a class="btn btn-sm btn-outline-primary" href="/teacher/courses/{{ course.id }}/materials/{{ m.id }}">{{ lx("Open", "打开") }}</a>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">{{ lx("No materials yet.", "暂无学习资料。") }}</p>
+        {% endif %}
+      </div>
+    </div>
   </div>
 
   <div class="col-lg-5">

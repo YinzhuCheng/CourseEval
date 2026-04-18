@@ -438,6 +438,28 @@
         {% endif %}
       </div>
     </div>
+
+    {% if reveal and reveal.open %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Student-facing reveal (after close)", "学生端关闭后公布内容") }}</h2>
+        {% if reveal.reference_text %}
+        <h3 class="h6">{{ lx("Reference answer", "参考答案") }}</h3>
+        <pre class="artifact-block mb-3">{{ reveal.reference_text }}</pre>
+        {% endif %}
+        {% if reveal.rubric_text %}
+        <h3 class="h6">{{ lx("Rubric", "评分标准") }}</h3>
+        <div class="border rounded-3 p-3 bg-light-subtle mb-3">{{ reveal.rubric_text }}</div>
+        {% endif %}
+        {% if reveal.sample %}
+        <h3 class="h6">{{ lx("Random full-score sample (anonymous to students)", "随机满分样例（对学生匿名）") }}</h3>
+        <pre class="artifact-block">{{ reveal.sample.preview_text }}</pre>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% include "partials/discussion_board.html" %}
   </div>
 </div>
 {% endblock %}
