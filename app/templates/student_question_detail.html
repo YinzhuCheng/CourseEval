@@ -231,4 +231,28 @@
     </div>
   </div>
 </div>
+
+{% if reveal and reveal.open %}
+<div class="card shadow-sm surface-card mb-4">
+  <div class="card-body p-4">
+    <h2 class="h5 mb-3">{{ lx("After close: reference & rubric", "关闭后公布：参考答案与评分标准") }}</h2>
+    <p class="small text-muted mb-3">{{ lx("Shown after the assignment close time.", "在作业「关闭时间」到达后向学生展示。") }}</p>
+    {% if reveal.reference_text %}
+    <h3 class="h6">{{ lx("Reference answer", "参考答案") }}</h3>
+    <pre class="artifact-block mb-3">{{ reveal.reference_text }}</pre>
+    {% endif %}
+    {% if reveal.rubric_text %}
+    <h3 class="h6">{{ lx("Rubric / grading criteria", "评分标准 / 细则") }}</h3>
+    <div class="border rounded-3 p-3 bg-light-subtle mb-3">{{ reveal.rubric_text }}</div>
+    {% endif %}
+    {% if reveal.sample %}
+    <h3 class="h6">{{ lx("Anonymous full-score sample", "匿名满分样例") }}</h3>
+    <p class="small text-muted">{{ lx("One randomly selected effective full-score submission (text excerpt).", "从生效满分提交中随机抽取一条，仅展示文本摘录且匿名。") }}</p>
+    <pre class="artifact-block">{{ reveal.sample.preview_text }}</pre>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% include "partials/discussion_board.html" %}
 {% endblock %}

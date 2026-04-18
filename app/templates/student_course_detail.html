@@ -71,4 +71,22 @@
     {% endif %}
   </div>
 </div>
+
+<div class="card shadow-sm mt-4">
+  <div class="card-body">
+    <h2 class="h5 mb-3">{{ lx("Learning materials", "学习资料") }}</h2>
+    {% if materials %}
+    <ul class="list-group list-group-flush">
+      {% for m in materials %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">{{ m.title }}</span>
+        <a class="btn btn-sm btn-outline-primary" href="/student/courses/{{ course.id }}/materials/{{ m.id }}">{{ lx("Open", "查看") }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted mb-0">{{ lx("No materials yet.", "暂无学习资料。") }}</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

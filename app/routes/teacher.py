@@ -43,6 +43,7 @@ from app.models import (
     User,
 )
 from app.runtime_support import default_allowed_code_libraries_text
+from app.services.course_materials import list_materials_for_course
 from app.services.courses import (
     DEFAULT_ALLOWED_CODE_LIBRARIES,
     get_assignment_for_staff,
@@ -59,6 +60,15 @@ from app.services.permissions import (
     require_login,
     require_teacher_account,
 )
+from app.services.discussions import (
+    can_post_on_question_topic,
+    create_post,
+    display_label_for_post,
+    get_or_create_question_topic,
+    list_posts_for_topic,
+    flat_thread_for_template,
+)
+from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
 from app.services.submissions import (
     get_submission_for_teacher,
@@ -66,6 +76,16 @@ from app.services.submissions import (
     read_submission_artifact_text,
     refresh_final_grade_snapshot,
     store_reference_answer_file,
+)
+from app.services.teacher_analytics import (
+    active_student_ids,
+    compute_assignment_staff_stats,
+    compute_course_staff_overview,
+    compute_question_class_stats,
+    enrich_course_grade_matrix,
+    grade_summary_from_float_scores,
+    percentile_rank,
+    score_distribution_by_question,
 )
 from app.web import render_template
 
@@ -195,7 +215,13 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .all()
     )
     course_role = get_course_role(db, course.id, user.id)
-    grade_matrix = summarize_course_grade_matrix(db, course.id) if course_role == CourseRole.TEACHER else None
+    grade_matrix = None
+    course_staff_overview = None
+    materials = list_materials_for_course(db, course.id)
+    if course_role in (CourseRole.TEACHER, CourseRole.TA):
+        course_staff_overview = compute_course_staff_overview(db, course.id)
+    if course_role == CourseRole.TEACHER:
+        grade_matrix = enrich_course_grade_matrix(db, course.id, summarize_course_grade_matrix(db, course.id))
     return render_template(
         request,
         db,
@@ -203,11 +229,13 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         {
             "course": course,
             "assignments": assignments,
+            "materials": materials,
             "members": members,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "available_llm_configs": available_llm_configs,
             "grade_matrix": grade_matrix,
+            "course_staff_overview": course_staff_overview,
         },
     )
 
@@ -454,6 +482,8 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
         .all()
     )
     course_role = get_course_role(db, assignment.course_id, user.id)
+    student_ids = active_student_ids(db, assignment.course_id)
+    assignment_staff_stats = compute_assignment_staff_stats(db, assignment.id, assignment.course_id, student_ids)
     return render_template(
         request,
         db,
@@ -465,6 +495,7 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
+            "assignment_staff_stats": assignment_staff_stats,
         },
     )
 
@@ -849,6 +880,18 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
         .order_by(QuestionVersion.version_number.desc())
         .all()
     )
+    sid_list = active_student_ids(db, question.assignment.course_id)
+    question_class_stats = compute_question_class_stats(db, question.id, question.assignment.course_id, sid_list)
+    topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
+    db.commit()
+    posts = list_posts_for_topic(db, topic.id)
+    decorated = []
+    for p in posts:
+        label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
+        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
+    threaded = flat_thread_for_template(posts, decorated)
+    reveal = reveal_bundle_for_question(db, question)
+    can_discuss = can_post_on_question_topic(db, question, user)
     return render_template(
         request,
         db,
@@ -861,8 +904,55 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
+            "question_class_stats": question_class_stats,
+            "topic_id": topic.id,
+            "discussion_thread": threaded,
+            "can_post_discussion": can_discuss,
+            "reveal": reveal,
+            "discussion_post_url": f"/teacher/questions/{question_id}/discuss",
+            "discussion_notice": "",
         },
     )
+
+
+@router.post("/questions/{question_id}/discuss")
+def teacher_question_discuss(
+    question_id: int,
+    request: Request,
+    body: str = Form(...),
+    parent_post_id: str = Form(""),
+    anonymous: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        question = get_question_for_staff(db, question_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if question is None:
+        return _redirect("/teacher/courses")
+    if not can_post_on_question_topic(db, question, user):
+        push_flash(request, choose_text(request, "You cannot post here.", "你无法在此发言。"), "danger")
+        return _redirect(f"/teacher/questions/{question_id}")
+    topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
+    db.commit()
+    pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    try:
+        create_post(
+            db,
+            topic_id=topic.id,
+            author=user,
+            body=body,
+            parent_post_id=pid,
+            is_anonymous=(anonymous == "on" or anonymous == "true"),
+        )
+        db.commit()
+    except ValueError:
+        db.rollback()
+        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
+    else:
+        push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+    return _redirect(f"/teacher/questions/{question_id}")
 
 
 @router.get("/courses/{course_id}/grades/student/{student_id}")
@@ -901,11 +991,14 @@ def teacher_student_course_grades(course_id: int, student_id: int, request: Requ
     assignments = (
         db.query(Assignment).filter(Assignment.course_id == course_id).order_by(Assignment.created_at.desc()).all()
     )
+    all_student_ids = active_student_ids(db, course_id)
     rows = []
     for asn in assignments:
         questions = (
             db.query(Question).filter(Question.assignment_id == asn.id).order_by(Question.order_index.asc()).all()
         )
+        q_ids = [q.id for q in questions]
+        class_scores_by_q = score_distribution_by_question(db, q_ids, all_student_ids)
         q_cells = []
         for q in questions:
             sub = (
@@ -922,12 +1015,16 @@ def teacher_student_course_grades(course_id: int, student_id: int, request: Requ
                 )
                 .first()
             )
+            peer_scores = class_scores_by_q.get(q.id, [])
+            st_score = float(snap.score) if snap is not None and snap.score is not None else None
             q_cells.append(
                 {
                     "question": q,
                     "submitted": sub is not None,
                     "submission": sub,
                     "snapshot": snap,
+                    "class_score_summary": grade_summary_from_float_scores(peer_scores),
+                    "percentile_rank": percentile_rank(peer_scores, st_score),
                 }
             )
         asn_total = (

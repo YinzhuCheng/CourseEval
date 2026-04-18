@@ -201,3 +201,23 @@ body {
     flex-direction: column;
   }
 }
+
+.discussion-board {
+  border-radius: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, #fafbff 0%, #ffffff 45%);
+}
+.discussion-post {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.85rem;
+  background: #ffffff;
+}
+.discussion-post--nested {
+  margin-left: 1.25rem;
+  border-left: 3px solid rgba(13, 110, 253, 0.28);
+}
+.material-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.35rem;
+}
