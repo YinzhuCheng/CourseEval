@@ -71,6 +71,9 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     email_verification_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verification_last_send_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    password_reset_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     llm_daily_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -106,6 +109,10 @@ class User(Base):
         foreign_keys="FinalGradeSnapshot.student_id",
     )
     llm_token_daily_rows: Mapped[list["UserLlmTokenDaily"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    email_delivery_logs: Mapped[list["EmailDeliveryLog"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -270,6 +277,21 @@ class UserLlmTokenDaily(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="llm_token_daily_rows")
+
+
+class EmailDeliveryLog(Base):
+    __tablename__ = "email_delivery_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped[User | None] = relationship(back_populates="email_delivery_logs")
 
 
 class LLMConfig(Base):

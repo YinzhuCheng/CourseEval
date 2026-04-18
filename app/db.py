@@ -65,6 +65,9 @@ def migrate_legacy_schema() -> None:
         _ensure_column("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 0")
         _ensure_column("users", "email_verification_token", "VARCHAR(255)")
         _ensure_column("users", "email_verification_sent_at", "DATETIME")
+        _ensure_column("users", "email_verification_last_send_at", "DATETIME")
+        _ensure_column("users", "password_reset_token", "VARCHAR(255)")
+        _ensure_column("users", "password_reset_sent_at", "DATETIME")
         _ensure_column("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1")
         _ensure_column("users", "updated_at", "DATETIME")
         _normalize_enum_values(
@@ -105,6 +108,29 @@ def migrate_legacy_schema() -> None:
         _ensure_column("llm_configs", "supports_vision", "BOOLEAN NOT NULL DEFAULT 0")
     if "submissions" in inspector.get_table_names():
         _ensure_column("submissions", "stored_file_path", "VARCHAR(512)")
+
+    if "email_delivery_logs" not in inspector.get_table_names():
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE email_delivery_logs (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        recipient VARCHAR(255) NOT NULL,
+                        subject VARCHAR(255) NOT NULL,
+                        purpose VARCHAR(64) NOT NULL,
+                        delivered BOOLEAN NOT NULL DEFAULT 0,
+                        error_message TEXT,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE SET NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX ix_email_delivery_logs_user_id ON email_delivery_logs (user_id)"))
+            connection.execute(text("CREATE INDEX ix_email_delivery_logs_recipient ON email_delivery_logs (recipient)"))
+            connection.execute(text("CREATE INDEX ix_email_delivery_logs_purpose ON email_delivery_logs (purpose)"))
 
     enum_normalizations = {
         "course_members": {

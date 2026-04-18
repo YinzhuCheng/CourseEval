@@ -20,6 +20,9 @@ SCRYPT_R = 8
 SCRYPT_P = 1
 SCRYPT_KEY_LEN = 64
 EMAIL_VERIFICATION_TOKEN_BYTES = 32
+PASSWORD_RESET_TOKEN_BYTES = 32
+EMAIL_RESEND_COOLDOWN_SECONDS = 60
+PASSWORD_RESET_EXPIRE_HOURS = 2
 
 
 def hash_password(password: str) -> str:
@@ -120,6 +123,21 @@ def generate_email_verification_token() -> str:
     return secrets.token_urlsafe(EMAIL_VERIFICATION_TOKEN_BYTES)
 
 
+def generate_password_reset_token() -> str:
+    return secrets.token_urlsafe(PASSWORD_RESET_TOKEN_BYTES)
+
+
+def token_digest(token: str) -> str:
+    return hmac.new(get_settings().secret_key.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def token_matches(stored_token: str | None, candidate_token: str) -> bool:
+    if not stored_token or not candidate_token:
+        return False
+    candidate_digest = token_digest(candidate_token)
+    return hmac.compare_digest(stored_token, candidate_digest) or hmac.compare_digest(stored_token, candidate_token)
+
+
 def invite_registration_enabled() -> bool:
     return bool(get_settings().registration_invite_code)
 
@@ -139,18 +157,39 @@ def generate_internal_email_address() -> str:
     return f"invite-{secrets.token_hex(12)}@{domain}"
 
 
-def initial_email_verification_state() -> dict[str, object]:
+def initial_email_verification_state(raw_token: str | None = None) -> dict[str, object]:
+    raw_token = raw_token or generate_email_verification_token()
+    now = utcnow()
     return {
         "email_verified": False,
-        "email_verification_token": generate_email_verification_token(),
-        "email_verification_sent_at": utcnow(),
+        "email_verification_token": token_digest(raw_token),
+        "email_verification_sent_at": now,
+        "email_verification_last_send_at": now,
     }
 
 
-def refresh_email_verification(user: User) -> None:
+def refresh_email_verification(user: User) -> str:
+    raw_token = generate_email_verification_token()
+    now = utcnow()
     user.email_verified = False
-    user.email_verification_token = generate_email_verification_token()
-    user.email_verification_sent_at = utcnow()
+    user.email_verification_token = token_digest(raw_token)
+    user.email_verification_sent_at = now
+    user.email_verification_last_send_at = now
+    return raw_token
+
+
+def can_send_email_verification(user: User) -> bool:
+    last_send_at = _as_utc(user.email_verification_last_send_at)
+    if last_send_at is None:
+        return True
+    return utcnow() >= last_send_at + timedelta(seconds=EMAIL_RESEND_COOLDOWN_SECONDS)
+
+
+def can_send_password_reset(user: User) -> bool:
+    last_send_at = _as_utc(user.password_reset_sent_at)
+    if last_send_at is None:
+        return True
+    return utcnow() >= last_send_at + timedelta(seconds=EMAIL_RESEND_COOLDOWN_SECONDS)
 
 
 def can_verify_email_token(user: User) -> bool:
@@ -166,6 +205,27 @@ def mark_email_verified(user: User) -> None:
     user.email_verified = True
     user.email_verification_token = None
     user.email_verification_sent_at = None
+    user.email_verification_last_send_at = None
+
+
+def refresh_password_reset(user: User) -> str:
+    raw_token = generate_password_reset_token()
+    user.password_reset_token = token_digest(raw_token)
+    user.password_reset_sent_at = utcnow()
+    return raw_token
+
+
+def can_reset_password_token(user: User) -> bool:
+    sent_at = _as_utc(user.password_reset_sent_at)
+    token = user.password_reset_token
+    if not token or sent_at is None:
+        return False
+    return utcnow() <= sent_at + timedelta(hours=PASSWORD_RESET_EXPIRE_HOURS)
+
+
+def clear_password_reset(user: User) -> None:
+    user.password_reset_token = None
+    user.password_reset_sent_at = None
 
 
 def assign_user_role(user: User, role: UserRole) -> None:

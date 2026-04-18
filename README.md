@@ -287,6 +287,14 @@ SMTP_USE_SSL=false
 
 If SMTP is missing or delivery fails, email-based registrations stay pending until email sending works and the verification email is resent. Invitation-code registrations are not affected as long as `REGISTRATION_INVITE_CODE` is configured.
 
+### Email operations
+
+- Password reset is available from the login page for verified, active accounts
+- Verification and password reset tokens are stored as server-keyed hashes in the database
+- Verification resend and password reset requests have a short cooldown to reduce email abuse
+- Admins can send a test message from **Admin → System overview → Email tools**
+- Email delivery attempts are recorded in `email_delivery_logs` for audit and troubleshooting
+
 ## Queue and LLM deployment notes
 
 The platform now separates evaluation traffic into:
@@ -410,4 +418,3 @@ Check:
 - No automatic cleanup for old artifacts
 - No advanced sandbox hardening beyond Docker flags
 - Intended for a single worker process and small-scale deployments
-

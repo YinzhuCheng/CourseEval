@@ -1,5 +1,6 @@
 import json
 
+from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, Form
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
@@ -32,6 +33,7 @@ from app.services.llm_token_usage import (
     beijing_today_str,
     get_platform_default_daily_limit,
 )
+from app.services.email import send_smtp_test_email
 from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
 
@@ -332,6 +334,33 @@ def admin_test_llm_config(config_id: int, request: Request, db: Session = Depend
     db.commit()
     push_flash(request, flash_message, flash_category)
     return _redirect("/admin/llm-configs")
+
+
+@router.post("/system/smtp-test")
+def admin_test_smtp(
+    request: Request,
+    recipient: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        admin_user = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    try:
+        normalized_recipient = validate_email(recipient.strip().lower(), check_deliverability=False).normalized
+    except EmailNotValidError:
+        push_flash(request, t(request, "flash.invalid_email"), "danger")
+        return _redirect("/admin/system")
+
+    result = send_smtp_test_email(request, normalized_recipient, db=db, user=admin_user)
+    if result.delivered:
+        push_flash(request, t(request, "flash.smtp_test_success"), "success")
+    else:
+        push_flash(request, t(request, "flash.smtp_test_failed", message=result.error_message), "danger")
+    return _redirect("/admin/system")
 
 
 @router.get("/system")

@@ -48,6 +48,21 @@
         <pre class="artifact-block">{{ raw_stats_json }}</pre>
       </div>
     </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-2">{{ t("admin.system.email_tools") }}</h2>
+        <p class="text-muted small mb-3">{{ t("admin.system.smtp_test_help") }}</p>
+        <form method="post" action="/admin/system/smtp-test" class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label">{{ t("admin.system.smtp_test_recipient") }}</label>
+            <input class="form-control" name="recipient" type="email" required autocomplete="email" />
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <button class="btn btn-outline-primary w-100" type="submit">{{ t("admin.system.smtp_test_submit") }}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}
