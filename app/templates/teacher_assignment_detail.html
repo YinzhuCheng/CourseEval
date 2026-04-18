@@ -6,7 +6,7 @@
 <div class="page-header-card mb-4">
   <div>
     <h1 class="h3 mb-1">{{ assignment.title }}</h1>
-    <p class="text-muted mb-0">{{ assignment.course.title }} / {{ assignment.status.value }}</p>
+    <p class="text-muted mb-0">{{ assignment.course.title }} / {{ elabel("assignment_status", assignment.status) }}</p>
   </div>
   <a class="btn btn-outline-secondary" href="/teacher/courses/{{ assignment.course_id }}">
     {{ lx("Back to course", "返回课程") }}
@@ -28,11 +28,11 @@
           <dt class="col-sm-4">{{ lx("Allow late", "允许迟交") }}</dt>
           <dd class="col-sm-8">{{ lx("Yes", "是") if assignment.allow_late else lx("No", "否") }}</dd>
           <dt class="col-sm-4">{{ lx("Scoring rule", "计分规则") }}</dt>
-          <dd class="col-sm-8">{{ assignment.default_scoring_rule.value }}</dd>
+          <dd class="col-sm-8">{{ elabel("scoring_rule", assignment.default_scoring_rule) }}</dd>
           <dt class="col-sm-4">{{ lx("Submission limit", "提交限制") }}</dt>
           <dd class="col-sm-8">
-            {{ assignment.submission_limit_mode.value }}
-            {% if assignment.submission_limit_value %}({{ assignment.submission_limit_value }}){% endif %}
+            {{ elabel("submission_limit_mode", assignment.submission_limit_mode) }}
+            {% if assignment.submission_limit_value %}({{ assignment.submission_limit_value }}){% else %}<span class="text-muted">({{ lx("No cap", "不限制") }})</span>{% endif %}
           </dd>
         </dl>
       </div>
@@ -48,7 +48,7 @@
               <tr>
                 <th>#</th>
                 <th>{{ lx("Title", "标题") }}</th>
-                <th>{{ lx("Type", "题型") }}</th>
+                <th>{{ lx("Kind", "类型") }}</th>
                 <th>{{ lx("Max score", "满分") }}</th>
                 <th></th>
               </tr>
@@ -58,7 +58,7 @@
               <tr>
                 <td>{{ question.order_index }}</td>
                 <td>{{ question.title }}</td>
-                <td>{{ question.question_type.value }}</td>
+                <td>{{ elabel("question_type", question.question_type) }}</td>
                 <td>{{ question.max_score }}</td>
                 <td class="text-end">
                   <a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">
@@ -85,11 +85,11 @@
         <div class="alert alert-info">
           <strong>{{ lx("Question type guidance", "题型说明") }}:</strong>
           {{ lx(
-            "Use native Python code questions for executable .py submissions. Use file / LLM-reviewed questions when students should upload PDF, txt, tex, or .ipynb files.",
-            "需要执行评测的编程题请使用原生 Python 代码题；需要学生上传 PDF、txt、tex 或 .ipynb 文件时，请使用文件 / LLM 评测题。"
+            "Use code questions for executable Python, C, or C++ submissions. For uploads graded by the LLM, pick allowed file formats (you may allow more than one, for example PDF and TeX together).",
+            "需要执行评测的编程题请使用代码题，可允许 Python、C 或 C++；需要上传并由 LLM 评分的题目请选择“允许提交的文件格式”（可多选，例如同时允许 PDF 与 TeX）。"
           ) }}
         </div>
-        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" class="row g-3" id="create-question-form">
+        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" enctype="multipart/form-data" class="row g-3" id="create-question-form">
           <div class="col-12">
             <label class="form-label">{{ lx("Title", "标题") }}</label>
             <input class="form-control" name="title" required />
@@ -99,11 +99,11 @@
             <textarea class="form-control" name="description" rows="3"></textarea>
           </div>
           <div class="col-md-6">
-            <label class="form-label">{{ lx("Type", "题型") }}</label>
+            <label class="form-label">{{ lx("Question kind", "题目类型") }}</label>
             <select class="form-select" name="question_type">
-              <option value="python_code">{{ lx("Native Python code", "原生 Python 代码题") }}</option>
-              <option value="pdf_llm">{{ lx("PDF file / LLM-reviewed", "PDF 文件 / LLM 评测题") }}</option>
-              <option value="formatted_text_llm">{{ lx("Formatted text or ipynb / LLM-reviewed", "格式化文本或 ipynb / LLM 评测题") }}</option>
+              <option value="code">{{ lx("Code question", "代码题") }}</option>
+              <option value="notebook">{{ lx("Notebook (.ipynb) / LLM text review", "Notebook（.ipynb）/ LLM 文本评阅") }}</option>
+              <option value="file_llm">{{ lx("File upload / LLM-reviewed", "文件上传 / LLM 评测题") }}</option>
             </select>
           </div>
           <div class="col-md-6">
@@ -119,97 +119,162 @@
             </select>
           </div>
 
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <div class="alert alert-info mb-0">
               <strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong>
-              {{ default_allowed_python_libraries }}
+              {{ default_allowed_code_libraries }}
             </div>
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Allowed languages", "允许语言") }}</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="python" id="lang_python_create" checked />
+                <label class="form-check-label" for="lang_python_create">Python</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="c" id="lang_c_create" />
+                <label class="form-check-label" for="lang_c_create">C</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="cpp" id="lang_cpp_create" />
+                <label class="form-check-label" for="lang_cpp_create">C++</label>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 code-only">
             <label class="form-label">{{ lx("Input specification", "输入格式") }}</label>
             <textarea class="form-control" name="input_spec" rows="3" required></textarea>
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <label class="form-label">{{ lx("Output specification", "输出格式") }}</label>
             <textarea class="form-control" name="output_spec" rows="3" required></textarea>
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <label class="form-label">{{ lx("Allowed libraries note", "允许库备注") }}</label>
-            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ default_allowed_python_libraries }}</textarea>
+            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ default_allowed_code_libraries }}</textarea>
           </div>
-          <div class="col-md-4 python-code-only">
+          <div class="col-md-4 code-only">
             <label class="form-label">{{ lx("Timeout (seconds)", "超时秒数") }}</label>
             <input class="form-control" name="time_limit_seconds" value="300" />
           </div>
-          <div class="col-md-4 python-code-only">
+          <div class="col-md-4 code-only">
             <label class="form-label">{{ lx("Memory MB", "内存 MB") }}</label>
             <input class="form-control" name="memory_limit_mb" value="1024" />
           </div>
-          <div class="col-md-4 python-code-only">
+          <div class="col-md-4 code-only">
             <label class="form-label">{{ lx("CPU", "CPU") }}</label>
             <input class="form-control" name="cpu_limit" value="1" />
           </div>
-          <div class="col-12 python-code-only">
+          <div class="col-12 code-only">
             <h3 class="h6 mb-2">{{ lx("5 test cases (20 points each)", "5 个测试点（默认每个 20 分）") }}</h3>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 1 input", "可见测试 1 输入") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_1_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 1 output", "可见测试 1 输出") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_1_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 2 input", "可见测试 2 输入") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_2_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 2 output", "可见测试 2 输出") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_2_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 3 input", "可见测试 3 输入") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_3_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 3 output", "可见测试 3 输出") }}</label>
             <textarea class="form-control font-monospace" name="visible_test_3_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 1 input", "隐藏测试 1 输入") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_1_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 1 output", "隐藏测试 1 输出") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_1_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 2 input", "隐藏测试 2 输入") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_2_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 python-code-only">
+          <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Hidden test 2 output", "隐藏测试 2 输出") }}</label>
             <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3" required></textarea>
           </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - Python", "参考答案 - Python") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_python" rows="5"></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - C", "参考答案 - C") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_c" rows="5"></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - C++", "参考答案 - C++") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5"></textarea>
+          </div>
 
+          <div class="col-12 notebook-llm-only d-none">
+            <label class="form-label">{{ lx("LLM score weight (cap for LLM portion)", "LLM 分数上限（LLM 部分不超过此值）") }}</label>
+            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" min="0.01" value="20" />
+            <input type="hidden" name="notebook_llm_feedback_enabled" value="true" />
+            <div class="form-text">{{ lx("After auto tests, the notebook is converted to text and graded by the LLM.", "自动评测后，系统会将 ipynb 转为文本并由 LLM 评分。") }}</div>
+          </div>
+          <div class="col-12 notebook-llm-only d-none">
+            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
+            <textarea class="form-control" name="llm_scoring_rubric" rows="4"></textarea>
+          </div>
           <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
             <textarea class="form-control" name="reference_answer" rows="4"></textarea>
           </div>
           <div class="col-12 llm-graded-only d-none">
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            <div class="form-text">{{ lx("PDF and TeX are converted to text for the model.", "PDF 与 TeX 会先转为文本再送入模型。") }}</div>
+          </div>
+          <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>
             <textarea class="form-control" name="rubric_text" rows="3"></textarea>
           </div>
-          <div class="col-md-6 llm-graded-only d-none">
-            <label class="form-label">{{ lx("Accepted extensions", "允许扩展名") }}</label>
-            <input class="form-control" name="accepted_extensions" value=".txt,.tex,.ipynb" />
+          <div class="col-12 llm-graded-only d-none">
+            <label class="form-label">{{ lx("Allowed submission formats", "允许提交的文件格式") }}</label>
+            <input type="hidden" name="accepted_extensions" id="combined_accepted_extensions" value=".pdf" />
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".pdf" id="fmt_pdf" checked />
+                <label class="form-check-label" for="fmt_pdf">PDF</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".txt" id="fmt_txt" />
+                <label class="form-check-label" for="fmt_txt">TXT</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".tex" id="fmt_tex" />
+                <label class="form-check-label" for="fmt_tex">TeX</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".ipynb" id="fmt_ipynb" />
+                <label class="form-check-label" for="fmt_ipynb">Jupyter (.ipynb)</label>
+              </div>
+            </div>
+            <div class="form-text">
+              {{ lx("Select one or more. PDF submissions use page rendering for the LLM. If your answer relies on diagrams, prefer PDF so images are preserved.", "可多选。勾选 PDF 时，系统会对 PDF 渲染页面供 LLM 评阅。若答案强依赖示意图，尽量提交 PDF 以保留图片信息。") }}
+            </div>
           </div>
           <div class="col-md-6 llm-graded-only d-none">
             <label class="form-label">{{ lx("Teacher confirmation required", "教师确认后生效") }}</label>
             <select class="form-select" name="require_teacher_confirmation">
-              <option value="true">{{ lx("Yes", "是") }}</option>
               <option value="false">{{ lx("No", "否") }}</option>
+              <option value="true">{{ lx("Yes", "是") }}</option>
             </select>
           </div>
 
@@ -235,7 +300,7 @@
         <div class="list-group list-group-flush">
           {% for submission in submissions %}
           <a class="list-group-item list-group-item-action" href="/teacher/submissions/{{ submission.id }}">
-            #{{ submission.id }} - {{ submission.user.username }} - {{ submission.status.value }}
+            #{{ submission.id }} - {{ submission.user.username }} - {{ elabel("submission_status", submission.status) }}
           </a>
           {% endfor %}
         </div>
@@ -251,25 +316,36 @@
     const typeSelect = document.querySelector('select[name="question_type"]');
     if (!typeSelect) return;
 
+    const combined = document.getElementById("combined_accepted_extensions");
+    const syncFormats = () => {
+      if (!combined) return;
+      const parts = Array.from(document.querySelectorAll(".file-format-cb:checked")).map((cb) => cb.value);
+      combined.value = parts.length ? parts.join(",") : "";
+    };
+
     const toggle = () => {
       const selected = typeSelect.value;
-      const isPython = selected === "python_code";
-      const isPdf = selected === "pdf_llm";
-      const isFormatted = selected === "formatted_text_llm";
-      const isLlm = isPdf || isFormatted;
+      const isCode = selected === "code";
+      const isNotebook = selected === "notebook";
+      const isLlm = selected === "file_llm";
 
-      document.querySelectorAll(".python-code-only").forEach((el) => {
-        el.classList.toggle("d-none", !isPython);
+      document.querySelectorAll(".code-only").forEach((el) => {
+        el.classList.toggle("d-none", !isCode);
+      });
+      document.querySelectorAll(".notebook-llm-only").forEach((el) => {
+        el.classList.toggle("d-none", !isNotebook);
       });
       document.querySelectorAll(".llm-graded-only").forEach((el) => {
-        el.classList.toggle("d-none", !isLlm);
+        el.classList.toggle("d-none", !(isLlm || isNotebook));
       });
       document.querySelectorAll(".legacy-notebook-only").forEach((el) => {
         el.classList.add("d-none");
       });
+      if (isLlm) syncFormats();
     };
 
     typeSelect.addEventListener("change", toggle);
+    document.querySelectorAll(".file-format-cb").forEach((cb) => cb.addEventListener("change", syncFormats));
     toggle();
   })();
 </script>

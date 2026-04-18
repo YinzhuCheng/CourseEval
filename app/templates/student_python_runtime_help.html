@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ lx("Python Runtime Help", "Python 运行环境说明") }} - {{ t("site.title") }}{% endblock %}
+{% block title %}{{ lx("Code Runtime Help", "代码运行环境说明") }} - {{ t("site.title") }}{% endblock %}
 
 {% block content %}
 <div class="card hero-card mb-4">
@@ -8,11 +8,11 @@
     <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
       <div>
         <span class="feature-chip">{{ lx("Student help", "学生帮助") }}</span>
-        <h1 class="h3 mt-3 mb-2">{{ lx("Python runtime and submission guide", "Python 运行环境与提交流程说明") }}</h1>
+        <h1 class="h3 mt-3 mb-2">{{ lx("Code runtime and submission guide", "代码运行环境与提交流程说明") }}</h1>
         <p class="text-muted mb-0">
           {{ lx(
-            "Use this page to understand which Python version is available, which libraries are preinstalled, and when to submit .py versus .ipynb files.",
-            "本页用于说明系统支持的 Python 版本、已预装的第三方库，以及什么时候应提交 .py 或 .ipynb 文件。"
+            "Use this page to understand Python, C, and C++ submissions, entry files, and allowed libraries.",
+            "本页用于说明 Python、C、C++ 的提交规则、入口文件和允许使用的库。"
           ) }}
         </p>
       </div>
@@ -30,9 +30,15 @@
           <dt class="col-sm-5">{{ lx("Python version", "Python 版本") }}</dt>
           <dd class="col-sm-7"><code>{{ supported_python_version }}</code></dd>
 
+          <dt class="col-sm-5">C</dt>
+          <dd class="col-sm-7"><code>C11 / gcc</code></dd>
+
+          <dt class="col-sm-5">C++</dt>
+          <dd class="col-sm-7"><code>C++17 / g++</code></dd>
+
           <dt class="col-sm-5">{{ lx("Execution mode", "执行模式") }}</dt>
           <dd class="col-sm-7">
-            {{ lx("Native Python runner for .py questions", "原生 Python 运行器（用于 .py 代码题）") }}
+            {{ lx("Docker-isolated code runner", "Docker 隔离代码运行器") }}
           </dd>
 
           <dt class="col-sm-5">{{ lx("ipynb support", "ipynb 支持") }}</dt>
@@ -44,9 +50,10 @@
         <div class="soft-note mt-4">
           <div class="fw-semibold mb-2">{{ lx("Which submission type should I choose?", "我应该选择哪种提交方式？") }}</div>
           <ul class="small text-muted mb-0 ps-3">
-            <li>{{ lx("Use .py when the question expects executable code and automatic test-based evaluation.", "当题目需要执行代码并按测试点自动评测时，请提交 .py 文件。") }}</li>
+            <li>{{ lx("For code questions, choose one of the languages allowed by the teacher and submit .py, .c, .cpp/.cc/.cxx, or .zip.", "代码题请选择教师允许的语言，并提交 .py、.c、.cpp/.cc/.cxx 或 .zip。") }}</li>
+            <li>{{ lx("Zip submissions must contain main.py, main.c, or main.cpp as the entry file.", "zip 多文件提交必须包含 main.py、main.c 或 main.cpp 作为入口文件。") }}</li>
+            <li>{{ lx("Programs read from standard input and write the answer to standard output.", "程序需要从标准输入读取数据，并把答案写到标准输出。") }}</li>
             <li>{{ lx("Use .ipynb when the course asks for notebook-style reasoning, analysis, charts, or formatted reports reviewed through the LLM workflow.", "当课程要求提交 Notebook 形式的分析、说明、图表或报告时，请提交 .ipynb，并通过文件 / LLM 评测流程处理。") }}</li>
-            <li>{{ lx("The old standalone notebook execution page has been retired.", "旧的独立 Notebook 执行页面已经下线。") }}</li>
           </ul>
         </div>
       </div>
@@ -56,7 +63,11 @@
   <div class="col-lg-7">
     <div class="card section-card mb-4">
       <div class="card-body p-4">
-        <h2 class="h5 mb-3">{{ lx("Preinstalled Python packages", "预装 Python 包") }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Allowed libraries", "允许使用的库") }}</h2>
+        <div class="soft-note mb-4">
+          <div class="fw-semibold mb-1">Python</div>
+          <div class="small text-muted">{{ lx(default_allowed_libraries_en, default_allowed_libraries_zh) }}</div>
+        </div>
         <div class="table-responsive">
           <table class="table align-middle package-table">
             <thead>
@@ -80,6 +91,24 @@
         <div class="alert alert-warning mb-0">
           {{ lx(unsupported_package_note_en, unsupported_package_note_zh) }}
         </div>
+        <div class="soft-note mt-4">
+          <div class="fw-semibold mb-1">C / C++</div>
+          <div class="small text-muted">
+            {{ lx(
+              "C supports the C11 standard library. C++ supports the C++17 standard library. Third-party C/C++ libraries, Makefile, CMake, and custom build commands are not supported in the default runner.",
+              "C 支持 C11 标准库。C++ 支持 C++17 标准库。默认 runner 不支持第三方 C/C++ 库、Makefile、CMake 或自定义构建命令。"
+            ) }}
+          </div>
+        </div>
+        <div class="soft-note mt-4">
+          <div class="fw-semibold mb-1">{{ lx("How the preinstalled Python packages are managed", "预装 Python 包如何维护") }}</div>
+          <div class="small text-muted">
+            {{ lx(
+              "The package list shown here is read from app/runtime_support.py. The deployment image installs the original packages from runner/requirements.txt. To expand the default Python library set, update both files and rebuild the runner Docker image.",
+              "本页显示的包列表读取自 app/runtime_support.py。部署镜像会从 runner/requirements.txt 安装原装预置包。若要扩充默认 Python 库，请同时修改这两个文件并重新构建 runner Docker 镜像。"
+            ) }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -100,8 +129,8 @@
             <div class="fw-semibold mb-1">{{ lx("Can I import extra packages?", "我可以导入额外的第三方库吗？") }}</div>
             <div class="small text-muted">
               {{ lx(
-                "Only the Python standard library and the preinstalled packages listed above are guaranteed. If a course needs more dependencies, ask the teaching staff first.",
-                "系统仅保证可用 Python 标准库和上表列出的预装包。如课程确实需要更多依赖，请先联系教师确认。"
+                "Only the standard library for the selected language and the preinstalled Python packages listed above are guaranteed. If a course needs more dependencies, ask the teaching staff first.",
+                "系统仅保证所选语言的标准库，以及上表列出的 Python 预装包。如课程确实需要更多依赖，请先联系教师确认。"
               ) }}
             </div>
           </div>
@@ -109,8 +138,8 @@
             <div class="fw-semibold mb-1">{{ lx("Where else can I view this information?", "我还能在哪里看到这些信息？") }}</div>
             <div class="small text-muted">
               {{ lx(
-                "Teachers see the same runtime information while creating Python questions, and administrators can review the default runtime image from the admin console.",
-                "教师在创建 Python 代码题时也会看到同一份运行环境信息，管理员还可以在管理后台查看默认运行镜像配置。"
+                "Teachers see the same runtime information while creating code questions, and administrators can review the default runtime image from the admin console.",
+                "教师在创建代码题时也会看到同一份运行环境信息，管理员还可以在管理后台查看默认运行镜像配置。"
               ) }}
             </div>
           </div>

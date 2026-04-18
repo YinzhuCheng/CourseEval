@@ -12,12 +12,12 @@ router = APIRouter()
 
 RETIRED_NOTEBOOK_MESSAGE_EN = (
     "The standalone Notebook execution workflow has been retired. "
-    "Use native Python questions for executable .py submissions, or submit .ipynb "
+    "Use code questions for executable Python, C, or C++ submissions, or submit .ipynb "
     "through the file / LLM-reviewed workflow."
 )
 RETIRED_NOTEBOOK_MESSAGE_ZH = (
     "独立的 Notebook 执行流程已下线。"
-    "可执行的编程题请使用原生 Python 题型提交 .py 文件；"
+    "可执行的编程题请使用代码题提交 Python、C 或 C++；"
     "需要提交 .ipynb 时，请使用文件 / LLM 评测流程。"
 )
 

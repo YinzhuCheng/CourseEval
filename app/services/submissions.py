@@ -2,6 +2,7 @@ import json
 import logging
 import shutil
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -21,6 +22,8 @@ from app.constants import (
     EvaluationTaskType,
     FeedbackSource,
     JobStatus,
+    CodeLanguage,
+    CodeSubmissionMode,
     LLMScope,
     LLMTestStatus,
     MembershipStatus,
@@ -31,10 +34,12 @@ from app.constants import (
 )
 from app.db import SessionLocal, utcnow
 from app.services.llm import (
+    ImageInput,
     generate_notebook_evaluation_with_llm,
     generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
 )
+from app.services.llm_retry import retry_llm_grading_call
 from app.models import (
     Assignment,
     CourseMember,
@@ -47,8 +52,10 @@ from app.models import (
     JobOutput,
     Notebook,
     LLMConfig,
-    PythonCodeQuestionConfig,
+    NotebookQuestionConfig,
+    CodeQuestionConfig,
     Question,
+    QuestionVersion,
     RuntimeImage,
     Submission,
 )
@@ -107,7 +114,7 @@ def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
 _HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
 _HIDDEN_STDERR_MARKER = "=== Hidden Test stderr ==="
 _RETIRED_NOTEBOOK_MESSAGE = (
-    "Notebook execution has been retired. Use native Python code questions for .py submissions, "
+    "Notebook execution has been retired. Use code questions for Python, C, or C++ submissions, "
     "or use file / LLM-reviewed questions for .ipynb submissions."
 )
 
@@ -132,8 +139,12 @@ def _file_question_config(question: Question | None) -> FileQuestionConfig | Non
     return question.file_question_config if question is not None else None
 
 
-def _python_code_config(question: Question | None) -> PythonCodeQuestionConfig | None:
-    return question.python_code_config if question is not None else None
+def _code_config(question: Question | None) -> CodeQuestionConfig | None:
+    return question.code_config if question is not None else None
+
+
+def _python_code_config(question: Question | None) -> CodeQuestionConfig | None:
+    return _code_config(question)
 
 
 def _resolve_runtime_image_for_question(question: Question) -> RuntimeImage | None:
@@ -152,13 +163,32 @@ def _runner_script_path(script_name: str) -> Path:
 
 
 def submission_requires_teacher_confirmation(submission: Submission) -> bool:
+    """True only when the question explicitly opts into \"teacher must confirm before any score\".
+
+    Default product behavior: LLM scores (when present) are effective without teacher confirmation.
+    This flag is then an optional strict gate for rare courses that want no score until a teacher posts.
+    """
     question = submission.question
     if submission.submission_type == QuestionType.SHORT_ANSWER:
         config = question.short_answer_config if question is not None else None
-        return config is None or config.teacher_confirmation_required
-    if submission.submission_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
+        return bool(config and config.teacher_confirmation_required)
+    if submission.submission_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM, QuestionType.FILE_LLM}:
         config = _file_question_config(question)
-        return config is None or config.teacher_confirmation_required
+        return bool(config and config.teacher_confirmation_required)
+    return False
+
+
+def _submission_has_llm_score(submission: Submission) -> bool:
+    return any(
+        item.source == FeedbackSource.LLM and item.score_suggestion is not None for item in submission.feedback_items
+    )
+
+
+def submission_eligible_for_gradebook(submission: Submission) -> bool:
+    if submission.counts_toward_limit or submission.is_effective_submission:
+        return True
+    if submission_requires_teacher_confirmation(submission) and _submission_has_llm_score(submission):
+        return True
     return False
 
 
@@ -167,7 +197,13 @@ def submission_has_teacher_feedback(submission: Submission) -> bool:
 
 
 def is_submission_pending_teacher_review(submission: Submission) -> bool:
-    return submission_requires_teacher_confirmation(submission) and not submission_has_teacher_feedback(submission)
+    """Pending only when the question opted into strict teacher-first grading and no teacher score yet.
+
+    With the default (no strict flag), LLM scores are effective and this is always False.
+    """
+    if not submission_requires_teacher_confirmation(submission):
+        return False
+    return not submission_has_teacher_feedback(submission)
 
 
 def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, FeedbackSource | None]:
@@ -182,11 +218,11 @@ def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, Fe
     if latest_result is not None and latest_result.final_score is not None:
         return Decimal(str(latest_result.final_score)), FeedbackSource.AUTO
 
-    if submission_requires_teacher_confirmation(submission):
-        return None, None
-
     llm_feedback = _latest_feedback(submission, FeedbackSource.LLM)
     if llm_feedback is not None and llm_feedback.score_suggestion is not None:
+        if submission_requires_teacher_confirmation(submission):
+            # Strict opt-in: no displayed/final score from LLM until a teacher posts feedback.
+            return None, None
         return Decimal(str(llm_feedback.score_suggestion)), FeedbackSource.LLM
 
     auto_feedback = _latest_feedback(submission, FeedbackSource.AUTO)
@@ -355,6 +391,28 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+REFERENCE_ANSWER_UPLOAD_EXTENSIONS = frozenset({".pdf", ".tex", ".txt", ".md", ".ipynb"})
+
+
+def store_reference_answer_file(
+    *,
+    user_id: int,
+    question_id: int,
+    original_filename: str,
+    file_bytes: bytes,
+) -> str:
+    ext = Path(original_filename).suffix.lower()
+    if ext not in REFERENCE_ANSWER_UPLOAD_EXTENSIONS:
+        raise ValueError(f"Reference answer uploads must be one of: {', '.join(sorted(REFERENCE_ANSWER_UPLOAD_EXTENSIONS))}")
+    relative, _ = _store_uploaded_file(
+        user_id=user_id,
+        question_id=question_id,
+        original_filename=original_filename,
+        file_bytes=file_bytes,
+    )
+    return relative
+
+
 def _store_uploaded_file(*, user_id: int, question_id: int, original_filename: str, file_bytes: bytes) -> tuple[str, str]:
     suffix = Path(original_filename).suffix.lower() or ".bin"
     upload_dir = settings.uploads_dir / f"user-{user_id}" / f"question-{question_id}"
@@ -392,6 +450,128 @@ def _render_pdf_pages_to_images(file_path: Path) -> list[Path]:
     if not rendered_pages:
         raise ValueError("The uploaded PDF could not be rendered into images.")
     return rendered_pages
+
+
+def _image_inputs_from_png_paths(paths: list[Path]) -> list[ImageInput]:
+    return [ImageInput(mime_type="image/png", data=path.read_bytes()) for path in paths]
+
+
+def _extract_pdf_text(file_path: Path, *, max_chars: int = 120000) -> str:
+    doc = fitz.open(file_path)
+    try:
+        parts: list[str] = []
+        for page_index in range(min(doc.page_count, settings.pdf_review_max_pages)):
+            page = doc.load_page(page_index)
+            parts.append(page.get_text("text") or "")
+        text = "\n".join(parts).strip()
+        return text[:max_chars] if len(text) > max_chars else text
+    finally:
+        doc.close()
+
+
+def _merged_reference_answer_text(
+    *,
+    base_text: str,
+    file_relative_path: str | None,
+    notices: list[str],
+) -> str:
+    merged = (base_text or "").strip()
+    if not file_relative_path:
+        return merged
+    path = absolute_data_path(file_relative_path)
+    if not path.exists():
+        notices.append("Reference answer file is missing on disk; using text field only.")
+        return merged
+    ext = path.suffix.lower()
+    try:
+        if ext == ".pdf":
+            extracted = _extract_pdf_text(path)
+        elif ext in {".tex", ".txt", ".md"}:
+            extracted = path.read_text(encoding="utf-8", errors="replace").strip()
+        elif ext == ".ipynb":
+            extracted = _render_notebook_as_text(path, require_outputs=False)
+        else:
+            notices.append(f"Unsupported reference answer file type {ext}; using text field only.")
+            return merged
+        if not extracted:
+            notices.append("Reference answer file produced no extractable text; using text field only.")
+            return merged
+        if merged:
+            return f"{merged}\n\n--- From uploaded reference file ---\n{extracted}"
+        return extracted
+    except Exception as exc:
+        notices.append(f"Could not read reference answer file: {exc}")
+        return merged
+
+
+def _course_llm_response_language(question: Question) -> str | None:
+    course = question.assignment.course
+    return getattr(course, "llm_response_language", None) or "auto"
+
+
+def _latest_feedback_comment(submission: Submission) -> str:
+    items = [f for f in submission.feedback_items if f.source in {FeedbackSource.TEACHER, FeedbackSource.LLM}]
+    if not items:
+        return ""
+    latest = max(items, key=lambda f: f.created_at)
+    parts = []
+    if latest.comment_text:
+        parts.append(latest.comment_text.strip())
+    if latest.score_suggestion is not None:
+        parts.append(f"(suggested/recorded score: {latest.score_suggestion})")
+    return "\n".join(parts).strip()
+
+
+def _latest_teacher_score_text(submission: Submission) -> str:
+    teacher_items = [f for f in submission.feedback_items if f.source == FeedbackSource.TEACHER]
+    if not teacher_items:
+        return ""
+    latest = max(teacher_items, key=lambda f: f.created_at)
+    if latest.score_suggestion is None:
+        return ""
+    return str(latest.score_suggestion)
+
+
+def _submission_text_for_llm_context(submission: Submission) -> str:
+    text = (submission.answer_text or "").strip()
+    if text:
+        return text
+    if submission.notebook:
+        try:
+            return _render_notebook_as_text(
+                absolute_data_path(submission.notebook.stored_path),
+                require_outputs=False,
+            )
+        except Exception:
+            return ""
+    return ""
+
+
+def _find_previous_submission_with_feedback(db: Session, submission: Submission) -> Submission | None:
+    statement = (
+        select(Submission)
+        .options(
+            joinedload(Submission.feedback_items),
+            joinedload(Submission.notebook),
+        )
+        .where(
+            Submission.question_id == submission.question_id,
+            Submission.user_id == submission.user_id,
+            Submission.submitted_at < submission.submitted_at,
+        )
+        .order_by(Submission.submitted_at.desc())
+    )
+    for prev in db.scalars(statement).unique():
+        if any(f.source in {FeedbackSource.TEACHER, FeedbackSource.LLM} for f in prev.feedback_items):
+            return prev
+    return None
+
+
+def _truncate_for_llm(label: str, text: str, max_len: int, notices: list[str]) -> str:
+    if len(text) <= max_len:
+        return text
+    notices.append(f"{label} was truncated to {max_len} characters for the LLM prompt.")
+    return text[:max_len] + "\n...[truncated]"
 
 
 def _render_notebook_as_text(file_path: Path, *, require_outputs: bool) -> str:
@@ -442,13 +622,13 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
     try:
         payload = json.loads(raw_json or "[]")
     except json.JSONDecodeError as exc:
-        raise ValueError("Stored Python code test cases are not valid JSON.") from exc
+        raise ValueError("Stored code test cases are not valid JSON.") from exc
     if not isinstance(payload, list):
-        raise ValueError("Stored Python code test cases must be a JSON list.")
+        raise ValueError("Stored code test cases must be a JSON list.")
     normalized: list[dict] = []
     for index, item in enumerate(payload, start=1):
         if not isinstance(item, dict):
-            raise ValueError("Each Python code test case must be a JSON object.")
+            raise ValueError("Each code test case must be a JSON object.")
         normalized.append(
             {
                 "name": item.get("name") or f"Test {index}",
@@ -590,7 +770,7 @@ def get_question_for_student(db: Session, question_id: int, user_id: int) -> Que
         .options(
             joinedload(Question.assignment).joinedload(Assignment.course),
             joinedload(Question.notebook_config),
-            joinedload(Question.python_code_config),
+            joinedload(Question.code_config),
             joinedload(Question.file_question_config),
             joinedload(Question.short_answer_config),
         )
@@ -623,7 +803,7 @@ def get_submission_for_student(db: Session, submission_id: int, user_id: int) ->
         .options(
             joinedload(Submission.question).joinedload(Question.assignment).joinedload(Assignment.course),
             joinedload(Submission.question).joinedload(Question.notebook_config),
-            joinedload(Submission.question).joinedload(Question.python_code_config),
+            joinedload(Submission.question).joinedload(Question.code_config),
             joinedload(Submission.question).joinedload(Question.file_question_config),
             joinedload(Submission.question).joinedload(Question.short_answer_config),
             joinedload(Submission.evaluation_tasks),
@@ -643,7 +823,7 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
             joinedload(Submission.user),
             joinedload(Submission.question).joinedload(Question.assignment).joinedload(Assignment.course),
             joinedload(Submission.question).joinedload(Question.notebook_config),
-            joinedload(Submission.question).joinedload(Question.python_code_config),
+            joinedload(Submission.question).joinedload(Question.code_config),
             joinedload(Submission.question).joinedload(Question.file_question_config),
             joinedload(Submission.question).joinedload(Question.short_answer_config),
             joinedload(Submission.evaluation_tasks),
@@ -792,10 +972,72 @@ def create_notebook_submission(
     original_filename: str,
     notebook_bytes: bytes,
 ) -> Submission:
-    raise ValueError(
-        "Notebook execution has been retired. Use a native Python code question for .py submissions, "
-        "or use a file / LLM-reviewed question for .ipynb submissions."
+    allowed, message = _submission_window_open(question)
+    if not allowed:
+        raise ValueError(message or "Submission window is closed.")
+
+    allowed, message = _check_submission_limit(db, question, user_id)
+    if not allowed:
+        raise ValueError(message or "Submission limit reached.")
+
+    ncfg = question.notebook_config
+    if ncfg is None:
+        raise ValueError("Notebook question configuration is missing.")
+
+    _ensure_text_file_extension(original_filename, {".ipynb"})
+    upload_dir = settings.uploads_dir / f"user-{user_id}"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = upload_dir / f"{uuid4().hex}.ipynb"
+    stored_path.write_bytes(notebook_bytes)
+    relative_nb = relative_to_data(stored_path)
+
+    notebook = Notebook(
+        user_id=user_id,
+        original_filename=original_filename,
+        stored_path=relative_nb,
     )
+    db.add(notebook)
+    db.flush()
+
+    extracted = _render_notebook_as_text(stored_path, require_outputs=False)
+    llm_enabled = ncfg.llm_feedback_enabled and _resolve_llm_config_for_question(question, db) is not None
+    submission = Submission(
+        course_id=question.assignment.course_id,
+        assignment_id=question.assignment_id,
+        question_id=question.id,
+        user_id=user_id,
+        submission_type=QuestionType.NOTEBOOK,
+        status=SubmissionStatus.SUBMITTED if llm_enabled else SubmissionStatus.COMPLETED,
+        original_filename=original_filename,
+        notebook_id=notebook.id,
+        answer_text=extracted,
+        submitted_at=utcnow(),
+        completed_at=utcnow() if not llm_enabled else None,
+        is_late=_is_late(question),
+        counts_toward_limit=True,
+        is_effective_submission=not llm_enabled,
+        question_version_id=question.current_question_version_id,
+    )
+    db.add(submission)
+    db.flush()
+    if llm_enabled:
+        db.add(
+            EvaluationTask(
+                submission_id=submission.id,
+                task_type=EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
+                backend_type="rq",
+                status=EvaluationTaskStatus.QUEUED,
+            )
+        )
+        db.commit()
+        db.refresh(submission)
+        enqueue_notebook_llm_feedback(db, submission.id)
+    else:
+        db.commit()
+        db.refresh(submission)
+    if submission.is_effective_submission:
+        update_final_grade_snapshot(db, submission)
+    return submission
 
 
 def create_short_answer_submission(
@@ -814,7 +1056,7 @@ def create_short_answer_submission(
         raise ValueError(message or "Submission limit reached.")
 
     config = question.short_answer_config
-    teacher_confirmation_required = True if config is None else config.teacher_confirmation_required
+    teacher_confirmation_required = False if config is None else bool(config.teacher_confirmation_required)
     cleaned = answer_text.strip()
     if not cleaned:
         raise ValueError("Answer cannot be empty.")
@@ -823,19 +1065,30 @@ def create_short_answer_submission(
     if config and config.max_length and len(cleaned) > config.max_length:
         raise ValueError(f"Answer must be at most {config.max_length} characters long.")
 
+    llm_will_run = bool(config and config.llm_suggestion_enabled)
+    if llm_will_run:
+        initial_status = SubmissionStatus.SUBMITTED
+        initial_completed_at = None
+        initial_effective = False
+    else:
+        initial_status = SubmissionStatus.SUBMITTED if teacher_confirmation_required else SubmissionStatus.COMPLETED
+        initial_completed_at = None if teacher_confirmation_required else utcnow()
+        initial_effective = not teacher_confirmation_required
+
     submission = Submission(
         course_id=question.assignment.course_id,
         assignment_id=question.assignment_id,
         question_id=question.id,
         user_id=user_id,
         submission_type=QuestionType.SHORT_ANSWER,
-        status=SubmissionStatus.SUBMITTED if teacher_confirmation_required else SubmissionStatus.COMPLETED,
+        status=initial_status,
         answer_text=cleaned,
         submitted_at=utcnow(),
-        completed_at=None if teacher_confirmation_required else utcnow(),
+        completed_at=initial_completed_at,
         is_late=_is_late(question),
         counts_toward_limit=True,
-        is_effective_submission=not teacher_confirmation_required,
+        is_effective_submission=initial_effective,
+        question_version_id=question.current_question_version_id,
     )
     db.add(submission)
     db.flush()
@@ -850,7 +1103,7 @@ def create_short_answer_submission(
         )
     db.commit()
     db.refresh(submission)
-    if not teacher_confirmation_required:
+    if not llm_will_run and not teacher_confirmation_required:
         update_final_grade_snapshot(db, submission)
     if config and config.llm_suggestion_enabled:
         enqueue_short_answer_llm(db, submission.id)
@@ -865,6 +1118,60 @@ def create_python_code_submission(
     original_filename: str,
     submission_bytes: bytes,
 ) -> Submission:
+    return create_code_submission(
+        db,
+        user_id=user_id,
+        question=question,
+        original_filename=original_filename,
+        submission_bytes=submission_bytes,
+        language=CodeLanguage.PYTHON,
+    )
+
+
+def _code_language_from_value(value: str | CodeLanguage) -> CodeLanguage:
+    try:
+        return value if isinstance(value, CodeLanguage) else CodeLanguage(str(value).strip().lower())
+    except ValueError as exc:
+        raise ValueError("Unsupported code language.") from exc
+
+
+def _code_submission_mode_for_filename(filename: str) -> CodeSubmissionMode:
+    return CodeSubmissionMode.ZIP if Path(filename).suffix.lower() == ".zip" else CodeSubmissionMode.SINGLE_FILE
+
+
+def _allowed_suffixes_for_language(language: CodeLanguage) -> set[str]:
+    if language == CodeLanguage.PYTHON:
+        return {".py", ".zip"}
+    if language == CodeLanguage.C:
+        return {".c", ".zip"}
+    return {".cpp", ".cc", ".cxx", ".zip"}
+
+
+def _read_code_preview(path: Path, language: CodeLanguage, mode: CodeSubmissionMode) -> str:
+    if mode == CodeSubmissionMode.SINGLE_FILE:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    entrypoint = {
+        CodeLanguage.PYTHON: "main.py",
+        CodeLanguage.C: "main.c",
+        CodeLanguage.CPP: "main.cpp",
+    }[language]
+    try:
+        with zipfile.ZipFile(path) as archive:
+            with archive.open(entrypoint) as source:
+                return source.read(256 * 1024).decode("utf-8", errors="replace").strip()
+    except Exception:
+        return f"Multi-file {language.value} submission: {path.name}"
+
+
+def create_code_submission(
+    db: Session,
+    *,
+    user_id: int,
+    question: Question,
+    original_filename: str,
+    submission_bytes: bytes,
+    language: str | CodeLanguage,
+) -> Submission:
     allowed, message = _submission_window_open(question)
     if not allowed:
         raise ValueError(message or "Submission window is closed.")
@@ -873,34 +1180,41 @@ def create_python_code_submission(
     if not allowed:
         raise ValueError(message or "Submission limit reached.")
 
-    config = _python_code_config(question)
+    config = _code_config(question)
     if config is None:
-        raise ValueError("Python code configuration is missing for this question.")
-    _ensure_text_file_extension(original_filename, {".py"})
+        raise ValueError("Code question configuration is missing for this question.")
+    code_language = _code_language_from_value(language)
+    if not config.allows_language(code_language):
+        raise ValueError("This language is not allowed for the question.")
+    _ensure_text_file_extension(original_filename, _allowed_suffixes_for_language(code_language))
+    submission_mode = _code_submission_mode_for_filename(original_filename)
     stored_relative_path, _ = _store_uploaded_file(
         user_id=user_id,
         question_id=question.id,
         original_filename=original_filename,
         file_bytes=submission_bytes,
     )
-    source_text = absolute_data_path(stored_relative_path).read_text(encoding="utf-8", errors="replace").strip()
+    source_text = _read_code_preview(absolute_data_path(stored_relative_path), code_language, submission_mode)
     if not source_text:
-        raise ValueError("Uploaded Python file is empty.")
+        raise ValueError("Uploaded code file is empty.")
 
     submission = Submission(
         course_id=question.assignment.course_id,
         assignment_id=question.assignment_id,
         question_id=question.id,
         user_id=user_id,
-        submission_type=QuestionType.PYTHON_CODE,
+        submission_type=QuestionType.CODE,
         status=SubmissionStatus.SUBMITTED,
         original_filename=original_filename,
         stored_file_path=stored_relative_path,
         answer_text=source_text,
+        code_language=code_language,
+        code_submission_mode=submission_mode,
         submitted_at=utcnow(),
         is_late=_is_late(question),
         counts_toward_limit=False,
         is_effective_submission=False,
+        question_version_id=question.current_question_version_id,
     )
     db.add(submission)
     db.flush()
@@ -908,7 +1222,7 @@ def create_python_code_submission(
     db.add(
         EvaluationTask(
             submission_id=submission.id,
-            task_type=EvaluationTaskType.PYTHON_CODE_EVALUATION,
+            task_type=EvaluationTaskType.CODE_EVALUATION,
             backend_type="rq",
             status=EvaluationTaskStatus.QUEUED,
         )
@@ -948,7 +1262,11 @@ def create_file_submission(
     )
     stored_path = absolute_data_path(stored_relative_path)
     pdf_page_paths: list[Path] = []
-    if question.question_type == QuestionType.PDF_LLM:
+    use_pdf_pipeline = extension == ".pdf" and question.question_type in {
+        QuestionType.PDF_LLM,
+        QuestionType.FILE_LLM,
+    }
+    if use_pdf_pipeline:
         pdf_page_paths = _render_pdf_pages_to_images(stored_path)
         extracted_text = f"PDF rendered into {len(pdf_page_paths)} page image(s) for multimodal LLM review."
     else:
@@ -977,6 +1295,7 @@ def create_file_submission(
         is_late=_is_late(question),
         counts_toward_limit=True,
         is_effective_submission=not teacher_confirmation_required and not llm_enabled,
+        question_version_id=question.current_question_version_id,
     )
     db.add(submission)
     db.flush()
@@ -1012,8 +1331,8 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
     if task is None:
         raise ValueError("Evaluation task not found.")
 
-    if task.task_type == EvaluationTaskType.PYTHON_CODE_EVALUATION:
-        target_func = process_python_code_evaluation
+    if task.task_type == EvaluationTaskType.CODE_EVALUATION:
+        target_func = process_code_evaluation
         timeout_seconds = settings.execution_timeout_seconds + 60
     else:
         target_func = process_submission_evaluation
@@ -1102,7 +1421,36 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
 
 
 def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
-    raise ValueError(_RETIRED_NOTEBOOK_MESSAGE)
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise ValueError("Submission not found.")
+
+    task = db.scalar(
+        select(EvaluationTask)
+        .where(
+            EvaluationTask.submission_id == submission_id,
+            EvaluationTask.task_type == EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
+        )
+        .order_by(EvaluationTask.created_at.desc())
+    )
+    if task is None:
+        raise ValueError("Notebook LLM task not found.")
+
+    llm_config = _resolve_llm_config_for_question(submission.question, db)
+    if llm_config is None:
+        raise ValueError("No enabled LLM config available.")
+    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+        process_notebook_llm_feedback,
+        submission_id,
+        task.id,
+        job_timeout=120,
+        result_ttl=86400,
+        failure_ttl=86400,
+    )
+    task.backend_job_id = rq_job.id
+    task.status = EvaluationTaskStatus.QUEUED
+    db.commit()
+    return rq_job.id
 
 
 def cleanup_stale_running_items() -> int:
@@ -1342,13 +1690,13 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
         db.close()
 
 
-def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
+def process_code_evaluation(submission_id: int, task_id: int) -> None:
     db = SessionLocal()
     try:
         statement = (
             select(Submission)
             .options(
-                joinedload(Submission.question).joinedload(Question.python_code_config),
+                joinedload(Submission.question).joinedload(Question.code_config),
                 joinedload(Submission.assignment),
                 joinedload(Submission.evaluation_results),
                 joinedload(Submission.evaluation_tasks),
@@ -1358,15 +1706,15 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
         submission = db.scalar(statement)
         task = db.get(EvaluationTask, task_id)
         if submission is None or task is None or not submission.stored_file_path:
-            logger.error("Python code submission %s or task %s could not be loaded.", submission_id, task_id)
+            logger.error("Code submission %s or task %s could not be loaded.", submission_id, task_id)
             return
 
         question = submission.question
-        config = _python_code_config(question)
+        config = _code_config(question)
         if config is None:
             task.status = EvaluationTaskStatus.FAILED
             task.finished_at = utcnow()
-            task.error_message = "Python code question config is missing."
+            task.error_message = "Code question config is missing."
             submission.status = SubmissionStatus.FAILED_SYSTEM
             submission.completed_at = utcnow()
             submission.counts_toward_limit = False
@@ -1386,8 +1734,10 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
         ensure_writable_directory(output_dir)
         runtime_image_tag, runtime_image = _resolve_runner_image_tag(question)
         task.runtime_image_id = runtime_image.id if runtime_image is not None else None
-        result = run_python_code_in_docker(
+        result = run_code_in_docker(
             input_relative_path=submission.stored_file_path,
+            language=(submission.code_language or CodeLanguage.PYTHON).value,
+            submission_mode=(submission.code_submission_mode or CodeSubmissionMode.SINGLE_FILE).value,
             output_dir_relative_path=relative_to_data(output_dir),
             runner_image=runtime_image_tag,
             timeout_seconds=config.time_limit_seconds,
@@ -1442,13 +1792,13 @@ def process_python_code_evaluation(submission_id: int, task_id: int) -> None:
                 evaluation_result=evaluation_result,
                 source=FeedbackSource.AUTO,
                 score_suggestion=evaluation_result.auto_score,
-                comment_text=(result.summary_json or {}).get("message", "Python code evaluation completed."),
+                comment_text=(result.summary_json or {}).get("message", "Code evaluation completed."),
             )
         )
         db.commit()
         update_final_grade_snapshot(db, submission)
     except Exception as exc:  # pragma: no cover
-        logger.exception("Unexpected error while processing Python code submission %s", submission_id)
+        logger.exception("Unexpected error while processing code submission %s", submission_id)
         submission = db.get(Submission, submission_id)
         task = db.get(EvaluationTask, task_id)
         if task is not None:
@@ -1505,9 +1855,11 @@ def run_job_in_docker(
     return RunnerResult(exit_code=1, error_message=_RETIRED_NOTEBOOK_MESSAGE, summary_json=summary)
 
 
-def run_python_code_in_docker(
+def run_code_in_docker(
     *,
     input_relative_path: str,
+    language: str,
+    submission_mode: str,
     output_dir_relative_path: str,
     runner_image: str,
     timeout_seconds: int,
@@ -1519,7 +1871,7 @@ def run_python_code_in_docker(
 ) -> RunnerResult:
     input_path = absolute_data_path(input_relative_path)
     output_dir = absolute_data_path(output_dir_relative_path)
-    runner_script_path = _runner_script_path("execute_python_code.py")
+    runner_script_path = _runner_script_path("execute_code.py")
     stdout_path = output_dir / "stdout.txt"
     stderr_path = output_dir / "stderr.txt"
     summary_path = output_dir / "summary.json"
@@ -1536,7 +1888,7 @@ def run_python_code_in_docker(
         summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
         return RunnerResult(exit_code=127, error_message=message, summary_json=summary)
 
-    container_name = f"python-submission-runner-{uuid4().hex[:8]}"
+    container_name = f"code-submission-runner-{uuid4().hex[:8]}"
     command = [
         "docker",
         "run",
@@ -1552,11 +1904,11 @@ def run_python_code_in_docker(
         "--entrypoint",
         "python",
         "-v",
-        f"{input_path.resolve().as_posix()}:/job/input.py:ro",
+        f"{input_path.resolve().as_posix()}:/job/input{submission_mode == 'zip' and '.zip' or Path(input_path).suffix}:ro",
         "-v",
         f"{output_dir.resolve().as_posix()}:/job/output",
         "-v",
-        f"{runner_script_path.resolve().as_posix()}:/runner/execute_python_code.py:ro",
+        f"{runner_script_path.resolve().as_posix()}:/runner/execute_code.py:ro",
         "-w",
         "/job",
     ]
@@ -1566,9 +1918,13 @@ def run_python_code_in_docker(
     command.extend(
         [
             runner_image,
-            "/runner/execute_python_code.py",
+            "/runner/execute_code.py",
             "--input",
-            "/job/input.py",
+            f"/job/input{submission_mode == 'zip' and '.zip' or Path(input_path).suffix}",
+            "--language",
+            language,
+            "--submission-mode",
+            submission_mode,
             "--stdout",
             "/job/output/stdout.txt",
             "--stderr",
@@ -1594,7 +1950,7 @@ def run_python_code_in_docker(
         )
     except subprocess.TimeoutExpired:
         _force_remove_container(container_name)
-        message = f"Python code execution timed out after {timeout_seconds} seconds per test."
+        message = f"Code execution timed out after {timeout_seconds} seconds per test."
         write_text(stderr_path, f"{message}\n")
         summary = {"failure_type": "answer_timeout", "message": message, "run_success": False, "auto_score": 0}
         summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
@@ -1619,7 +1975,7 @@ def run_python_code_in_docker(
             summary_json = {}
 
     if completed.returncode != 0:
-        message = summary_json.get("message") or "Python code runner exited with a non-zero status."
+        message = summary_json.get("message") or "Code runner exited with a non-zero status."
         summary_json.setdefault("failure_type", "answer_error")
         summary_json.setdefault("auto_score", 0)
         return RunnerResult(exit_code=completed.returncode, error_message=message, summary_json=summary_json)
@@ -1635,6 +1991,12 @@ def run_python_code_in_docker(
         return RunnerResult(exit_code=1, error_message=message, summary_json=summary_json)
 
     return RunnerResult(exit_code=0, summary_json=summary_json)
+
+
+def run_python_code_in_docker(**kwargs) -> RunnerResult:
+    kwargs.setdefault("language", CodeLanguage.PYTHON.value)
+    kwargs.setdefault("submission_mode", CodeSubmissionMode.SINGLE_FILE.value)
+    return run_code_in_docker(**kwargs)
 
 
 def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> None:
@@ -1661,28 +2023,61 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         task.started_at = utcnow()
         db.commit()
 
-        result = generate_short_answer_evaluation(
-            llm_config,
-            question_title=submission.question.title,
-            question_description=submission.question.description or "",
-            rubric_text=submission.question.short_answer_config.rubric_text if submission.question.short_answer_config else "",
-            reference_answer_text="",
-            answer_text=submission.answer_text or "",
-            max_score=float(submission.question.max_score),
-        )
+        notices: list[str] = []
+        prev = _find_previous_submission_with_feedback(db, submission)
+        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
+        prev_fb = _latest_feedback_comment(prev) if prev else ""
+        prev_score = _latest_teacher_score_text(prev) if prev else ""
+        trunc_notice = ""
+        answer_text = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
+        if notices:
+            trunc_notice = " ".join(notices)
+
+        def _run_sa() -> dict:
+            return generate_short_answer_evaluation(
+                llm_config,
+                question_title=submission.question.title,
+                question_description=submission.question.description or "",
+                rubric_text=submission.question.short_answer_config.rubric_text
+                if submission.question.short_answer_config
+                else "",
+                reference_answer_text="",
+                answer_text=answer_text,
+                max_score=float(submission.question.max_score),
+                previous_submission_text=prev_answer,
+                previous_feedback_text=prev_fb,
+                previous_teacher_score_text=prev_score,
+                truncation_notice=trunc_notice,
+                course_llm_response_language=_course_llm_response_language(submission.question),
+                text_format_may_lose_images=False,
+                bill_user_id=submission.user_id,
+                bill_db=db,
+            )
+
+        result = retry_llm_grading_call(llm_config, _run_sa, label="short_answer_llm")
+        comment = result.get("comment_text") or ""
+        if notices:
+            comment = (
+                comment
+                + "\n\n"
+                + "\n".join(f"[Grading system notice] {item}" for item in notices)
+            ).strip()
         db.add(
             Feedback(
                 submission_id=submission.id,
                 source=FeedbackSource.LLM,
                 score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
-                comment_text=result.get("comment_text"),
+                comment_text=comment,
             )
         )
+        submission.status = SubmissionStatus.COMPLETED
+        submission.completed_at = utcnow()
+        submission.is_effective_submission = True
+        submission.failure_reason_code = None
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()
-        if not submission_requires_teacher_confirmation(submission):
-            refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
+        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Short-answer LLM evaluation failed for submission %s", submission_id)
         task = db.get(EvaluationTask, task_id)
@@ -1691,6 +2086,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
             task.finished_at = utcnow()
             task.error_message = str(exc)
             db.commit()
+        raise
     finally:
         db.close()
 
@@ -1723,45 +2119,96 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         task.started_at = utcnow()
         db.commit()
 
-        if submission.submission_type == QuestionType.PDF_LLM and submission.stored_file_path:
+        notices: list[str] = []
+        ref_merged = _merged_reference_answer_text(
+            base_text=question_config.reference_answer_text,
+            file_relative_path=question_config.reference_answer_file_path,
+            notices=notices,
+        )
+        prev = _find_previous_submission_with_feedback(db, submission)
+        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
+        prev_fb = _latest_feedback_comment(prev) if prev else ""
+        prev_score = _latest_teacher_score_text(prev) if prev else ""
+        trunc_notice = ""
+        prev_answer = _truncate_for_llm("Previous submission", prev_answer, 12000, notices)
+        prev_fb = _truncate_for_llm("Previous feedback", prev_fb, 8000, notices)
+        ref_for_prompt = _truncate_for_llm("Reference answer", ref_merged, 24000, notices)
+        if notices:
+            trunc_notice = " ".join(notices)
+
+        ext = Path(submission.original_filename or "").suffix.lower()
+        if submission.stored_file_path and (
+            submission.submission_type == QuestionType.PDF_LLM
+            or (submission.submission_type == QuestionType.FILE_LLM and ext == ".pdf")
+        ):
             pdf_path = absolute_data_path(submission.stored_file_path)
             page_dir = pdf_path.parent / f"{pdf_path.stem}-pages"
             page_paths = sorted(page_dir.glob("page-*.png"))
             if not page_paths:
                 page_paths = _render_pdf_pages_to_images(pdf_path)
-            result = generate_file_evaluation_from_images(
-                llm_config,
-                question_title=submission.question.title,
-                question_description=submission.question.description or "",
-                rubric_text=question_config.rubric_text,
-                reference_answer_text=question_config.reference_answer_text,
-                image_paths=page_paths,
-                max_score=float(submission.question.max_score),
-            )
-        else:
-            result = generate_short_answer_evaluation(
-                llm_config,
-                question_title=submission.question.title,
-                question_description=submission.question.description or "",
-                rubric_text=question_config.rubric_text,
-                reference_answer_text=question_config.reference_answer_text,
-                answer_text=submission.answer_text or "",
-                max_score=float(submission.question.max_score),
-            )
 
+            def _run_pdf() -> dict:
+                return generate_file_evaluation_from_images(
+                    llm_config,
+                    question_title=submission.question.title,
+                    question_description=submission.question.description or "",
+                    rubric_text=question_config.rubric_text,
+                    reference_answer_text=ref_for_prompt,
+                    max_score=float(submission.question.max_score),
+                    images=_image_inputs_from_png_paths(page_paths),
+                    previous_submission_text=prev_answer,
+                    previous_feedback_text=prev_fb,
+                    previous_teacher_score_text=prev_score,
+                    truncation_notice=trunc_notice,
+                    course_llm_response_language=_course_llm_response_language(submission.question),
+                    bill_user_id=submission.user_id,
+                    bill_db=db,
+                )
+
+            result = retry_llm_grading_call(llm_config, _run_pdf, label="file_llm_pdf")
+        else:
+            ans = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
+            if notices and not trunc_notice:
+                trunc_notice = " ".join(notices)
+
+            def _run_text() -> dict:
+                return generate_short_answer_evaluation(
+                    llm_config,
+                    question_title=submission.question.title,
+                    question_description=submission.question.description or "",
+                    rubric_text=question_config.rubric_text,
+                    reference_answer_text=ref_for_prompt,
+                    answer_text=ans,
+                    max_score=float(submission.question.max_score),
+                    previous_submission_text=prev_answer,
+                    previous_feedback_text=prev_fb,
+                    previous_teacher_score_text=prev_score,
+                    truncation_notice=trunc_notice,
+                    course_llm_response_language=_course_llm_response_language(submission.question),
+                    text_format_may_lose_images=ext in {".tex", ".ipynb", ".txt"},
+                    bill_user_id=submission.user_id,
+                    bill_db=db,
+                )
+
+            result = retry_llm_grading_call(llm_config, _run_text, label="file_llm_text")
+
+        comment = result.get("comment_text") or ""
+        if notices:
+            comment = (
+                comment + "\n\n" + "\n".join(f"[Grading system notice] {item}" for item in notices)
+            ).strip()
         db.add(
             Feedback(
                 submission_id=submission.id,
                 source=FeedbackSource.LLM,
                 score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
-                comment_text=result.get("comment_text"),
+                comment_text=comment,
             )
         )
-        if not question_config.teacher_confirmation_required:
-            submission.status = SubmissionStatus.COMPLETED
-            submission.completed_at = utcnow()
-            submission.is_effective_submission = True
-            submission.failure_reason_code = None
+        submission.status = SubmissionStatus.COMPLETED
+        submission.completed_at = utcnow()
+        submission.is_effective_submission = True
+        submission.failure_reason_code = None
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
         db.commit()
@@ -1774,6 +2221,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             task.finished_at = utcnow()
             task.error_message = str(exc)
             db.commit()
+        raise
     finally:
         db.close()
 
@@ -1781,14 +2229,118 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
 def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
     db = SessionLocal()
     try:
+        submission = db.scalar(
+            select(Submission)
+            .options(
+                joinedload(Submission.question).joinedload(Question.notebook_config),
+                joinedload(Submission.assignment).joinedload(Assignment.course),
+                joinedload(Submission.notebook),
+                joinedload(Submission.evaluation_results),
+                joinedload(Submission.feedback_items),
+            )
+            .where(Submission.id == submission_id)
+        )
         task = db.get(EvaluationTask, task_id)
-        if task is None:
+        if submission is None or task is None:
             return
 
-        task.status = EvaluationTaskStatus.FAILED
-        task.finished_at = utcnow()
-        task.error_message = _RETIRED_NOTEBOOK_MESSAGE
+        llm_config = _resolve_llm_config_for_question(submission.question, db)
+        ncfg = submission.question.notebook_config if submission.question else None
+        if llm_config is None or not llm_config.enabled or ncfg is None:
+            task.status = EvaluationTaskStatus.FAILED
+            task.error_message = "No enabled LLM config or notebook question config."
+            task.finished_at = utcnow()
+            db.commit()
+            return
+
+        if submission.notebook is None:
+            task.status = EvaluationTaskStatus.FAILED
+            task.error_message = "Notebook file is missing for this submission."
+            task.finished_at = utcnow()
+            db.commit()
+            return
+
+        task.status = EvaluationTaskStatus.RUNNING
+        task.started_at = utcnow()
         db.commit()
+
+        nb_path = absolute_data_path(submission.notebook.stored_path)
+        student_text = _render_notebook_as_text(nb_path, require_outputs=False)
+        latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
+        summary_payload = _parsed_summary_json(latest_result)
+        summary_json = json.dumps(summary_payload, ensure_ascii=True, indent=2) if summary_payload else "{}"
+        stdout_text = read_submission_artifact_text(latest_result, "stdout", max_chars=8000) if latest_result else ""
+        stderr_text = read_submission_artifact_text(latest_result, "stderr", max_chars=8000) if latest_result else ""
+        auto_score = float(latest_result.auto_score) if latest_result and latest_result.auto_score is not None else 0.0
+        max_llm = float(ncfg.llm_score_weight or 0)
+
+        notices: list[str] = []
+        ref_merged = _merged_reference_answer_text(
+            base_text=ncfg.reference_answer_text or "",
+            file_relative_path=ncfg.reference_answer_file_path,
+            notices=notices,
+        )
+        prev = _find_previous_submission_with_feedback(db, submission)
+        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
+        prev_answer = _truncate_for_llm("Previous submission", prev_answer, 12000, notices)
+        prev_fb = _truncate_for_llm("Previous feedback", _latest_feedback_comment(prev) if prev else "", 8000, notices)
+        prev_score = _latest_teacher_score_text(prev) if prev else ""
+        student_text = _truncate_for_llm("Student submission", student_text, 24000, notices)
+        ref_for_prompt = _truncate_for_llm("Reference answer", ref_merged, 24000, notices)
+        summary_json = _truncate_for_llm("Evaluation summary JSON", summary_json, 12000, notices)
+        stdout_text = _truncate_for_llm("stdout", stdout_text, 8000, notices)
+        stderr_text = _truncate_for_llm("stderr", stderr_text, 8000, notices)
+        trunc_notice = " ".join(notices) if notices else ""
+
+        def _run_nb() -> dict:
+            return generate_notebook_evaluation_with_llm(
+                llm_config,
+                question_title=submission.question.title,
+                question_description=submission.question.description or "",
+                rubric_text=ncfg.llm_scoring_rubric or "",
+                reference_answer_text=ref_for_prompt,
+                student_submission_text=student_text,
+                summary_json=summary_json,
+                stdout_text=stdout_text,
+                stderr_text=stderr_text,
+                auto_score=auto_score,
+                max_llm_score=max_llm,
+                previous_submission_text=prev_answer,
+                previous_feedback_text=prev_fb,
+                previous_teacher_score_text=prev_score,
+                truncation_notice=trunc_notice,
+                course_llm_response_language=_course_llm_response_language(submission.question),
+                bill_user_id=submission.user_id,
+                bill_db=db,
+            )
+
+        result = retry_llm_grading_call(llm_config, _run_nb, label="notebook_llm")
+        comment = result.get("comment_text") or ""
+        if notices:
+            comment = (
+                comment + "\n\n" + "\n".join(f"[Grading system notice] {item}" for item in notices)
+            ).strip()
+        db.add(
+            Feedback(
+                submission_id=submission.id,
+                evaluation_result_id=latest_result.id if latest_result else None,
+                source=FeedbackSource.LLM,
+                score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
+                comment_text=comment,
+            )
+        )
+        db.flush()
+        if latest_result is not None:
+            db.refresh(submission)
+            latest_result.final_score = _recompute_notebook_final_score(submission, latest_result)
+        submission.status = SubmissionStatus.COMPLETED
+        submission.completed_at = utcnow()
+        submission.is_effective_submission = True
+        submission.failure_reason_code = None
+        task.status = EvaluationTaskStatus.SUCCEEDED
+        task.finished_at = utcnow()
+        db.commit()
+        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Notebook LLM feedback failed for submission %s", submission_id)
         task = db.get(EvaluationTask, task_id)
@@ -1797,6 +2349,7 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
             task.finished_at = utcnow()
             task.error_message = str(exc)
             db.commit()
+        raise
     finally:
         db.close()
 
@@ -1829,11 +2382,11 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
         .where(
             Submission.question_id == submission.question_id,
             Submission.user_id == submission.user_id,
-            Submission.is_effective_submission.is_(True),
         )
         .order_by(Submission.submitted_at.asc())
     )
-    submissions = list(db.scalars(statement).unique())
+    all_submissions = list(db.scalars(statement).unique())
+    submissions = [item for item in all_submissions if submission_eligible_for_gradebook(item)]
     effective: Submission | None = None
     effective_score = Decimal("0")
     feedback_source = None
@@ -1842,29 +2395,46 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
         resolved_score, _ = resolve_submission_score(item)
         return resolved_score if resolved_score is not None else Decimal("0")
 
-    for item in submissions:
-        current_score = score_for(item)
-        if effective is None:
-            effective = item
-            effective_score = current_score
-            continue
-        if rule == ScoringRule.LATEST:
-            if item.submitted_at >= effective.submitted_at:
-                effective = item
-                effective_score = current_score
-        elif current_score >= effective_score:
-            effective = item
-            effective_score = current_score
-
-    if effective is not None:
-        _, feedback_source = resolve_submission_score(effective)
-
     snapshot = db.scalar(
         select(FinalGradeSnapshot).where(
             FinalGradeSnapshot.student_id == submission.user_id,
             FinalGradeSnapshot.question_id == submission.question_id,
         )
     )
+    use_historical_highest = bool(snapshot.use_historical_highest) if snapshot is not None else False
+
+    if not submissions:
+        effective = None
+        effective_score = Decimal("0")
+        feedback_source = None
+    elif use_historical_highest:
+        for item in submissions:
+            current_score = score_for(item)
+            if effective is None or current_score > effective_score or (
+                current_score == effective_score and item.submitted_at >= effective.submitted_at
+            ):
+                effective = item
+                effective_score = current_score
+        if effective is not None:
+            _, feedback_source = resolve_submission_score(effective)
+    else:
+        for item in submissions:
+            current_score = score_for(item)
+            if effective is None:
+                effective = item
+                effective_score = current_score
+                continue
+            if rule == ScoringRule.LATEST:
+                if item.submitted_at >= effective.submitted_at:
+                    effective = item
+                    effective_score = current_score
+            elif current_score >= effective_score:
+                effective = item
+                effective_score = current_score
+
+        if effective is not None:
+            _, feedback_source = resolve_submission_score(effective)
+
     if snapshot is None:
         snapshot = FinalGradeSnapshot(
             student_id=submission.user_id,
@@ -1878,6 +2448,7 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
     snapshot.grading_rule_applied = rule
     snapshot.score = effective_score if effective else None
     snapshot.feedback_source = feedback_source
+    snapshot.question_version_id = effective.question_version_id if effective else None
     snapshot.updated_at = utcnow()
     db.commit()
 

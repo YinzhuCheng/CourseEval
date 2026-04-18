@@ -5,11 +5,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
-from app.auth import can_verify_email_token, hash_password
+from app.auth import can_verify_email_token, hash_password, token_digest, verify_password
 from app.config import get_settings
 from app.db import Base, utcnow
 from app.main import app
-from app.models import User
+from app.models import EmailDeliveryLog, User
 from app.routes.auth import get_db
 
 
@@ -77,6 +77,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
         self.assertTrue(user.is_active)
         self.assertIsNotNone(user.email_verification_token)
         self.assertTrue(can_verify_email_token(user))
+        self.assertNotIn("newuser@example.com", user.email_verification_token)
 
     def test_unverified_user_cannot_log_in(self) -> None:
         with self.session_factory() as db:
@@ -184,6 +185,103 @@ class AuthEmailVerificationTests(unittest.TestCase):
         pending_page = self.client.get("/register/pending?email=mailuser@example.com")
         self.assertIn("mailuser@example.com", pending_page.text)
         self.assertIsNotNone(verification_token)
+
+        with self.session_factory() as db:
+            log = db.scalar(select(EmailDeliveryLog).where(EmailDeliveryLog.recipient == "mailuser@example.com"))
+            self.assertIsNotNone(log)
+            assert log is not None
+            self.assertEqual(log.purpose, "email_verification")
+            self.assertFalse(log.delivered)
+
+    def test_resend_verification_is_rate_limited(self) -> None:
+        with self.session_factory() as db:
+            db.add(
+                User(
+                    username="limited",
+                    email="limited@example.com",
+                    password_hash=hash_password("password123"),
+                    email_verified=False,
+                    email_verification_token="old-token",
+                    email_verification_sent_at=utcnow(),
+                    email_verification_last_send_at=utcnow(),
+                    is_active=True,
+                )
+            )
+            db.commit()
+
+        response = self.client.post(
+            "/verify-email/resend",
+            data={"email": "limited@example.com"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        user = self._db_user("limited@example.com")
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(user.email_verification_token, "old-token")
+
+    def test_password_reset_updates_password_and_clears_token(self) -> None:
+        with self.session_factory() as db:
+            db.add(
+                User(
+                    username="resetme",
+                    email="resetme@example.com",
+                    password_hash=hash_password("password123"),
+                    email_verified=True,
+                    password_reset_token=token_digest("reset-token"),
+                    password_reset_sent_at=utcnow(),
+                    is_active=True,
+                )
+            )
+            db.commit()
+
+        response = self.client.post(
+            "/reset-password",
+            data={
+                "token": "reset-token",
+                "password": "newpassword123",
+                "confirm_password": "newpassword123",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        user = self._db_user("resetme@example.com")
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertIsNone(user.password_reset_token)
+        self.assertTrue(verify_password("newpassword123", user.password_hash))
+
+    def test_forgot_password_creates_reset_token_and_delivery_log(self) -> None:
+        with self.session_factory() as db:
+            db.add(
+                User(
+                    username="forgot",
+                    email="forgot@example.com",
+                    password_hash=hash_password("password123"),
+                    email_verified=True,
+                    is_active=True,
+                )
+            )
+            db.commit()
+
+        response = self.client.post(
+            "/forgot-password",
+            data={"email": "forgot@example.com"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        user = self._db_user("forgot@example.com")
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertIsNotNone(user.password_reset_token)
+        with self.session_factory() as db:
+            log = db.scalar(select(EmailDeliveryLog).where(EmailDeliveryLog.recipient == "forgot@example.com"))
+            self.assertIsNotNone(log)
+            assert log is not None
+            self.assertEqual(log.purpose, "password_reset")
 
     def test_invite_registration_can_activate_without_email(self) -> None:
         object.__setattr__(self.settings, "registration_invite_code", "server-invite")

@@ -8,7 +8,12 @@ from starlette.responses import RedirectResponse
 from app.auth import (
     assign_user_role,
     can_verify_email_token,
+    can_reset_password_token,
+    can_send_email_verification,
+    can_send_password_reset,
+    clear_password_reset,
     generate_internal_email_address,
+    generate_email_verification_token,
     initial_email_verification_state,
     find_user_by_login,
     get_current_user,
@@ -21,15 +26,18 @@ from app.auth import (
     mark_email_verified,
     push_flash,
     refresh_email_verification,
+    refresh_password_reset,
+    token_digest,
+    token_matches,
     valid_registration_invite_code,
     verify_password,
 )
 from app.constants import AccountRole, PlatformRole, UserRole
-from app.db import get_db
+from app.db import get_db, utcnow
 from app.i18n import set_locale, t
 from app.models import User
 from app.services.courses import bootstrap_sample_data
-from app.services.email import send_verification_email
+from app.services.email import send_password_reset_email, send_verification_email
 from app.web import render_template
 
 
@@ -111,6 +119,86 @@ def register_pending_page(
     if get_current_user(request, db):
         return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
     return _render_register_pending_page(request, db, email=email.strip())
+
+
+@router.get("/forgot-password")
+def forgot_password_page(request: Request, db: Session = Depends(get_db)):
+    if get_current_user(request, db):
+        return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
+    return render_template(request, db, "forgot_password.html", {})
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    request: Request,
+    email: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    normalized_email = email.strip().lower()
+    try:
+        normalized_email = validate_email(normalized_email, check_deliverability=False).normalized
+    except EmailNotValidError:
+        push_flash(request, t(request, "flash.password_reset_sent"), "success")
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = db.scalar(select(User).where(User.email == normalized_email))
+    if user is not None and user.is_active and user.email_verified and can_send_password_reset(user):
+        reset_token = refresh_password_reset(user)
+        db.commit()
+        db.refresh(user)
+        send_password_reset_email(request, user, reset_token, db=db)
+
+    push_flash(request, t(request, "flash.password_reset_sent"), "success")
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@router.get("/reset-password")
+def reset_password_page(
+    request: Request,
+    token: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    token_hash = token_digest(token)
+    user = db.scalar(select(User).where(User.password_reset_token == token_hash))
+    if user is None:
+        users = list(db.scalars(select(User).where(User.password_reset_token.is_not(None))).all())
+        user = next((candidate for candidate in users if token_matches(candidate.password_reset_token, token)), None)
+    if user is None or not can_reset_password_token(user):
+        push_flash(request, t(request, "flash.password_reset_invalid"), "danger")
+        return RedirectResponse(url="/forgot-password", status_code=303)
+    return render_template(request, db, "reset_password.html", {"reset_token": token})
+
+
+@router.post("/reset-password")
+def reset_password(
+    request: Request,
+    token: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    token = token.strip()
+    token_hash = token_digest(token)
+    user = db.scalar(select(User).where(User.password_reset_token == token_hash))
+    if user is None:
+        users = list(db.scalars(select(User).where(User.password_reset_token.is_not(None))).all())
+        user = next((candidate for candidate in users if token_matches(candidate.password_reset_token, token)), None)
+    if user is None or not can_reset_password_token(user):
+        push_flash(request, t(request, "flash.password_reset_invalid"), "danger")
+        return RedirectResponse(url="/forgot-password", status_code=303)
+    if password != confirm_password:
+        push_flash(request, t(request, "flash.password_mismatch"), "danger")
+        return render_template(request, db, "reset_password.html", {"reset_token": token}, status_code=400)
+    if len(password) < 8:
+        push_flash(request, t(request, "flash.password_length"), "danger")
+        return render_template(request, db, "reset_password.html", {"reset_token": token}, status_code=400)
+
+    user.password_hash = hash_password(password)
+    clear_password_reset(user)
+    user.updated_at = utcnow()
+    db.commit()
+    push_flash(request, t(request, "flash.password_reset_success"), "success")
+    return RedirectResponse(url=f"/login?email={user.email}", status_code=303)
 
 
 @router.post("/register")
@@ -205,18 +293,19 @@ def register_user(
         push_flash(request, t(request, "flash.invite_registration_success"), "success")
         return RedirectResponse(url=landing_path_for_user(user), status_code=303)
 
+    verification_token = generate_email_verification_token()
     user = User(
         username=username,
         email=normalized_email,
         password_hash=hash_password(password),
         account_role=AccountRole.STUDENT,
         platform_role=PlatformRole.USER,
-        **initial_email_verification_state(),
+        **initial_email_verification_state(verification_token),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    delivery = send_verification_email(request, user)
+    delivery = send_verification_email(request, user, verification_token, db=db)
 
     if delivery.delivered:
         push_flash(request, t(request, "flash.registration_pending_verification", email=user.email), "success")
@@ -267,7 +356,11 @@ def verify_email(
     token: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
 ):
-    user = db.scalar(select(User).where(User.email_verification_token == token))
+    token_hash = token_digest(token)
+    user = db.scalar(select(User).where(User.email_verification_token == token_hash))
+    if user is None:
+        users = list(db.scalars(select(User).where(User.email_verification_token.is_not(None))).all())
+        user = next((candidate for candidate in users if token_matches(candidate.email_verification_token, token)), None)
     if user is None:
         push_flash(request, t(request, "flash.email_verification_invalid"), "danger")
         return RedirectResponse(url="/login", status_code=303)
@@ -275,10 +368,10 @@ def verify_email(
         push_flash(request, t(request, "flash.email_already_verified"), "info")
         return RedirectResponse(url="/login", status_code=303)
     if not can_verify_email_token(user):
-        refresh_email_verification(user)
+        new_token = refresh_email_verification(user)
         db.commit()
         db.refresh(user)
-        send_verification_email(request, user)
+        send_verification_email(request, user, new_token, db=db)
         push_flash(request, t(request, "flash.email_verification_expired"), "warning")
         return RedirectResponse(url=f"/login?email={user.email}", status_code=303)
 
@@ -315,10 +408,14 @@ def resend_verification_email(
         push_flash(request, t(request, "flash.email_already_verified"), "info")
         return RedirectResponse(url="/login", status_code=303)
 
-    refresh_email_verification(user)
+    if not can_send_email_verification(user):
+        push_flash(request, t(request, "flash.email_resend_rate_limited"), "warning")
+        return RedirectResponse(url=f"/login?email={user.email}", status_code=303)
+
+    verification_token = refresh_email_verification(user)
     db.commit()
     db.refresh(user)
-    delivery = send_verification_email(request, user)
+    delivery = send_verification_email(request, user, verification_token, db=db)
     if delivery.delivered:
         push_flash(request, t(request, "flash.verification_email_resent"), "success")
     else:

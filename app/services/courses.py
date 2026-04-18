@@ -27,18 +27,20 @@ from app.models import (
     FinalGradeSnapshot,
     LLMConfig,
     NotebookQuestionConfig,
-    PythonCodeQuestionConfig,
+    CodeQuestionConfig,
     Question,
+    QuestionVersion,
     RuntimeImage,
     ShortAnswerQuestionConfig,
     Submission,
     User,
 )
-from app.runtime_support import default_allowed_python_libraries_text
+from app.runtime_support import default_allowed_code_libraries_text
 
 
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
-DEFAULT_ALLOWED_PYTHON_LIBRARIES = default_allowed_python_libraries_text("en")
+DEFAULT_ALLOWED_CODE_LIBRARIES = default_allowed_code_libraries_text("en")
+DEFAULT_ALLOWED_PYTHON_LIBRARIES = DEFAULT_ALLOWED_CODE_LIBRARIES
 # Keep the legacy name as an alias so older imports and payload builders stay valid.
 DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
@@ -46,16 +48,17 @@ DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 def _question_loader_options():
     return (
         joinedload(Question.notebook_config),
-        joinedload(Question.python_code_config),
+        joinedload(Question.code_config),
         joinedload(Question.short_answer_config),
         joinedload(Question.file_question_config),
+        joinedload(Question.versions),
     )
 
 
 def _assignment_question_loader_options():
     return (
         joinedload(Assignment.questions).joinedload(Question.notebook_config),
-        joinedload(Assignment.questions).joinedload(Question.python_code_config),
+        joinedload(Assignment.questions).joinedload(Question.code_config),
         joinedload(Assignment.questions).joinedload(Question.short_answer_config),
         joinedload(Assignment.questions).joinedload(Question.file_question_config),
     )
@@ -487,7 +490,7 @@ def create_question(
     runtime_image_id: int | None,
     llm_config_id: int | None,
     notebook_config_payload: dict | None,
-    python_code_config_payload: dict | None,
+    code_config_payload: dict | None,
     short_answer_payload: dict | None,
     file_question_payload: dict | None,
 ) -> Question:
@@ -509,17 +512,21 @@ def create_question(
     db.add(question)
     db.flush()
 
-    if question_type == QuestionType.PYTHON_CODE:
-        payload = python_code_config_payload or {}
+    if question_type == QuestionType.CODE:
+        payload = code_config_payload or {}
         db.add(
-            PythonCodeQuestionConfig(
+            CodeQuestionConfig(
                 question_id=question.id,
                 input_spec=payload.get("input_spec") or None,
                 output_spec=payload.get("output_spec") or None,
                 visible_tests_json=payload.get("visible_tests_json", "[]"),
                 hidden_tests_json=payload.get("hidden_tests_json", "[]"),
                 allowed_libraries_note=payload.get("allowed_libraries_note")
-                or DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+                or DEFAULT_ALLOWED_CODE_LIBRARIES,
+                allowed_languages_json=payload.get("allowed_languages_json", '["python"]'),
+                reference_solution_python=payload.get("reference_solution_python", ""),
+                reference_solution_c=payload.get("reference_solution_c", ""),
+                reference_solution_cpp=payload.get("reference_solution_cpp", ""),
                 time_limit_seconds=payload.get("time_limit_seconds", 10),
                 memory_limit_mb=payload.get("memory_limit_mb", 512),
                 cpu_limit=payload.get("cpu_limit", "1"),
@@ -536,7 +543,7 @@ def create_question(
                 max_length=payload.get("max_length"),
                 rubric_text=payload.get("rubric_text") or None,
                 llm_suggestion_enabled=payload.get("llm_suggestion_enabled", False),
-                teacher_confirmation_required=payload.get("teacher_confirmation_required", True),
+                teacher_confirmation_required=payload.get("teacher_confirmation_required", False),
                 updated_at=utcnow(),
             )
         )
@@ -549,7 +556,7 @@ def create_question(
                 reference_answer_text=payload.get("reference_answer_text", ""),
                 rubric_text=payload.get("rubric_text", ""),
                 llm_suggestion_enabled=payload.get("llm_suggestion_enabled", True),
-                teacher_confirmation_required=payload.get("teacher_confirmation_required", True),
+                teacher_confirmation_required=payload.get("teacher_confirmation_required", False),
                 notebook_outputs_required=payload.get("notebook_outputs_required", True),
                 updated_at=utcnow(),
             )
@@ -647,6 +654,8 @@ def create_llm_config(
         timeout_seconds=timeout_seconds,
         max_tokens=max_tokens,
         temperature=temperature.strip() or "0.2",
+        max_llm_retries=3,
+        llm_retry_initial_seconds=5,
         enabled=enabled,
         created_by=creator_id,
         updated_at=utcnow(),
@@ -655,6 +664,80 @@ def create_llm_config(
     db.commit()
     db.refresh(llm_config)
     return llm_config
+
+
+def summarize_course_grade_matrix(db: Session, course_id: int) -> dict:
+    """Students × assignments: submission flag and summed snapshot scores."""
+    student_rows = (
+        db.execute(
+            select(User.id, User.username)
+            .join(CourseMember, CourseMember.user_id == User.id)
+            .where(
+                CourseMember.course_id == course_id,
+                CourseMember.role == CourseRole.STUDENT,
+                CourseMember.status == MembershipStatus.ACTIVE,
+            )
+            .order_by(User.username.asc())
+        )
+        .all()
+    )
+    assignment_rows = (
+        db.execute(
+            select(Assignment.id, Assignment.title)
+            .where(Assignment.course_id == course_id)
+            .order_by(Assignment.created_at.desc())
+        )
+        .all()
+    )
+    students = [{"id": row[0], "username": row[1]} for row in student_rows]
+    assignments = [{"id": row[0], "title": row[1]} for row in assignment_rows]
+    if not students or not assignments:
+        return {"assignments": assignments, "rows": []}
+
+    assignment_ids = [a["id"] for a in assignments]
+    student_ids = [s["id"] for s in students]
+
+    totals_stmt = (
+        select(
+            FinalGradeSnapshot.student_id,
+            FinalGradeSnapshot.assignment_id,
+            func.coalesce(func.sum(FinalGradeSnapshot.score), 0),
+        )
+        .where(
+            FinalGradeSnapshot.assignment_id.in_(assignment_ids),
+            FinalGradeSnapshot.student_id.in_(student_ids),
+        )
+        .group_by(FinalGradeSnapshot.student_id, FinalGradeSnapshot.assignment_id)
+    )
+    totals_map: dict[tuple[int, int], Decimal] = {}
+    for row in db.execute(totals_stmt).all():
+        totals_map[(int(row[0]), int(row[1]))] = row[2] if isinstance(row[2], Decimal) else Decimal(str(row[2]))
+
+    sub_stmt = (
+        select(Submission.user_id, Submission.assignment_id, func.count(Submission.id))
+        .where(
+            Submission.assignment_id.in_(assignment_ids),
+            Submission.user_id.in_(student_ids),
+        )
+        .group_by(Submission.user_id, Submission.assignment_id)
+    )
+    submitted_map: dict[tuple[int, int], int] = {}
+    for row in db.execute(sub_stmt).all():
+        submitted_map[(int(row[0]), int(row[1]))] = int(row[2] or 0)
+
+    matrix_rows = []
+    for st in students:
+        row_cells = []
+        for asn in assignments:
+            key = (st["id"], asn["id"])
+            row_cells.append(
+                {
+                    "submitted": submitted_map.get(key, 0) > 0,
+                    "total_score": totals_map.get(key, Decimal("0")),
+                }
+            )
+        matrix_rows.append({"student": st, "cells": row_cells})
+    return {"assignments": assignments, "rows": matrix_rows}
 
 
 def summarize_course_grades(db: Session, assignment_id: int) -> list[dict]:
@@ -760,23 +843,23 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
     db.add(assignment)
     db.flush()
 
-    python_question = Question(
+    code_question = Question(
         assignment_id=assignment.id,
         order_index=1,
         title="括号匹配判断",
         description=(
             "输入一行只包含 ()[]{} 的字符串，输出 YES 或 NO，判断括号是否完全匹配。"
-            "\n请严格按照输入输出格式编写 Python 程序。"
+            "\n请严格按照输入输出格式编写程序，可使用 Python、C 或 C++。"
         ),
-        question_type=QuestionType.PYTHON_CODE,
+        question_type=QuestionType.CODE,
         max_score=Decimal("100"),
         updated_at=utcnow(),
     )
-    db.add(python_question)
+    db.add(code_question)
     db.flush()
     db.add(
-        PythonCodeQuestionConfig(
-            question_id=python_question.id,
+        CodeQuestionConfig(
+            question_id=code_question.id,
             input_spec="输入一行括号字符串，例如 ()[]{}",
             output_spec="若括号完全匹配输出 YES，否则输出 NO",
             visible_tests_json=json.dumps(
@@ -796,7 +879,64 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 ensure_ascii=False,
                 indent=2,
             ),
-            allowed_libraries_note=DEFAULT_ALLOWED_PYTHON_LIBRARIES,
+            allowed_libraries_note=DEFAULT_ALLOWED_CODE_LIBRARIES,
+            allowed_languages_json='["python", "c", "cpp"]',
+            reference_solution_python=(
+                "s = input().strip()\n"
+                "stack = []\n"
+                "pairs = {')': '(', ']': '[', '}': '{'}\n"
+                "ok = True\n"
+                "for ch in s:\n"
+                "    if ch in '([{':\n"
+                "        stack.append(ch)\n"
+                "    elif not stack or stack.pop() != pairs[ch]:\n"
+                "        ok = False\n"
+                "        break\n"
+                "print('YES' if ok and not stack else 'NO')\n"
+            ),
+            reference_solution_c=(
+                "#include <stdio.h>\n"
+                "#include <string.h>\n\n"
+                "int main(void) {\n"
+                "    char s[10005], st[10005];\n"
+                "    if (scanf(\"%10004s\", s) != 1) return 0;\n"
+                "    int top = 0, ok = 1;\n"
+                "    for (int i = 0; s[i]; ++i) {\n"
+                "        char c = s[i];\n"
+                "        if (c == '(' || c == '[' || c == '{') st[top++] = c;\n"
+                "        else {\n"
+                "            if (top == 0) { ok = 0; break; }\n"
+                "            char p = st[--top];\n"
+                "            if ((c == ')' && p != '(') || (c == ']' && p != '[') || (c == '}' && p != '{')) { ok = 0; break; }\n"
+                "        }\n"
+                "    }\n"
+                "    printf(\"%s\\n\", ok && top == 0 ? \"YES\" : \"NO\");\n"
+                "    return 0;\n"
+                "}\n"
+            ),
+            reference_solution_cpp=(
+                "#include <iostream>\n"
+                "#include <map>\n"
+                "#include <string>\n"
+                "#include <vector>\n"
+                "using namespace std;\n\n"
+                "int main() {\n"
+                "    string s;\n"
+                "    if (!(cin >> s)) return 0;\n"
+                "    vector<char> st;\n"
+                "    map<char, char> pairs{{')','('}, {']','['}, {'}','{'}};\n"
+                "    bool ok = true;\n"
+                "    for (char c : s) {\n"
+                "        if (c == '(' || c == '[' || c == '{') st.push_back(c);\n"
+                "        else {\n"
+                "            if (st.empty() || st.back() != pairs[c]) { ok = false; break; }\n"
+                "            st.pop_back();\n"
+                "        }\n"
+                "    }\n"
+                "    cout << (ok && st.empty() ? \"YES\" : \"NO\") << '\\n';\n"
+                "    return 0;\n"
+                "}\n"
+            ),
             time_limit_seconds=300,
             memory_limit_mb=1024,
             cpu_limit="1",
@@ -810,7 +950,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
         order_index=2,
         title="栈与队列概念比较（PDF）",
         description="请提交 PDF，比较栈和队列的定义、典型操作以及一个实际应用场景。",
-        question_type=QuestionType.PDF_LLM,
+        question_type=QuestionType.FILE_LLM,
         max_score=Decimal("20"),
         updated_at=utcnow(),
     )
@@ -827,7 +967,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 "应用场景可举函数调用栈、任务排队等。"
             ),
             llm_suggestion_enabled=True,
-            teacher_confirmation_required=True,
+            teacher_confirmation_required=False,
             notebook_outputs_required=False,
             updated_at=utcnow(),
         )
@@ -838,7 +978,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
         order_index=3,
         title="顺序表与链表复杂度分析（文本/TeX/ipynb）",
         description="请提交 txt、tex 或已执行输出的 ipynb，说明顺序表和链表在随机访问、插入、删除上的复杂度差异。",
-        question_type=QuestionType.FORMATTED_TEXT_LLM,
+        question_type=QuestionType.FILE_LLM,
         max_score=Decimal("20"),
         updated_at=utcnow(),
     )
@@ -854,7 +994,7 @@ def bootstrap_sample_data(db: Session, user: User) -> None:
                 "链表随机访问为 O(n)，但已定位节点后插入删除可达 O(1)。"
             ),
             llm_suggestion_enabled=True,
-            teacher_confirmation_required=True,
+            teacher_confirmation_required=False,
             notebook_outputs_required=True,
             updated_at=utcnow(),
         )

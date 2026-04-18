@@ -30,7 +30,7 @@
               <div>
                 <strong>{{ assignment.title }}</strong>
                 <div class="small text-muted">
-                  {{ assignment.status.value }} · {{ assignment.default_scoring_rule.value }}
+                  {{ elabel("assignment_status", assignment.status) }} · {{ elabel("scoring_rule", assignment.default_scoring_rule) }}
                 </div>
               </div>
               <span class="btn btn-sm btn-outline-primary">{{ lx("Open", "打开") }}</span>
@@ -50,8 +50,8 @@
         {% if can_manage_course %}
         <div class="section-note mb-3">
           {{ lx(
-            "Use native Python code questions for executable programming tasks. Use file / LLM-reviewed questions for .pdf, .txt, .tex, or .ipynb submissions.",
-            "需要可执行编程评测时请使用原生 Python 代码题；需要提交 .pdf、.txt、.tex 或 .ipynb 时，请使用文件 / LLM 评测题。"
+            "Use code questions for executable Python, C, or C++ programming tasks. Use file / LLM-reviewed questions for .pdf, .txt, .tex, or .ipynb submissions.",
+            "需要可执行编程评测时请使用代码题，可支持 Python、C 或 C++；需要提交 .pdf、.txt、.tex 或 .ipynb 时，请使用文件 / LLM 评测题。"
           ) }}
         </div>
         <h3 class="h6 mb-3">{{ lx("Create assignment", "创建作业") }}</h3>
@@ -67,24 +67,23 @@
           <div class="col-md-4">
             <label class="form-label">{{ lx("Status", "状态") }}</label>
             <select class="form-select" name="status">
-              <option value="draft">draft</option>
-              <option value="published">published</option>
-              <option value="closed">closed</option>
+              <option value="draft">{{ elabel("assignment_status", "draft") }}</option>
+              <option value="published">{{ elabel("assignment_status", "published") }}</option>
+              <option value="closed">{{ elabel("assignment_status", "closed") }}</option>
             </select>
           </div>
           <div class="col-md-4">
             <label class="form-label">{{ lx("Scoring rule", "计分规则") }}</label>
             <select class="form-select" name="default_scoring_rule">
-              <option value="latest">latest</option>
-              <option value="highest">highest</option>
+              <option value="latest">{{ elabel("scoring_rule", "latest") }}</option>
+              <option value="highest">{{ elabel("scoring_rule", "highest") }}</option>
             </select>
           </div>
           <div class="col-md-4">
             <label class="form-label">{{ lx("Submission limit mode", "提交次数限制模式") }}</label>
             <select class="form-select" name="submission_limit_mode">
-              <option value="unlimited">unlimited</option>
-              <option value="daily">daily</option>
-              <option value="total">total</option>
+              <option value="daily">{{ elabel("submission_limit_mode", "daily") }}</option>
+              <option value="total">{{ elabel("submission_limit_mode", "total") }}</option>
             </select>
           </div>
           <div class="col-md-4">
@@ -109,6 +108,7 @@
           <div class="col-md-4">
             <label class="form-label">{{ lx("Submission limit value", "提交次数上限") }}</label>
             <input class="form-control" name="submission_limit_value" type="number" min="1" />
+            <div class="form-text">{{ lx("Leave empty for no submission cap.", "留空表示不限制提交次数。") }}</div>
           </div>
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Create assignment", "创建作业") }}</button>
@@ -120,6 +120,48 @@
             "You are viewing this course as TA staff. Assignment creation and member management remain teacher-only.",
             "你当前以助教身份查看本课程。创建作业和管理成员仍仅对教师开放。"
           ) }}
+        </div>
+        {% endif %}
+
+        {% if can_manage_course and grade_matrix and grade_matrix.rows %}
+        <div class="card shadow-sm mt-4">
+          <div class="card-body">
+            <h2 class="h5 mb-3">{{ lx("Student progress", "学生作业进度") }}</h2>
+            <p class="small text-muted">
+              {{ lx("Submitted means at least one answer was uploaded for that assignment.", "“已提交”表示该作业下至少有一道题有提交记录。") }}
+            </p>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{{ lx("Student", "学生") }}</th>
+                    {% for asn in grade_matrix.assignments %}
+                    <th class="text-center text-nowrap">{{ asn.title }}</th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in grade_matrix.rows %}
+                  <tr>
+                    <td>
+                      <a href="/teacher/courses/{{ course.id }}/grades/student/{{ row.student.id }}">{{ row.student.username }}</a>
+                    </td>
+                    {% for cell in row.cells %}
+                      <td class="text-center small">
+                        {% if cell.submitted %}
+                          <span class="text-success">{{ lx("Yes", "是") }}</span>
+                        {% else %}
+                          <span class="text-muted">—</span>
+                        {% endif %}
+                        <div class="text-muted">{{ cell.total_score }}</div>
+                      </td>
+                    {% endfor %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
         {% endif %}
       </div>
@@ -167,6 +209,14 @@
               {% endfor %}
             </select>
           </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM response language", "LLM 回复语言") }}</label>
+            <select class="form-select" name="llm_response_language">
+              <option value="auto" {% if (course.llm_response_language or 'auto') == 'auto' %}selected{% endif %}>{{ lx("Auto (match student submission)", "自动（跟随学生作业语言）") }}</option>
+              <option value="zh" {% if course.llm_response_language == 'zh' %}selected{% endif %}>{{ lx("Chinese", "中文") }}</option>
+              <option value="en" {% if course.llm_response_language == 'en' %}selected{% endif %}>{{ lx("English", "English") }}</option>
+            </select>
+          </div>
           <div class="col-12 d-grid">
             <button class="btn btn-outline-primary" type="submit">{{ lx("Save LLM setting", "保存 LLM 设置") }}</button>
           </div>
@@ -188,7 +238,7 @@
               <strong>{{ member.user.username }}</strong>
               <div class="small text-muted">{{ member.user.email }}</div>
             </div>
-            <span class="badge bg-secondary">{{ member.role.value }}</span>
+            <span class="badge bg-secondary">{{ elabel("course_role", member.role) }}</span>
           </li>
           {% endfor %}
         </ul>
@@ -206,9 +256,9 @@
           <div class="col-12">
             <label class="form-label">{{ lx("Role", "角色") }}</label>
             <select class="form-select" name="role">
-              <option value="student">student</option>
-              <option value="teacher">teacher</option>
-              <option value="ta">ta</option>
+              <option value="student">{{ elabel("course_role", "student") }}</option>
+              <option value="teacher">{{ elabel("course_role", "teacher") }}</option>
+              <option value="ta">{{ elabel("course_role", "ta") }}</option>
             </select>
           </div>
           <div class="col-12 d-grid">

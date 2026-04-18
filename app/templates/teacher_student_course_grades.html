@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}{{ student.username }} - {{ course.title }}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a class="btn btn-outline-secondary btn-sm" href="/teacher/courses/{{ course.id }}">{{ lx("Back to course", "返回课程") }}</a>
+  <h1 class="h3 mt-3 mb-1">{{ student.username }}</h1>
+  <p class="text-muted mb-0">{{ course.code }} · {{ student.email }}</p>
+</div>
+
+{% for row in rows %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+      <div>
+        <h2 class="h5 mb-1">
+          <a href="/teacher/assignments/{{ row.assignment.id }}">{{ row.assignment.title }}</a>
+        </h2>
+        <p class="text-muted small mb-0">{{ elabel("assignment_status", row.assignment.status) }}</p>
+      </div>
+      <div class="text-end">
+        <div class="small text-muted">{{ lx("Assignment total (snapshots)", "作业总分（快照合计）") }}</div>
+        <div class="fs-5 fw-semibold">{{ row.assignment_total }}</div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>{{ lx("Question", "题目") }}</th>
+            <th class="text-center">{{ lx("Submitted", "已提交") }}</th>
+            <th class="text-end">{{ lx("Score", "得分") }}</th>
+            <th class="text-end">{{ lx("Source", "来源") }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cell in row.questions %}
+          <tr>
+            <td>{{ cell.question.title }}</td>
+            <td class="text-center">
+              {% if cell.submitted %}
+                <span class="text-success">{{ lx("Yes", "是") }}</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if cell.snapshot and cell.snapshot.score is not none %}{{ cell.snapshot.score }}{% else %}—{% endif %}
+            </td>
+            <td class="text-end small">
+              {% if cell.snapshot and cell.snapshot.feedback_source %}
+                {{ elabel("feedback_source", cell.snapshot.feedback_source) }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if cell.submission %}
+                <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ cell.submission.id }}">{{ lx("Open", "查看") }}</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

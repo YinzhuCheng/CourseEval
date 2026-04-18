@@ -52,9 +52,21 @@ class AssignmentStatus(str, Enum):
 class QuestionType(str, Enum):
     NOTEBOOK = "notebook"
     SHORT_ANSWER = "short_answer"
-    PYTHON_CODE = "python_code"
+    CODE = "code"
     PDF_LLM = "pdf_llm"
     FORMATTED_TEXT_LLM = "formatted_text_llm"
+    FILE_LLM = "file_llm"
+
+
+class CodeLanguage(str, Enum):
+    PYTHON = "python"
+    C = "c"
+    CPP = "cpp"
+
+
+class CodeSubmissionMode(str, Enum):
+    SINGLE_FILE = "single_file"
+    ZIP = "zip"
 
 
 class ScoringRule(str, Enum):
@@ -88,7 +100,7 @@ class EvaluationTaskType(str, Enum):
     NOTEBOOK_EVALUATION = "notebook_evaluation"
     SHORT_ANSWER_LLM = "short_answer_llm"
     NOTEBOOK_LLM_FEEDBACK = "notebook_llm_feedback"
-    PYTHON_CODE_EVALUATION = "python_code_evaluation"
+    CODE_EVALUATION = "code_evaluation"
     FILE_LLM_EVALUATION = "file_llm_evaluation"
 
 
@@ -118,6 +130,12 @@ class LLMTestStatus(str, Enum):
     NEVER = "never"
     SUCCESS = "success"
     FAILED = "failed"
+
+
+class LLMResponseLanguage(str, Enum):
+    AUTO = "auto"
+    ZH = "zh"
+    EN = "en"
 
 
 class JobStatus(str, Enum):

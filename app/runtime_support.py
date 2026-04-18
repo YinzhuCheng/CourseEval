@@ -2,6 +2,9 @@ from typing import Final
 
 
 SUPPORTED_PYTHON_VERSION: Final[str] = "3.12"
+SUPPORTED_C_STANDARD: Final[str] = "C11"
+SUPPORTED_CPP_STANDARD: Final[str] = "C++17"
+RUNNER_REQUIREMENTS_FILE: Final[str] = "runner/requirements.txt"
 
 SUPPORTED_PYTHON_PACKAGES: Final[tuple[dict[str, str], ...]] = (
     {
@@ -60,10 +63,34 @@ def default_allowed_python_libraries_text(locale: str = "en") -> str:
     )
 
 
+def allowed_c_libraries_text(locale: str = "en") -> str:
+    if locale == "zh":
+        return "允许使用 C 标准库（C11），例如 stdio.h、stdlib.h、string.h、math.h。系统不预装第三方 C 库。"
+    return "Allowed libraries: C standard library (C11), such as stdio.h, stdlib.h, string.h, and math.h. No third-party C libraries are preinstalled."
+
+
+def allowed_cpp_libraries_text(locale: str = "en") -> str:
+    if locale == "zh":
+        return "允许使用 C++ 标准库（C++17），例如 iostream、vector、string、algorithm、map、set、queue、stack、cmath。系统不预装第三方 C++ 库。"
+    return "Allowed libraries: C++ standard library (C++17), such as iostream, vector, string, algorithm, map, set, queue, stack, and cmath. No third-party C++ libraries are preinstalled."
+
+
+def default_allowed_code_libraries_text(locale: str = "en") -> str:
+    return "\n".join(
+        [
+            default_allowed_python_libraries_text(locale),
+            allowed_c_libraries_text(locale),
+            allowed_cpp_libraries_text(locale),
+        ]
+    )
+
+
 def default_runtime_package_summary() -> str:
     return "\n".join(
         [
             f"Python {SUPPORTED_PYTHON_VERSION}",
+            f"C {SUPPORTED_C_STANDARD} via gcc",
+            f"C++ {SUPPORTED_CPP_STANDARD} via g++",
             *[
                 f"- {package['name']}=={package['version']}"
                 for package in SUPPORTED_PYTHON_PACKAGES

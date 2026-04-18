@@ -6,8 +6,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.constants import (
     AccountRole,
     AssignmentStatus,
+    CodeLanguage,
+    CodeSubmissionMode,
     CourseRole,
     CourseStatus,
+    LLMResponseLanguage,
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
@@ -48,6 +51,29 @@ def _normalize_python_test_case(item: dict, index: int) -> dict:
     }
 
 
+def _normalize_code_language(value: str | CodeLanguage | None) -> str:
+    raw = value.value if isinstance(value, CodeLanguage) else str(value or "").strip().lower()
+    return raw if raw in {item.value for item in CodeLanguage} else CodeLanguage.PYTHON.value
+
+
+def _normalize_code_language_list(raw: str | None) -> list[CodeLanguage]:
+    try:
+        payload = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        payload = []
+    if not isinstance(payload, list):
+        payload = []
+    result: list[CodeLanguage] = []
+    for item in payload:
+        try:
+            language = CodeLanguage(str(item).strip().lower())
+        except ValueError:
+            continue
+        if language not in result:
+            result.append(language)
+    return result or [CodeLanguage.PYTHON]
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -70,6 +96,10 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     email_verification_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verification_last_send_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    password_reset_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    llm_daily_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -102,6 +132,14 @@ class User(Base):
         back_populates="student",
         cascade="all, delete-orphan",
         foreign_keys="FinalGradeSnapshot.student_id",
+    )
+    llm_token_daily_rows: Mapped[list["UserLlmTokenDaily"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    email_delivery_logs: Mapped[list["EmailDeliveryLog"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -152,6 +190,9 @@ class Course(Base):
         nullable=True,
     )
     use_global_llm_default: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    llm_response_language: Mapped[str] = mapped_column(
+        String(8), nullable=False, default=LLMResponseLanguage.AUTO.value
+    )
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -240,6 +281,44 @@ class RuntimeImage(Base):
     evaluation_tasks: Mapped[list["EvaluationTask"]] = relationship(back_populates="runtime_image")
 
 
+class PlatformLlmTokenPolicy(Base):
+    """Singleton row id=1: default daily LLM token budget per user (Beijing calendar day)."""
+
+    __tablename__ = "platform_llm_token_policy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    default_user_daily_llm_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=100000)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserLlmTokenDaily(Base):
+    __tablename__ = "user_llm_token_daily"
+    __table_args__ = (Index("ix_user_llm_token_daily_user_date", "user_id", "usage_date", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    usage_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    consumed_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="llm_token_daily_rows")
+
+
+class EmailDeliveryLog(Base):
+    __tablename__ = "email_delivery_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped[User | None] = relationship(back_populates="email_delivery_logs")
+
+
 class LLMConfig(Base):
     __tablename__ = "llm_configs"
 
@@ -263,6 +342,8 @@ class LLMConfig(Base):
     max_tokens: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
     temperature: Mapped[str] = mapped_column(String(16), default="0.2", nullable=False)
     queue_concurrency: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    max_llm_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    llm_retry_initial_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_test_status: Mapped[LLMTestStatus] = mapped_column(
         Enum(LLMTestStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
@@ -379,7 +460,7 @@ class Question(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
-    python_code_config: Mapped["PythonCodeQuestionConfig | None"] = relationship(
+    code_config: Mapped["CodeQuestionConfig | None"] = relationship(
         back_populates="question",
         cascade="all, delete-orphan",
         uselist=False,
@@ -404,9 +485,44 @@ class Question(Base):
         foreign_keys=[llm_config_id],
     )
     final_grade_snapshots: Mapped[list["FinalGradeSnapshot"]] = relationship(back_populates="question")
+    versions: Mapped[list["QuestionVersion"]] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="QuestionVersion.version_number",
+    )
+    current_question_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    current_version: Mapped["QuestionVersion | None"] = relationship(
+        "QuestionVersion",
+        primaryjoin="Question.current_question_version_id==QuestionVersion.id",
+        foreign_keys="QuestionVersion.id",
+        post_update=True,
+        uselist=False,
+    )
+
+    @property
+    def python_code_config(self) -> "CodeQuestionConfig | None":
+        return self.code_config
 
 
 Index("ix_questions_assignment_order", Question.assignment_id, Question.order_index)
+
+
+class QuestionVersion(Base):
+    __tablename__ = "question_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    question: Mapped["Question"] = relationship(
+        back_populates="versions",
+        foreign_keys=[question_id],
+    )
+
+
+Index("ix_question_versions_question_version", QuestionVersion.question_id, QuestionVersion.version_number, unique=True)
 
 
 class NotebookQuestionConfig(Base):
@@ -431,14 +547,16 @@ class NotebookQuestionConfig(Base):
     llm_score_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     llm_scoring_rubric: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_feedback_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reference_answer_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_answer_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     question: Mapped[Question] = relationship(back_populates="notebook_config")
 
 
-class PythonCodeQuestionConfig(Base):
-    __tablename__ = "python_code_question_configs"
+class CodeQuestionConfig(Base):
+    __tablename__ = "code_question_configs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     question_id: Mapped[int] = mapped_column(
@@ -452,6 +570,10 @@ class PythonCodeQuestionConfig(Base):
     visible_tests_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     hidden_tests_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     allowed_libraries_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_languages_json: Mapped[str] = mapped_column(Text, nullable=False, default='["python"]')
+    reference_solution_python: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_solution_c: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_solution_cpp: Mapped[str] = mapped_column(Text, nullable=False, default="")
     time_limit_seconds: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     memory_limit_mb: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
     cpu_limit: Mapped[str] = mapped_column(String(16), default="1", nullable=False)
@@ -459,7 +581,17 @@ class PythonCodeQuestionConfig(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    question: Mapped[Question] = relationship(back_populates="python_code_config")
+    question: Mapped[Question] = relationship(back_populates="code_config")
+
+    def allowed_languages(self) -> list[CodeLanguage]:
+        return _normalize_code_language_list(self.allowed_languages_json)
+
+    def allowed_language_values(self) -> list[str]:
+        return [language.value for language in self.allowed_languages()]
+
+    def allows_language(self, language: CodeLanguage | str) -> bool:
+        normalized = CodeLanguage(_normalize_code_language(language))
+        return normalized in self.allowed_languages()
 
     def visible_tests(self) -> list[dict]:
         try:
@@ -480,6 +612,10 @@ class PythonCodeQuestionConfig(Base):
         return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
 
+# Backward-compatible import alias while the codebase migrates away from Python-only naming.
+PythonCodeQuestionConfig = CodeQuestionConfig
+
+
 class ShortAnswerQuestionConfig(Base):
     __tablename__ = "short_answer_question_configs"
 
@@ -494,7 +630,7 @@ class ShortAnswerQuestionConfig(Base):
     max_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rubric_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -513,9 +649,10 @@ class FileQuestionConfig(Base):
     )
     accepted_extensions: Mapped[str] = mapped_column(String(255), nullable=False)
     reference_answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    reference_answer_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
     llm_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    teacher_confirmation_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notebook_outputs_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -545,6 +682,15 @@ class Submission(Base):
     notebook_id: Mapped[int | None] = mapped_column(ForeignKey("notebooks.id", ondelete="SET NULL"), nullable=True)
     stored_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_language: Mapped[CodeLanguage | None] = mapped_column(
+        Enum(CodeLanguage, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=True,
+        index=True,
+    )
+    code_submission_mode: Mapped[CodeSubmissionMode | None] = mapped_column(
+        Enum(CodeSubmissionMode, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=True,
+    )
     submitted_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     queued_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -554,6 +700,11 @@ class Submission(Base):
     is_effective_submission: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     failure_reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    question_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     course: Mapped[Course] = relationship(back_populates="submissions")
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
@@ -567,6 +718,7 @@ class Submission(Base):
         back_populates="effective_submission",
         foreign_keys="FinalGradeSnapshot.effective_submission_id",
     )
+    question_version: Mapped["QuestionVersion | None"] = relationship(foreign_keys=[question_version_id])
 
 
 Index("ix_submissions_question_user_submitted", Submission.question_id, Submission.user_id, Submission.submitted_at)
@@ -680,6 +832,12 @@ class FinalGradeSnapshot(Base):
         nullable=True,
     )
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    question_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    use_historical_highest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     student: Mapped[User] = relationship(
         back_populates="final_grade_snapshots",
@@ -691,6 +849,7 @@ class FinalGradeSnapshot(Base):
         back_populates="grade_snapshots_using_submission",
         foreign_keys=[effective_submission_id],
     )
+    question_version: Mapped["QuestionVersion | None"] = relationship(foreign_keys=[question_version_id])
 
 
 Index("ix_final_grade_snapshot_unique", FinalGradeSnapshot.student_id, FinalGradeSnapshot.question_id, unique=True)

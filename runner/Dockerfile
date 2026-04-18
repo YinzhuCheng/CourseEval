@@ -6,14 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd -m -u 10001 runner
 WORKDIR /runner
 
-RUN pip install --no-cache-dir \
-    numpy==2.4.4 \
-    pandas==3.0.2 \
-    matplotlib==3.10.8 \
-    scipy==1.17.1 \
-    scikit-learn==1.8.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY execute_python_code.py /runner/execute_python_code.py
+COPY requirements.txt /runner/requirements.txt
+RUN pip install --no-cache-dir -r /runner/requirements.txt
+
+COPY execute_code.py /runner/execute_code.py
 
 USER runner
 

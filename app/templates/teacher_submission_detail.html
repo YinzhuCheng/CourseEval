@@ -23,11 +23,11 @@
         <h2 class="h5 mb-3">{{ lx("Submission overview", "提交概览") }}</h2>
         <dl class="row mb-0">
           <dt class="col-sm-5">{{ lx("Status", "状态") }}</dt>
-          <dd class="col-sm-7"><span class="badge bg-secondary">{{ submission.status.value }}</span></dd>
+          <dd class="col-sm-7"><span class="badge bg-secondary">{{ elabel("submission_status", submission.status) }}</span></dd>
           <dt class="col-sm-5">{{ lx("Submitted", "提交时间") }}</dt>
           <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
           <dt class="col-sm-5">{{ lx("Question type", "题型") }}</dt>
-          <dd class="col-sm-7">{{ submission.submission_type.value }}</dd>
+          <dd class="col-sm-7">{{ elabel("question_type", submission.submission_type) }}</dd>
           <dt class="col-sm-5">{{ lx("Counts toward limit", "计入次数限制") }}</dt>
           <dd class="col-sm-7">{{ lx("Yes", "是") if submission.counts_toward_limit else lx("No", "否") }}</dd>
           <dt class="col-sm-5">{{ lx("Effective submission", "是否为有效提交") }}</dt>
@@ -104,9 +104,9 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">
-          {% if submission.submission_type.value == "python_code" %}
-          {{ lx("Submitted Python code", "提交的 Python 代码") }}
-          {% elif submission.submission_type.value in ["pdf_llm", "formatted_text_llm"] %}
+          {% if submission.submission_type.value == "code" %}
+          {{ lx("Submitted code", "提交的代码") }}
+          {% elif submission.submission_type.value in ["pdf_llm", "formatted_text_llm", "file_llm"] %}
           {{ lx("Extracted submission text", "提取后的提交文本") }}
           {% else %}
           {{ lx("Student answer", "学生答案") }}
@@ -128,7 +128,7 @@
           {% for item in feedback_items %}
           <div class="border rounded p-3">
             <div class="d-flex justify-content-between mb-2">
-              <strong>{{ item.source.value }}</strong>
+              <strong>{{ elabel("feedback_source", item.source) }}</strong>
               <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
             </div>
             <div class="small text-muted mb-2">
