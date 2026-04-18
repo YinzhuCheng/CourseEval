@@ -190,14 +190,18 @@ def generate_notebook_evaluation_with_llm(
     course_llm_response_language: str | None = None,
     bill_user_id: int | None = None,
     bill_db: Session | None = None,
+    notebook_images: list[ImageInput] | None = None,
+    notebook_multimodal_instructions: str = "",
 ) -> dict:
     lang = _response_language_instruction(course_llm_response_language, student_submission_text)
+    has_mm_images = bool(notebook_images)
     quality = language_and_quality_block(
         lang,
-        text_submission_may_lose_images=bool(student_submission_text.strip()),
+        text_submission_may_lose_images=bool(student_submission_text.strip()) and not has_mm_images,
         student_submission_is_pdf_pages=False,
     )
-    system_prompt = _grading_system_preamble() + " " + quality
+    mm_extra = (" " + notebook_multimodal_instructions.strip()) if notebook_multimodal_instructions.strip() else ""
+    system_prompt = _grading_system_preamble() + " " + quality + mm_extra
     prev_block = ""
     if (previous_submission_text or "").strip() or (previous_feedback_text or "").strip():
         prev_block = (
@@ -222,15 +226,27 @@ def generate_notebook_evaluation_with_llm(
         + prev_block
         + "\nReturn valid JSON only."
     )
-    raw = generate_text(
-        config,
-        prompt,
-        system_prompt,
-        bill_user_id=bill_user_id,
-        bill_db=bill_db,
-        bill_user_prompt=prompt,
-        bill_system_prompt=system_prompt,
-    ).content
+    if notebook_images:
+        img_bytes_total = sum(len(im.data) for im in notebook_images)
+        raw = generate_multimodal(
+            config,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            images=notebook_images,
+            bill_user_id=bill_user_id,
+            bill_db=bill_db,
+            bill_image_bytes_total=img_bytes_total,
+        ).content
+    else:
+        raw = generate_text(
+            config,
+            prompt,
+            system_prompt,
+            bill_user_id=bill_user_id,
+            bill_db=bill_db,
+            bill_user_prompt=prompt,
+            bill_system_prompt=system_prompt,
+        ).content
     return _parse_grading_json(raw)
 
 
