@@ -20,6 +20,68 @@
   </div>
 </div>
 
+{% if question_class_stats %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h2 class="h5 mb-3">{{ lx("Class statistics (gradebook snapshots)", "全班统计（成绩快照）") }}</h2>
+    <p class="small text-muted mb-3">
+      {{ lx("Scores are effective snapshot grades for active students in this course.", "分数为当前课程活跃学生的生效成绩快照。") }}
+    </p>
+    <div class="row g-3 small mb-3">
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Active students", "活跃学生") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Submitted (any)", "已提交人数") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.submitted_any_count }} / {{ question_class_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Missing", "缺交人数") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.missing_count }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Graded count", "有分人数") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.score_stats.count }}</div>
+      </div>
+    </div>
+    {% set st = question_class_stats.score_stats %}
+    {% if st.count %}
+    <div class="row g-3 small mb-3">
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Mean", "均分") }}</div><div>{{ "%.2f"|format(st.mean) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Median", "中位数") }}</div><div>{{ "%.2f"|format(st.median) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Min", "最低") }}</div><div>{{ "%.2f"|format(st.min) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Max", "最高") }}</div><div>{{ "%.2f"|format(st.max) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">P25</div><div>{{ "%.2f"|format(st.p25) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">P75</div><div>{{ "%.2f"|format(st.p75) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Zeros", "零分人数") }}</div><div>{{ st.zero_count }}</div></div>
+    </div>
+    {% endif %}
+    {% if question_class_stats.feedback_source_counts %}
+    <div class="small mb-3">
+      <span class="text-muted me-2">{{ lx("Score sources", "分数来源") }}:</span>
+      {% for src, cnt in question_class_stats.feedback_source_counts.items() %}
+      <span class="badge text-bg-light border me-1">{{ elabel("feedback_source", src) }} × {{ cnt }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if question_class_stats.missing_students %}
+    <details class="small">
+      <summary class="fw-semibold">{{ lx("Missing list (first 200)", "缺交名单（前 200）") }}</summary>
+      <ul class="mb-0 mt-2">
+        {% for u in question_class_stats.missing_students %}
+        <li><a href="/teacher/courses/{{ question.assignment.course_id }}/grades/student/{{ u.id }}">{{ u.username }}</a></li>
+        {% endfor %}
+      </ul>
+      {% if question_class_stats.missing_truncated %}
+      <p class="text-muted mb-0">{{ lx("Additional names omitted.", "其余名单已省略。") }}</p>
+      {% endif %}
+    </details>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <div class="row g-4">
   <div class="col-lg-5">
     <div class="card shadow-sm">

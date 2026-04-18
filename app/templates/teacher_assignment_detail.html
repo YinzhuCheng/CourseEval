@@ -13,6 +13,43 @@
   </a>
 </div>
 
+{% if assignment_staff_stats %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 small align-items-center">
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Active students", "活跃学生") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Any submission", "至少一题已交") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.students_with_any_submission }} / {{ assignment_staff_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("All questions done", "全题齐") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.students_fully_complete }} / {{ assignment_staff_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Pending teacher review", "待教师确认") }}</div>
+        <div class="fs-5 fw-semibold {% if assignment_staff_stats.pending_teacher_review_count %}text-warning{% endif %}">{{ assignment_staff_stats.pending_teacher_review_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Evaluating", "评测中") }}</div>
+        <div class="fs-5 fw-semibold {% if assignment_staff_stats.stuck_evaluation_count %}text-info{% endif %}">{{ assignment_staff_stats.stuck_evaluation_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Failed", "失败") }}</div>
+        <div class="fs-5 fw-semibold {% if assignment_staff_stats.failed_evaluation_count %}text-danger{% endif %}">{{ assignment_staff_stats.failed_evaluation_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Late rows", "迟交条数") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.late_submission_row_count }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="row g-4">
   <div class="col-lg-7">
     <div class="card shadow-sm mb-4">
@@ -50,16 +87,33 @@
                 <th>{{ lx("Title", "标题") }}</th>
                 <th>{{ lx("Kind", "类型") }}</th>
                 <th>{{ lx("Max score", "满分") }}</th>
+                {% if assignment_staff_stats %}
+                <th class="text-end text-nowrap">{{ lx("Submitted", "已交人数") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Missing", "缺交") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Mean", "均分") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Median", "中位") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Zeros", "零分人数") }}</th>
+                {% endif %}
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {% for question in questions %}
+              {% set qs = assignment_staff_stats.question_stats_by_id.get(question.id) if assignment_staff_stats else none %}
               <tr>
                 <td>{{ question.order_index }}</td>
                 <td>{{ question.title }}</td>
                 <td>{{ elabel("question_type", question.question_type) }}</td>
                 <td>{{ question.max_score }}</td>
+                {% if assignment_staff_stats and qs %}
+                <td class="text-end small">{{ qs.submitted_student_count }} / {{ assignment_staff_stats.active_student_count }}</td>
+                <td class="text-end small">{{ qs.missing_student_count }}</td>
+                <td class="text-end small">{% if qs.score_stats.count %}{{ "%.1f"|format(qs.score_stats.mean) }}{% else %}—{% endif %}</td>
+                <td class="text-end small">{% if qs.score_stats.median is not none %}{{ "%.1f"|format(qs.score_stats.median) }}{% else %}—{% endif %}</td>
+                <td class="text-end small">{{ qs.score_stats.zero_count }}</td>
+                {% elif assignment_staff_stats %}
+                <td class="text-end small" colspan="5">—</td>
+                {% endif %}
                 <td class="text-end">
                   <a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">
                     {{ lx("Manage", "管理") }}
