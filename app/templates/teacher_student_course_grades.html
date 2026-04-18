@@ -31,6 +31,8 @@
             <th>{{ lx("Question", "题目") }}</th>
             <th class="text-center">{{ lx("Submitted", "已提交") }}</th>
             <th class="text-end">{{ lx("Score", "得分") }}</th>
+            <th class="text-end">{{ lx("Class mean", "班级均分") }}</th>
+            <th class="text-end">{{ lx("Percentile", "百分位") }}</th>
             <th class="text-end">{{ lx("Source", "来源") }}</th>
             <th></th>
           </tr>
@@ -48,6 +50,12 @@
             </td>
             <td class="text-end">
               {% if cell.snapshot and cell.snapshot.score is not none %}{{ cell.snapshot.score }}{% else %}—{% endif %}
+            </td>
+            <td class="text-end small">
+              {% if cell.class_score_summary.count %}{{ "%.1f"|format(cell.class_score_summary.mean) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-end small">
+              {% if cell.percentile_rank is not none %}{{ "%.0f"|format(cell.percentile_rank * 100) }}%{% else %}—{% endif %}
             </td>
             <td class="text-end small">
               {% if cell.snapshot and cell.snapshot.feedback_source %}

@@ -67,6 +67,16 @@ from app.services.submissions import (
     refresh_final_grade_snapshot,
     store_reference_answer_file,
 )
+from app.services.teacher_analytics import (
+    active_student_ids,
+    compute_assignment_staff_stats,
+    compute_course_staff_overview,
+    compute_question_class_stats,
+    enrich_course_grade_matrix,
+    grade_summary_from_float_scores,
+    percentile_rank,
+    score_distribution_by_question,
+)
 from app.web import render_template
 
 
@@ -195,7 +205,12 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .all()
     )
     course_role = get_course_role(db, course.id, user.id)
-    grade_matrix = summarize_course_grade_matrix(db, course.id) if course_role == CourseRole.TEACHER else None
+    grade_matrix = None
+    course_staff_overview = None
+    if course_role in (CourseRole.TEACHER, CourseRole.TA):
+        course_staff_overview = compute_course_staff_overview(db, course.id)
+    if course_role == CourseRole.TEACHER:
+        grade_matrix = enrich_course_grade_matrix(db, course.id, summarize_course_grade_matrix(db, course.id))
     return render_template(
         request,
         db,
@@ -208,6 +223,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "can_manage_course": course_role == CourseRole.TEACHER,
             "available_llm_configs": available_llm_configs,
             "grade_matrix": grade_matrix,
+            "course_staff_overview": course_staff_overview,
         },
     )
 
@@ -454,6 +470,8 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
         .all()
     )
     course_role = get_course_role(db, assignment.course_id, user.id)
+    student_ids = active_student_ids(db, assignment.course_id)
+    assignment_staff_stats = compute_assignment_staff_stats(db, assignment.id, assignment.course_id, student_ids)
     return render_template(
         request,
         db,
@@ -465,6 +483,7 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
+            "assignment_staff_stats": assignment_staff_stats,
         },
     )
 
@@ -849,6 +868,8 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
         .order_by(QuestionVersion.version_number.desc())
         .all()
     )
+    sid_list = active_student_ids(db, question.assignment.course_id)
+    question_class_stats = compute_question_class_stats(db, question.id, question.assignment.course_id, sid_list)
     return render_template(
         request,
         db,
@@ -861,6 +882,7 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
+            "question_class_stats": question_class_stats,
         },
     )
 
@@ -901,11 +923,14 @@ def teacher_student_course_grades(course_id: int, student_id: int, request: Requ
     assignments = (
         db.query(Assignment).filter(Assignment.course_id == course_id).order_by(Assignment.created_at.desc()).all()
     )
+    all_student_ids = active_student_ids(db, course_id)
     rows = []
     for asn in assignments:
         questions = (
             db.query(Question).filter(Question.assignment_id == asn.id).order_by(Question.order_index.asc()).all()
         )
+        q_ids = [q.id for q in questions]
+        class_scores_by_q = score_distribution_by_question(db, q_ids, all_student_ids)
         q_cells = []
         for q in questions:
             sub = (
@@ -922,12 +947,16 @@ def teacher_student_course_grades(course_id: int, student_id: int, request: Requ
                 )
                 .first()
             )
+            peer_scores = class_scores_by_q.get(q.id, [])
+            st_score = float(snap.score) if snap is not None and snap.score is not None else None
             q_cells.append(
                 {
                     "question": q,
                     "submitted": sub is not None,
                     "submission": sub,
                     "snapshot": snap,
+                    "class_score_summary": grade_summary_from_float_scores(peer_scores),
+                    "percentile_rank": percentile_rank(peer_scores, st_score),
                 }
             )
         asn_total = (
