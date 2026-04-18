@@ -26,6 +26,7 @@ from app.services.permissions import RedirectRequired, get_course_role, require_
 from app.services.llm_token_usage import usage_summary_for_user
 from app.services.discussions import (
     assignment_past_close_for_discussion,
+    attach_avatar_and_role_badges,
     can_post_on_question_topic,
     create_post,
     display_label_for_post,
@@ -172,7 +173,9 @@ def student_question_detail(question_id: int, request: Request, db: Session = De
     for p in posts:
         label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
         decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = flat_thread_for_template(posts, decorated)
+    threaded = attach_avatar_and_role_badges(
+        db, question.assignment.course_id, flat_thread_for_template(posts, decorated)
+    )
     reveal = reveal_bundle_for_question(db, question)
     can_discuss = can_post_on_question_topic(db, question, user)
     role = get_course_role(db, question.assignment.course_id, user.id)

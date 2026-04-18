@@ -69,6 +69,45 @@ def admin_users(request: Request, db: Session = Depends(get_db)):
     return render_template(request, db, "admin_users.html", {"users": users})
 
 
+@router.post("/users/{user_id}/avatar/ban")
+def admin_ban_user_avatar(user_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
+    target.avatar_banned = True
+    target.avatar_path = None
+    target.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Avatar banned for this user.", "已禁止该用户使用头像。"), "success")
+    return _redirect("/admin/users")
+
+
+@router.post("/users/{user_id}/avatar/unban")
+def admin_unban_user_avatar(user_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
+    target.avatar_banned = False
+    target.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Avatar ban lifted.", "已解除头像限制。"), "success")
+    return _redirect("/admin/users")
+
+
 @router.post("/users/{user_id}/role")
 def admin_update_user_role(
     user_id: int,

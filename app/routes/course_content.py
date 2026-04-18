@@ -1,11 +1,9 @@
 """Course materials (teacher CRUD) and material viewing (student)."""
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-from starlette.responses import FileResponse, RedirectResponse
+from starlette.responses import RedirectResponse
 
 from app.auth import push_flash
 from app.constants import CourseRole
@@ -13,7 +11,6 @@ from app.db import get_db
 from app.i18n import choose_text
 from app.models import CourseMaterial
 from app.services.course_materials import (
-    absolute_data_path,
     create_material,
     get_material_for_course,
     list_materials_for_course,
@@ -22,6 +19,7 @@ from app.services.course_materials import (
 )
 from app.services.courses import get_course_for_staff, get_course_for_student
 from app.services.discussions import (
+    attach_avatar_and_role_badges,
     can_post_on_material_topic,
     create_post,
     display_label_for_post,
@@ -186,7 +184,7 @@ def teacher_material_detail(course_id: int, material_id: int, request: Request, 
     for p in posts:
         label, hint = display_label_for_post(p, user, db, course_id)
         decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = flat_thread_for_template(posts, decorated)
+    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
     can_post = can_post_on_material_topic(db, course_id, user)
     from app.services.markdown_sanitize import render_material_markdown
 
@@ -272,7 +270,7 @@ def student_material_detail(course_id: int, material_id: int, request: Request, 
     for p in posts:
         label, hint = display_label_for_post(p, user, db, course_id)
         decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = flat_thread_for_template(posts, decorated)
+    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
     can_post = can_post_on_material_topic(db, course_id, user)
     from app.services.markdown_sanitize import render_material_markdown
 
@@ -339,28 +337,3 @@ def student_material_discuss(
     return _redirect(f"/student/courses/{course_id}/materials/{material_id}")
 
 
-@router.get("/data-files/{relative_path:path}")
-def serve_data_file(relative_path: str, request: Request, db: Session = Depends(get_db)):
-    """Serve uploaded material images to enrolled users."""
-    try:
-        user = require_user(request, db)
-    except RedirectRequired as redirect:
-        return _redirect(redirect.location)
-    path = absolute_data_path(relative_path)
-    if not path.exists() or not path.is_file():
-        return _redirect("/student/courses")
-    parts = Path(relative_path).parts
-    if len(parts) >= 2 and parts[0] == "course-materials" and parts[1].startswith("course-"):
-        try:
-            course_id = int(parts[1].split("-", 1)[1])
-        except (IndexError, ValueError):
-            return _redirect("/student/courses")
-        if get_course_for_student(db, course_id, user.id) is None and get_course_for_staff(db, course_id, user.id) is None:
-            return _redirect("/student/courses")
-    else:
-        return _redirect("/student/courses")
-    suffix = path.suffix.lower()
-    media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}.get(
-        suffix, "application/octet-stream"
-    )
-    return FileResponse(path=path, media_type=media)

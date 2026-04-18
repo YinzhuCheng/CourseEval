@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("nav.profile") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-3">{{ t("nav.profile") }}</h1>
+        <div class="d-flex align-items-center gap-3 mb-4">
+          {% if current_user_avatar_url %}
+          <img src="{{ current_user_avatar_url }}" alt="" class="rounded-circle object-fit-cover border" width="96" height="96" />
+          {% else %}
+          <div class="rounded-circle bg-primary-subtle text-primary d-flex align-items-center justify-content-center fw-bold border" style="width:96px;height:96px;font-size:2rem;">
+            {{ profile_user.username[0]|upper }}
+          </div>
+          {% endif %}
+          <div>
+            <div class="fw-semibold fs-5">{{ profile_user.username }}</div>
+            <div class="text-muted small">{{ profile_user.email }}</div>
+          </div>
+        </div>
+        <h2 class="h6 mb-2">{{ lx("Profile photo", "头像") }}</h2>
+        <p class="small text-muted mb-3">{{ lx("PNG, JPG, GIF, or WebP. Max size follows server upload limit.", "支持 PNG、JPG、GIF、WebP，大小不超过服务器上传限制。") }}</p>
+        <form method="post" action="/me/profile/avatar" enctype="multipart/form-data" class="row g-2 align-items-end mb-2">
+          <div class="col-md-8">
+            <input class="form-control" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+          </div>
+          <div class="col-md-4">
+            <button class="btn btn-primary w-100" type="submit">{{ lx("Upload", "上传") }}</button>
+          </div>
+        </form>
+        <form method="post" action="/me/profile/avatar/remove">
+          <button class="btn btn-outline-secondary btn-sm" type="submit">{{ lx("Remove photo", "移除头像") }}</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

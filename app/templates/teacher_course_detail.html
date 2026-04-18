@@ -259,6 +259,33 @@
       </div>
     </div>
 
+    {% if can_manage_course %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Course card image", "课程卡片图片") }}</h2>
+        <p class="small text-muted mb-3">{{ lx("Shown on the course list for students and teachers. PNG/JPG/WebP/GIF.", "显示在师生课程列表的卡片顶部。") }}</p>
+        {% if course.cover_image_path %}
+        <div class="mb-3 rounded overflow-hidden border" style="max-height: 160px;">
+          <img src="{{ course_cover_url(course) }}" alt="" class="w-100 object-fit-cover" style="max-height:160px;" />
+        </div>
+        {% endif %}
+        <form method="post" action="/teacher/courses/{{ course.id }}/cover" enctype="multipart/form-data" class="row g-2 align-items-end mb-2">
+          <div class="col-12">
+            <input class="form-control form-control-sm" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+          </div>
+          <div class="col-12">
+            <button class="btn btn-sm btn-primary" type="submit">{{ lx("Upload", "上传") }}</button>
+          </div>
+        </form>
+        {% if course.cover_image_path %}
+        <form method="post" action="/teacher/courses/{{ course.id }}/cover/remove" class="m-0">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">{{ lx("Remove image", "移除图片") }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ lx("Course LLM default", "课程默认 LLM") }}</h2>

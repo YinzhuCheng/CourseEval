@@ -13,6 +13,7 @@ from app.routes.jobs import router as jobs_router
 from app.routes.course_content import router as course_content_router
 from app.routes.student import router as student_router
 from app.routes.teacher import router as teacher_router
+from app.routes.uploads import router as uploads_router
 
 
 settings = get_settings()
@@ -30,6 +31,7 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 app.include_router(auth_router)
+app.include_router(uploads_router)
 app.include_router(student_router)
 app.include_router(course_content_router)
 app.include_router(teacher_router)
