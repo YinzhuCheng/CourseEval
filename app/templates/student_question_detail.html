@@ -164,11 +164,19 @@
               {% endif %}
             </div>
           </div>
+          {% if assignment_rubric_public(question.assignment) %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
               <strong>{{ lx("Rubric", "评分细则") }}:</strong> {{ question.file_question_config.rubric_text }}
             </div>
           </div>
+          {% else %}
+          <div class="col-12">
+            <p class="small text-muted mb-0">
+              {{ lx("The grading rubric will be shown after the assignment deadline.", "评分细则将在作业截止时间到达后公开。") }}
+            </p>
+          </div>
+          {% endif %}
           {% endif %}
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Upload file submission", "上传文件提交") }}</button>
@@ -191,11 +199,19 @@
           </div>
           {% endif %}
           {% if question.short_answer_config and question.short_answer_config.rubric_text %}
+            {% if assignment_rubric_public(question.assignment) %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
               <strong>{{ lx("Rubric", "评分细则") }}:</strong> {{ question.short_answer_config.rubric_text }}
             </div>
           </div>
+            {% else %}
+          <div class="col-12">
+            <p class="small text-muted mb-0">
+              {{ lx("The grading rubric will be shown after the assignment deadline.", "评分细则将在作业截止时间到达后公开。") }}
+            </p>
+          </div>
+            {% endif %}
           {% endif %}
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Submit answer", "提交答案") }}</button>
@@ -236,7 +252,7 @@
 <div class="card shadow-sm surface-card mb-4">
   <div class="card-body p-4">
     <h2 class="h5 mb-3">{{ lx("After close: reference & rubric", "关闭后公布：参考答案与评分标准") }}</h2>
-    <p class="small text-muted mb-3">{{ lx("Shown after the assignment close time.", "在作业「关闭时间」到达后向学生展示。") }}</p>
+    <p class="small text-muted mb-3">{{ lx("Shown after the assignment close time (or due time if no close is set).", "在作业关闭时间到达后展示（若未设置关闭时间，则在截止时间后展示）。") }}</p>
     {% if reveal.reference_text %}
     <h3 class="h6">{{ lx("Reference answer", "参考答案") }}</h3>
     <pre class="artifact-block mb-3">{{ reveal.reference_text }}</pre>
