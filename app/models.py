@@ -102,6 +102,8 @@ class User(Base):
     password_reset_sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     llm_daily_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    avatar_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    avatar_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -177,6 +179,7 @@ class Course(Base):
     join_code: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_image_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[CourseStatus] = mapped_column(
         Enum(CourseStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,

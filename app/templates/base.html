@@ -45,16 +45,21 @@
               <a class="btn btn-outline-light {% if current_locale == 'zh' %}active{% endif %}" href="/locale/zh">{{ t("locale.switch_to_zh") }}</a>
             </div>
             {% if current_user %}
-            <span class="small">
-              {{ t("nav.signed_in_as", username=current_user.username) | safe }}
-              {% if current_user_role == "super_admin" %}
-              <span class="badge bg-danger ms-1">super_admin</span>
-              {% elif current_user_role == "admin" %}
-              <span class="badge bg-warning text-dark ms-1">admin</span>
-              {% elif current_user_role == "teacher" %}
-              <span class="badge bg-info text-dark ms-1">teacher</span>
+            <a class="nav-user-pill text-white text-decoration-none d-inline-flex align-items-center gap-2 px-2 py-1 rounded-pill" href="/me/profile" title="{{ t('nav.profile') }}">
+              {% if current_user_avatar_url %}
+              <img src="{{ current_user_avatar_url }}" alt="" class="rounded-circle object-fit-cover" width="28" height="28" />
+              {% else %}
+              <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center fw-semibold" style="width:28px;height:28px;font-size:0.75rem;">{{ current_user.username[0]|upper }}</span>
               {% endif %}
-            </span>
+              <span class="small text-white-50 d-none d-sm-inline">{{ current_user.username }}</span>
+              {% if current_user_role == "super_admin" %}
+              <span class="badge bg-danger">super</span>
+              {% elif current_user_role == "admin" %}
+              <span class="badge bg-warning text-dark">admin</span>
+              {% elif current_user_role == "teacher" %}
+              <span class="badge bg-info text-dark">teacher</span>
+              {% endif %}
+            </a>
             <form method="post" action="/logout" class="m-0">
               <button class="btn btn-sm btn-outline-light" type="submit">{{ t("nav.logout") }}</button>
             </form>
@@ -68,21 +73,6 @@
     </nav>
 
     <main class="container pb-5">
-      {% if current_user %}
-      <div class="hero-banner mb-4">
-        <div>
-          <div class="hero-banner__eyebrow">{{ t("site.title") }}</div>
-          <h1 class="hero-banner__title mb-1">{{ t("hero.title") }}</h1>
-          {% if t("hero.subtitle") %}
-          <p class="hero-banner__body mb-0">{{ t("hero.subtitle") }}</p>
-          {% endif %}
-        </div>
-        <div class="hero-banner__actions">
-          <a class="btn btn-light btn-sm" href="/student/help/python-runtime">{{ t("nav.python_runtime_help") }}</a>
-          <a class="btn btn-outline-light btn-sm" href="/student/courses">{{ t("nav.my_courses") }}</a>
-        </div>
-      </div>
-      {% endif %}
       {% for flash in flashes %}
       <div class="alert alert-{{ flash.category }}" role="alert">
         {{ flash.message }}

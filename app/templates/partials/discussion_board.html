@@ -21,11 +21,24 @@
   <div class="discussion-post mb-3 p-3 {% if node.depth %}discussion-post--nested{% endif %}" style="margin-left: {{ node.depth * 1.25 }}rem;">
     <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
       <div class="d-flex align-items-center gap-2">
-        <span class="rounded-circle bg-primary-subtle text-primary d-inline-flex align-items-center justify-content-center fw-semibold" style="width:2.25rem;height:2.25rem;font-size:0.85rem;">
+        {% if node.avatar_url %}
+        <img src="{{ node.avatar_url }}" alt="" class="rounded-circle object-fit-cover border" width="36" height="36" />
+        {% else %}
+        <span class="rounded-circle bg-primary-subtle text-primary d-inline-flex align-items-center justify-content-center fw-semibold flex-shrink-0" style="width:36px;height:36px;font-size:0.85rem;">
           {{ (node.display_name or "?")[0]|upper }}
         </span>
+        {% endif %}
         <div>
-          <div class="fw-semibold">{{ node.display_name }}</div>
+          <div class="fw-semibold d-flex flex-wrap align-items-center gap-1">
+            <span>{{ node.display_name }}</span>
+            {% for b in node.role_badges %}
+              {% if b == 'super_admin' %}<span class="badge bg-danger" style="font-size:0.65rem;">super</span>{% endif %}
+              {% if b == 'admin' %}<span class="badge bg-warning text-dark" style="font-size:0.65rem;">admin</span>{% endif %}
+              {% if b == 'course_teacher' %}<span class="badge bg-primary" style="font-size:0.65rem;">{{ lx("Teacher", "教师") }}</span>{% endif %}
+              {% if b == 'course_ta' %}<span class="badge bg-secondary" style="font-size:0.65rem;">TA</span>{% endif %}
+              {% if b == 'account_teacher' %}<span class="badge bg-info text-dark" style="font-size:0.65rem;">{{ lx("Teacher", "教师") }}</span>{% endif %}
+            {% endfor %}
+          </div>
           {% if node.staff_hint and (node.staff_hint == 'admin' or node.staff_hint == 'staff_student_anon' or node.staff_hint == 'self_anon') %}
           <div class="small text-muted">{{ lx("Staff view: real account", "教务可见：真实账号") }} — {{ node.post.author.username }}</div>
           {% endif %}

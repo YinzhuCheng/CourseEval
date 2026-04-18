@@ -35,7 +35,13 @@
   {% if courses %}
     {% for course in courses %}
     <div class="col-md-6 col-xl-4">
-      <div class="card shadow-sm h-100">
+      <div class="card shadow-sm h-100 overflow-hidden">
+        {% set cover = course_cover_url(course) %}
+        {% if cover %}
+        <img src="{{ cover }}" alt="" class="course-card-cover" />
+        {% else %}
+        <div class="course-card-cover-placeholder"></div>
+        {% endif %}
         <div class="card-body">
           <h2 class="h5 mb-1">{{ course.code }}</h2>
           <p class="fw-semibold mb-2">{{ course.title }}</p>

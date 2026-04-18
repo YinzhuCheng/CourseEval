@@ -308,6 +308,7 @@ def _ensure_question_version_schema() -> None:
     _ensure_llm_token_policy_tables()
     _bootstrap_file_llm_questions_disable_teacher_confirmation()
     _ensure_discussion_tables()
+    _ensure_user_avatar_and_course_cover()
 
 
 def _ensure_discussion_tables() -> None:
@@ -395,6 +396,15 @@ def _ensure_discussion_tables() -> None:
                     """
                 )
             )
+
+
+def _ensure_user_avatar_and_course_cover() -> None:
+    inspector = inspect(engine)
+    if "users" in inspector.get_table_names():
+        _ensure_column("users", "avatar_path", "VARCHAR(512)")
+        _ensure_column("users", "avatar_banned", "BOOLEAN NOT NULL DEFAULT 0")
+    if "courses" in inspector.get_table_names():
+        _ensure_column("courses", "cover_image_path", "VARCHAR(512)")
 
 
 def _ensure_code_question_config_table() -> None:

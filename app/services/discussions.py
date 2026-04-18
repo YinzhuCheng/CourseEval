@@ -13,6 +13,16 @@ from app.db import utcnow
 from app.models import Assignment, CourseMember, DiscussionPost, DiscussionTopic, Question, User
 
 
+def course_member_roles_map(db: Session, course_id: int) -> dict[int, CourseRole]:
+    rows = db.execute(
+        select(CourseMember.user_id, CourseMember.role).where(
+            CourseMember.course_id == course_id,
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    ).all()
+    return {int(r[0]): r[1] for r in rows}
+
+
 def _as_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
@@ -108,6 +118,31 @@ def list_posts_for_topic(db: Session, topic_id: int) -> list[DiscussionPost]:
             .order_by(DiscussionPost.created_at.asc())
         ).all()
     )
+
+
+def attach_avatar_and_role_badges(db: Session, course_id: int, flat_rows: list[dict]) -> list[dict]:
+    """Add avatar_url and role_badges keys for template (badges: platform + course role)."""
+    from app.services.user_media import user_avatar_public_url
+
+    roles = course_member_roles_map(db, course_id)
+    for r in flat_rows:
+        u = r["post"].author
+        # Anonymous posts must not show the real user's photo (would de-anonymize).
+        r["avatar_url"] = None if r["post"].is_anonymous else user_avatar_public_url(u)
+        badges: list[str] = []
+        if is_super_admin(u):
+            badges.append("super_admin")
+        elif is_admin(u):
+            badges.append("admin")
+        cr = roles.get(u.id)
+        if cr == CourseRole.TEACHER:
+            badges.append("course_teacher")
+        elif cr == CourseRole.TA:
+            badges.append("course_ta")
+        elif u.account_role == AccountRole.TEACHER and not badges:
+            badges.append("account_teacher")
+        r["role_badges"] = badges
+    return flat_rows
 
 
 def flat_thread_for_template(posts: list[DiscussionPost], decorated: list[dict]) -> list[dict]:

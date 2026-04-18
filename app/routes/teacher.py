@@ -61,6 +61,7 @@ from app.services.permissions import (
     require_teacher_account,
 )
 from app.services.discussions import (
+    attach_avatar_and_role_badges,
     can_post_on_question_topic,
     create_post,
     display_label_for_post,
@@ -166,6 +167,54 @@ def create_course(
         "success",
     )
     return _redirect(f"/teacher/courses/{course.id}")
+
+
+@router.post("/courses/{course_id}/cover")
+async def upload_course_cover(
+    course_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect("/teacher/courses")
+    raw = await file.read()
+    from app.services.user_media import store_course_cover_image
+
+    try:
+        course.cover_image_path = store_course_cover_image(course.id, raw, file.filename or "cover.png")
+    except ValueError:
+        push_flash(request, choose_text(request, "Invalid image file.", "图片格式无效或文件过大。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Course image updated.", "课程图片已更新。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
+
+
+@router.post("/courses/{course_id}/cover/remove")
+def remove_course_cover(course_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        return _redirect("/teacher/courses")
+    from app.services.user_media import clear_course_cover_files
+
+    clear_course_cover_files(course.id)
+    course.cover_image_path = None
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Course image removed.", "已移除课程图片。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
 
 
 @router.get("/courses/{course_id}")
@@ -889,7 +938,9 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
     for p in posts:
         label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
         decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = flat_thread_for_template(posts, decorated)
+    threaded = attach_avatar_and_role_badges(
+        db, question.assignment.course_id, flat_thread_for_template(posts, decorated)
+    )
     reveal = reveal_bundle_for_question(db, question)
     can_discuss = can_post_on_question_topic(db, question, user)
     return render_template(
