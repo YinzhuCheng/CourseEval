@@ -55,6 +55,8 @@ It is used on **some listing/analytics code paths**, not the main student submis
 
 **Invariant for agents:** If you change scoring semantics, grep **both** symbols and reconcile or rename to reduce future confusion (requires careful refactor + tests).
 
+This is a confirmed code-structure inconsistency, not just a documentation warning. It is also tracked in `docs/known-issues.md`.
+
 ## Templates & student view
 
 `build_student_result_view` in `submissions.py` prepares a dict for `student_submission_detail.html`.

@@ -211,6 +211,8 @@ There is **no dedicated lint script** in-repo; rely on tests and compile checks 
 |----------|-----------|
 | `docs/file-map.md` | You need “which file owns X?” grouped by responsibility |
 | `docs/change-guide.md` | You are modifying behavior and need coupling / failure-mode hints |
+| `docs/known-issues.md` | You are reviewing technical debt, historical compatibility traps, or doc/code inconsistencies |
+| `docs/deployment-and-upgrades.md` | You need deployment, persistence, queue, or migration/upgrade expectations |
 | `docs/architecture/submission-lifecycle.md` | Submission + task + worker state flow |
 | `docs/architecture/scoring-pipeline.md` | Scores, feedback, snapshots, teacher confirmation |
 | `docs/architecture/roles-and-permissions.md` | Access control |

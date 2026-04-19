@@ -293,7 +293,7 @@
           <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
             <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
-            <div class="form-text">{{ lx("PDF and TeX are converted to text for the model.", "PDF 与 TeX 会先转为文本再送入模型。") }}</div>
+            <div class="form-text">{{ lx("PDF pages are rendered for multimodal review; TeX/text/ipynb files are converted to text.", "PDF 页面会渲染后交由多模态模型评阅；TeX、文本和 ipynb 会转换为文本。") }}</div>
           </div>
           <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>

@@ -60,6 +60,8 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 **Note:** Legacy **notebook execution** in Docker is stubbed via `run_job_in_docker`—grep in `submissions.py` if touching old notebook job paths.
 
+**Also verify:** Unified file/LLM questions use `QuestionType.FILE_LLM`, while legacy `PDF_LLM` and `FORMATTED_TEXT_LLM` values still appear in compatibility branches and templates. See `docs/known-issues.md`.
+
 ---
 
 ## Permissions & role gates
@@ -92,6 +94,8 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 **Failure mode:** UI shows new limit but grading still uses old cached config—check where `LLMConfig` is loaded per course vs platform default (`grep` `_resolve_llm_config` patterns in `submissions.py`).
 
+**Also verify:** Discussion AI has separate LLM precedence in `app/services/discussion_ai.py`; do not assume grading and discussion AI choose configs identically.
+
 ---
 
 ## UI wording, enums, status labels
@@ -111,6 +115,8 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 **Why:** This repo leans on `init_database` / metadata create—production may need Alembic not present here.
 
 **Uncertainty:** Confirm deployment migration strategy before assuming `create_all` is enough.
+
+**Operations:** See `docs/deployment-and-upgrades.md` before schema-changing deployments.
 
 ---
 

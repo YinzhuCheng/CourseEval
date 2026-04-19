@@ -18,6 +18,8 @@ This repository includes **layered documentation for AI coding agents** (and for
 - **[AGENTS.md](AGENTS.md)** is the top-level map for agents: stack, subsystems, workflows, traps, validation commands.
 - **[docs/file-map.md](docs/file-map.md)** groups important files by responsibility (where to look first).
 - **[docs/change-guide.md](docs/change-guide.md)** explains common change couplings and failure modes.
+- **[docs/known-issues.md](docs/known-issues.md)** records confirmed technical debt, historical compatibility traps, and review notes.
+- **[docs/deployment-and-upgrades.md](docs/deployment-and-upgrades.md)** summarizes deployment, persistence, queue, and migration/upgrade expectations.
 - **[docs/architecture/](docs/architecture/)** holds deeper, retrieval-friendly notes on submission flow, scoring, permissions, and the code runner.
 
 Please read **AGENTS.md** and the relevant `docs/` pages **before making non-trivial code changes**, especially when touching submissions, evaluation, scoring, permissions, or the Docker runner.
@@ -43,8 +45,7 @@ Please read **AGENTS.md** and the relevant `docs/` pages **before making non-tri
 - Create assignments
 - Create question types for:
   - Python, C, and C++ code evaluation
-  - PDF file / LLM-reviewed evaluation
-  - formatted text or `.ipynb` / LLM-reviewed evaluation
+  - file upload / LLM-reviewed evaluation with configurable `.pdf`, `.txt`, `.tex`, and `.ipynb` extensions
 - Configure code test cases, allowed language sets, reference solutions, scoring rules, and submission limits
 - Review submissions and confirm final grades
 
@@ -129,7 +130,7 @@ For `.ipynb`:
 
 Typical flow:
 
-1. Teacher creates a **PDF** or **formatted text / ipynb** question
+1. Teacher creates a **file upload / LLM-reviewed** question and chooses allowed file extensions
 2. Teacher provides rubric text and reference answer guidance
 3. Student uploads a supported file
 4. The system extracts readable content
@@ -188,12 +189,14 @@ Typical flow:
 │   │   └── style.css
 │   └── templates/
 ├── data/
+├── docs/
 ├── runner/
 │   ├── Dockerfile
 │   ├── execute_code.py
 │   └── requirements.txt
 ├── scripts/
 ├── tests/
+├── AGENTS.md
 ├── worker.py
 ├── requirements.txt
 └── README.md
@@ -358,11 +361,30 @@ PDF_REVIEW_MAX_PAGES=8
 
 ### PDF review behavior
 
-- PDF review no longer relies on OCR or text extraction
-- Uploaded PDFs are rendered page-by-page into images
-- Those page images are sent to the configured multimodal LLM for grading
+- Uploaded PDFs are rendered page-by-page into images for grading
+- Those page images are sent to the configured multimodal LLM
+- Reference-answer PDFs may still be text-extracted for prompt context
 - `PDF_REVIEW_MAX_PAGES` limits how many pages are rendered per submission
 - Use a multimodal-capable model for PDF review; text-only models may fail for these tasks
+
+## Deployment and upgrades
+
+For a fuller operations checklist, see **[docs/deployment-and-upgrades.md](docs/deployment-and-upgrades.md)**.
+
+High-level deployment requirements:
+
+- Persist `DATA_DIR` and the database; default SQLite lives under `DATA_DIR/app.db`
+- Run web, Redis, worker, Docker, and the runner image together
+- Set `SECRET_KEY`, `APP_BASE_URL`, `DATABASE_URL`, `REDIS_URL`, `PYTHON_QUEUE_NAME`, `LLM_QUEUE_PREFIX`, and runner limits explicitly for production
+- Configure SMTP if email verification or password reset should work
+- Back up the database and `DATA_DIR` before upgrades
+
+Migration / upgrade summary:
+
+- Startup runs `init_database()`, which calls `metadata.create_all()` plus hand-written compatibility shims in `app/db.py`
+- There is no Alembic migration tree in this repository
+- `create_all()` will not rewrite existing columns or constraints; schema changes need explicit idempotent upgrade code in `app/db.py`
+- Test upgrades against a copy of production data before deploying
 
 ## Data model notes
 

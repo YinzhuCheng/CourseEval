@@ -74,6 +74,7 @@ After code evaluation, `EvaluationResult` stores **relative** paths (under confi
 ## Common misconceptions
 
 - **`QuestionType.NOTEBOOK` vs file-upload `.ipynb`:** product may still have “notebook” typed questions for LLM workflows while **Docker notebook execution** is legacy/stubbed—verify `create_*` and `process_*` for the question type you touch.
+- **`FILE_LLM` vs old PDF/formatted values:** current file-upload LLM questions are unified under `file_llm`, but legacy `pdf_llm` and `formatted_text_llm` values still appear in constants, templates, and compatibility branches.
 - **Route success ≠ evaluation done:** creation endpoints often return redirect while worker runs asynchronously.
 
 ## Source of truth

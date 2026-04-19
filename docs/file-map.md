@@ -174,6 +174,15 @@ Changing copy: often **both** `i18n.py` and `enum_labels.py` (for enum-backed la
 | Schema | `app/models.py` |
 | One-off maintenance | `scripts/init_db.py`, `scripts/init_super_admin.py` |
 
+**Migration note:** There is no Alembic tree. Startup uses `init_database()` plus compatibility shims in `app/db.py`; see `docs/deployment-and-upgrades.md`.
+
+## Operations and review notes
+
+| Need | Document |
+|------|----------|
+| Known technical debt / compatibility traps | `docs/known-issues.md` |
+| Deployment and upgrade checklist | `docs/deployment-and-upgrades.md` |
+
 ---
 
 ## Tests (how to navigate)

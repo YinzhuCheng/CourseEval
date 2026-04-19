@@ -73,6 +73,8 @@ Do not show controls in templates that the POST route does not enforce.
 
 Grep `permissions.py` imports in `tests/`; much behavior is integration-tested via routes.
 
+There is no single comprehensive permission test suite. For review, grep `require_`, `can_`, mutating route handlers, and templates that expose the action.
+
 ## Common misconceptions
 
 - **Teacher account vs course teacher role:** `require_teacher_account` does not prove the user teaches *this* course—always combine with `can_manage_course` / `can_staff_course` where needed.

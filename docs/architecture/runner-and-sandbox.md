@@ -48,6 +48,8 @@ Changing marker strings requires updating **both** runner emission (if any) and 
 
 **Do not assume** notebook Docker execution equals the modern file/LLM `.ipynb` flow.
 
+The default runner image tag, `notebook-runner-mvp:latest`, is also historical. It is currently the default image for Python, C, and C++ code evaluation.
+
 ## Tests
 
 - `tests/test_code_runner.py` — primary integration coverage for runner + DB side effects.
