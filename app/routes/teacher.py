@@ -60,10 +60,10 @@ from app.services.permissions import (
     require_login,
     require_teacher_account,
 )
+from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
 from app.services.discussions import (
     attach_avatar_and_role_badges,
     can_post_on_question_topic,
-    create_post,
     display_label_for_post,
     get_or_create_question_topic,
     list_posts_for_topic,
@@ -363,6 +363,43 @@ def update_course_llm_config(
         "success",
     )
     return _redirect(f"/teacher/courses/{course.id}")
+
+
+@router.post("/courses/{course_id}/discussion-ai-llm")
+def update_course_discussion_ai_llm(
+    course_id: int,
+    request: Request,
+    discussion_question_llm_config_id: str = Form(""),
+    discussion_material_llm_config_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/teacher/courses")
+    if course is None:
+        return _redirect("/teacher/courses")
+
+    from app.services.discussion_ai import parse_optional_tested_llm_config_id
+
+    dq = parse_optional_tested_llm_config_id(db, discussion_question_llm_config_id)
+    dm = parse_optional_tested_llm_config_id(db, discussion_material_llm_config_id)
+    if discussion_question_llm_config_id.strip() and dq is None:
+        push_flash(request, choose_text(request, "Invalid question discussion AI model.", "习题讨论 AI 模型无效或未通过测试。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    if discussion_material_llm_config_id.strip() and dm is None:
+        push_flash(request, choose_text(request, "Invalid material discussion AI model.", "资料讨论 AI 模型无效或未通过测试。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+
+    course.discussion_ai_question_llm_config_id = dq
+    course.discussion_ai_material_llm_config_id = dm
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Discussion AI overrides saved.", "讨论区 AI 课程覆盖已保存。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
 
 
 @router.post("/courses/{course_id}/members")
@@ -970,9 +1007,10 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
 def teacher_question_discuss(
     question_id: int,
     request: Request,
-    body: str = Form(...),
+    body: str = Form(""),
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
+    request_ai: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -989,20 +1027,23 @@ def teacher_question_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     try:
-        create_post(
+        _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
-            topic_id=topic.id,
-            author=user,
+            topic=topic,
+            user=user,
             body=body,
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
+            request_ai=(request_ai == "on" or request_ai == "true"),
         )
         db.commit()
     except ValueError:
         db.rollback()
         push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
-    else:
-        push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+        return _redirect(f"/teacher/questions/{question_id}")
+    push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+    if ai_err:
+        push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
     return _redirect(f"/teacher/questions/{question_id}")
 
 

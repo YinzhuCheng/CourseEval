@@ -309,6 +309,7 @@ def _ensure_question_version_schema() -> None:
     _bootstrap_file_llm_questions_disable_teacher_confirmation()
     _ensure_discussion_tables()
     _ensure_user_avatar_and_course_cover()
+    _ensure_discussion_ai_columns()
 
 
 def _ensure_discussion_tables() -> None:
@@ -396,6 +397,19 @@ def _ensure_discussion_tables() -> None:
                     """
                 )
             )
+
+
+def _ensure_discussion_ai_columns() -> None:
+    inspector = inspect(engine)
+    if "discussion_posts" in inspector.get_table_names():
+        _ensure_column("discussion_posts", "is_ai", "BOOLEAN NOT NULL DEFAULT 0")
+    if "courses" in inspector.get_table_names():
+        _ensure_column("courses", "discussion_ai_question_llm_config_id", "INTEGER")
+        _ensure_column("courses", "discussion_ai_material_llm_config_id", "INTEGER")
+    if "platform_llm_token_policy" in inspector.get_table_names():
+        _ensure_column("platform_llm_token_policy", "discussion_ai_default_llm_config_id", "INTEGER")
+        _ensure_column("platform_llm_token_policy", "discussion_ai_question_llm_config_id", "INTEGER")
+        _ensure_column("platform_llm_token_policy", "discussion_ai_material_llm_config_id", "INTEGER")
 
 
 def _ensure_user_avatar_and_course_cover() -> None:

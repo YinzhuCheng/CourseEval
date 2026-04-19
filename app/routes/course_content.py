@@ -18,10 +18,10 @@ from app.services.course_materials import (
     update_material,
 )
 from app.services.courses import get_course_for_staff, get_course_for_student
+from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
 from app.services.discussions import (
     attach_avatar_and_role_badges,
     can_post_on_material_topic,
-    create_post,
     display_label_for_post,
     get_or_create_material_topic,
     list_posts_for_topic,
@@ -212,9 +212,10 @@ def teacher_material_discuss(
     course_id: int,
     material_id: int,
     request: Request,
-    body: str = Form(...),
+    body: str = Form(""),
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
+    request_ai: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -234,13 +235,14 @@ def teacher_material_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     try:
-        create_post(
+        _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
-            topic_id=topic.id,
-            author=user,
+            topic=topic,
+            user=user,
             body=body,
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
+            request_ai=(request_ai == "on" or request_ai == "true"),
         )
         db.commit()
     except ValueError:
@@ -248,6 +250,8 @@ def teacher_material_discuss(
         push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
         return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}")
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+    if ai_err:
+        push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
     return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}")
 
 
@@ -298,9 +302,10 @@ def student_material_discuss(
     course_id: int,
     material_id: int,
     request: Request,
-    body: str = Form(...),
+    body: str = Form(""),
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
+    request_ai: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -320,13 +325,14 @@ def student_material_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     try:
-        create_post(
+        _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
-            topic_id=topic.id,
-            author=user,
+            topic=topic,
+            user=user,
             body=body,
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
+            request_ai=(request_ai == "on" or request_ai == "true"),
         )
         db.commit()
     except ValueError:
@@ -334,6 +340,8 @@ def student_material_discuss(
         push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
         return _redirect(f"/student/courses/{course_id}/materials/{material_id}")
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+    if ai_err:
+        push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
     return _redirect(f"/student/courses/{course_id}/materials/{material_id}")
 
 

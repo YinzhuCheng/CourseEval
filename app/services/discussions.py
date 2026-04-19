@@ -127,6 +127,10 @@ def attach_avatar_and_role_badges(db: Session, course_id: int, flat_rows: list[d
     roles = course_member_roles_map(db, course_id)
     for r in flat_rows:
         u = r["post"].author
+        if getattr(r["post"], "is_ai", False):
+            r["avatar_url"] = None
+            r["role_badges"] = ["ai_assistant"]
+            continue
         # Anonymous posts must not show the real user's photo (would de-anonymize).
         r["avatar_url"] = None if r["post"].is_anonymous else user_avatar_public_url(u)
         badges: list[str] = []
@@ -168,6 +172,8 @@ def display_label_for_post(post: DiscussionPost, viewer: User | None, db: Sessio
     """Return (primary label, secondary hint for staff)."""
     if viewer is None:
         return ("", None)
+    if getattr(post, "is_ai", False):
+        return ("AI", None)
     if not post.is_anonymous:
         return (post.author.username, None)
 
@@ -194,6 +200,7 @@ def create_post(
     body: str,
     parent_post_id: int | None,
     is_anonymous: bool,
+    is_ai: bool = False,
 ) -> DiscussionPost:
     body = (body or "").strip()
     if not body:
@@ -204,6 +211,7 @@ def create_post(
         parent_post_id=parent_post_id,
         body_text=body[:20000],
         is_anonymous=bool(is_anonymous),
+        is_ai=bool(is_ai),
     )
     db.add(post)
     db.flush()

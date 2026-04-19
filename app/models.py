@@ -198,6 +198,14 @@ class Course(Base):
     llm_response_language: Mapped[str] = mapped_column(
         String(8), nullable=False, default=LLMResponseLanguage.AUTO.value
     )
+    discussion_ai_question_llm_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    discussion_ai_material_llm_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -294,6 +302,18 @@ class PlatformLlmTokenPolicy(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     default_user_daily_llm_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=100000)
+    discussion_ai_default_llm_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    discussion_ai_question_llm_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    discussion_ai_material_llm_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -928,6 +948,7 @@ class DiscussionPost(Base):
     parent_post_id: Mapped[int | None] = mapped_column(ForeignKey("discussion_posts.id", ondelete="CASCADE"), nullable=True, index=True)
     body_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_ai: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
 
     topic: Mapped[DiscussionTopic] = relationship(back_populates="posts")
