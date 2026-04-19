@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from app.auth import get_current_user, is_admin, is_super_admin, is_teacher_account, pop_flashes
 from app.services.assignment_visibility import assignment_rubric_public
+from app.services.courses import is_open_community_course
 from app.services.user_media import user_avatar_public_url
 from app.config import get_settings
 from app.enum_labels import label_for_enum
@@ -72,6 +73,7 @@ def render_template(
         "format_discussion_body": format_discussion_body,
         "course_cover_url": course_cover_url,
         "assignment_rubric_public": assignment_rubric_public,
+        "is_open_community_course": is_open_community_course,
         "elabel": elabel,
     }
     base_context["can_use_teacher_features"] = is_teacher_account(base_context["current_user"])

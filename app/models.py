@@ -180,6 +180,7 @@ class Course(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_image_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    is_open_community: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     status: Mapped[CourseStatus] = mapped_column(
         Enum(CourseStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,

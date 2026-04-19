@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -46,11 +46,14 @@ from app.runtime_support import default_allowed_code_libraries_text
 from app.services.course_materials import list_materials_for_course
 from app.services.courses import (
     DEFAULT_ALLOWED_CODE_LIBRARIES,
+    OPEN_COMMUNITY_COURSE_CODE,
+    ensure_user_in_open_community_course,
     get_assignment_for_staff,
     get_course_for_staff,
     get_course_for_teacher,
     get_question_for_staff,
     get_question_for_teacher,
+    is_open_community_course,
     summarize_course_grade_matrix,
 )
 from app.services.permissions import (
@@ -107,15 +110,23 @@ def teacher_courses(request: Request, db: Session = Depends(get_db)):
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
 
+    ensure_user_in_open_community_course(db, user)
+    db.commit()
     memberships = (
         db.query(CourseMember)
         .join(Course)
         .filter(
             CourseMember.user_id == user.id,
-            CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
+            or_(
+                CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
+                Course.is_open_community.is_(True),
+            ),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
-        .order_by(Course.title.asc())
+        .order_by(
+            case((Course.is_open_community.is_(True), 0), else_=1).asc(),
+            Course.title.asc(),
+        )
         .all()
     )
     courses = [membership.course for membership in memberships]
@@ -147,6 +158,10 @@ def create_course(
 
     if db.query(Course).filter(Course.code == code).first():
         push_flash(request, choose_text(request, "Course code already exists.", "课程编号已存在。"), "danger")
+        return _redirect("/teacher/courses")
+
+    if code == OPEN_COMMUNITY_COURSE_CODE:
+        push_flash(request, choose_text(request, "Reserved course code.", "该课程编号为系统保留。"), "danger")
         return _redirect("/teacher/courses")
 
     course = Course(code=code, title=title, description=description.strip() or None, created_by=user.id)
@@ -644,7 +659,7 @@ async def create_question(
             .filter(
                 Assignment.id == assignment_id,
                 CourseMember.user_id == user.id,
-                CourseMember.role == CourseRole.TEACHER,
+                or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
                 CourseMember.status == MembershipStatus.ACTIVE,
             )
             .first()
@@ -1422,7 +1437,10 @@ def grade_submission(
         )
         return _redirect("/teacher/courses")
 
-    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER:
+    sub_course = submission.question.assignment.course
+    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(
+        sub_course
+    ):
         push_flash(
             request,
             choose_text(

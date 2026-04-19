@@ -44,6 +44,9 @@
         {% endif %}
         <div class="card-body">
           <h2 class="h5 mb-1">{{ course.code }}</h2>
+          {% if course.is_open_community %}
+          <p class="mb-2"><span class="badge text-bg-info">{{ lx("Pinned · community", "置顶 · 公共区") }}</span></p>
+          {% endif %}
           <p class="fw-semibold mb-2">{{ course.title }}</p>
           <p class="text-muted small">{{ course.description or t("student.courses.no_description") }}</p>
           <p class="small text-muted">

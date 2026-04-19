@@ -36,7 +36,7 @@ from app.constants import AccountRole, PlatformRole, UserRole
 from app.db import get_db, utcnow
 from app.i18n import set_locale, t
 from app.models import User
-from app.services.courses import bootstrap_sample_data
+from app.services.courses import bootstrap_sample_data, ensure_user_in_open_community_course
 from app.services.email import send_password_reset_email, send_verification_email
 from app.services.permissions import RedirectRequired, require_user
 from app.services.user_media import store_user_avatar
@@ -289,6 +289,7 @@ def register_user(
         db.commit()
         db.refresh(user)
         bootstrap_sample_data(db, user)
+        ensure_user_in_open_community_course(db, user)
         db.commit()
         db.refresh(user)
         login_user(request, user)
@@ -348,6 +349,8 @@ def login(
         return RedirectResponse(url=f"/login?email={user.email}", status_code=303)
 
     login_user(request, user)
+    ensure_user_in_open_community_course(db, user)
+    db.commit()
     push_flash(request, t(request, "flash.login_success"), "success")
     return RedirectResponse(url=landing_path_for_user(user), status_code=303)
 
@@ -381,6 +384,7 @@ def verify_email(
     if not has_super_admin(db, require_verified=True):
         assign_user_role(user, UserRole.SUPER_ADMIN)
     bootstrap_sample_data(db, user)
+    ensure_user_in_open_community_course(db, user)
     db.commit()
     db.refresh(user)
 

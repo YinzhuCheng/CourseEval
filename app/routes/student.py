@@ -16,6 +16,7 @@ from app.runtime_support import (
 )
 from app.services.course_materials import list_materials_for_course
 from app.services.courses import (
+    ensure_user_in_open_community_course,
     get_assignment_for_student,
     get_course_for_student,
     get_question_for_student,
@@ -61,6 +62,8 @@ def student_courses(request: Request, db: Session = Depends(get_db)):
     except RedirectRequired as redirect:
         return RedirectResponse(url=redirect.location, status_code=303)
 
+    ensure_user_in_open_community_course(db, user)
+    db.commit()
     courses = list_courses_for_student(db, user.id)
     return render_template(request, db, "student_courses.html", {"courses": courses})
 

@@ -43,6 +43,7 @@ from app.services.llm_retry import retry_llm_grading_call
 from app.services.notebook_multimodal import notebook_placeholder_alignment_block, sanitize_notebook_for_llm
 from app.models import (
     Assignment,
+    Course,
     CourseMember,
     EvaluationResult,
     EvaluationTask,
@@ -833,12 +834,16 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
             joinedload(Submission.notebook),
         )
         .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(Course, Course.id == Assignment.course_id)
         .join(
             CourseMember,
             and_(
                 CourseMember.course_id == Assignment.course_id,
                 CourseMember.user_id == teacher_id,
-                CourseMember.role.in_(["teacher", "ta"]),
+                or_(
+                    CourseMember.role.in_(["teacher", "ta"]),
+                    Course.is_open_community.is_(True),
+                ),
             ),
         )
         .where(Submission.id == submission_id, CourseMember.status == MembershipStatus.ACTIVE)

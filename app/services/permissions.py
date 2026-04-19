@@ -13,6 +13,7 @@ from app.auth import (
 from app.constants import CourseRole, MembershipStatus
 from app.i18n import t
 from app.models import Course, CourseMember, User
+from app.services.courses import is_open_community_course
 
 
 class RedirectRequired(Exception):
@@ -63,6 +64,8 @@ def can_manage_course(db: Session, course: Course, user: User | None) -> bool:
         return False
     if is_platform_admin(user):
         return True
+    if is_open_community_course(course):
+        return False
     role = get_course_role(db, course.id, user.id)
     return role in COURSE_MANAGEMENT_ROLES
 

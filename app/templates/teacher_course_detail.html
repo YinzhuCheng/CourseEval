@@ -17,6 +17,15 @@
   <a class="btn btn-outline-secondary" href="/teacher/courses">{{ lx("Back to courses", "返回课程列表") }}</a>
 </div>
 
+{% if course.is_open_community %}
+<div class="alert alert-info shadow-sm mb-4">
+  {{ lx(
+    "This is the platform open discussion space: there is no designated course teacher; platform administrators moderate content. Every verified member can post learning materials and create assignments here.",
+    "这是平台公共「自由讨论区」：不设任课教师，由平台管理员治理内容与秩序。每位已验证成员均可发布学习资料与创建作业。",
+  ) }}
+</div>
+{% endif %}
+
 {% if course_staff_overview %}
 <div class="card shadow-sm mb-4">
   <div class="card-body py-3">
@@ -247,6 +256,11 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ lx("Course join code", "课程加入码") }}</h2>
+        {% if course.is_open_community %}
+        <p class="text-muted small mb-0">
+          {{ lx("This space does not use a join code; all verified users are added automatically.", "公共区不使用加入码，所有已验证用户会自动加入。") }}
+        </p>
+        {% else %}
         <div class="input-group">
           <input class="form-control font-monospace" value="{{ course.join_code or '-' }}" readonly />
         </div>
@@ -256,6 +270,7 @@
             "把这个加入码发给学生，学生即可自行加入课程。"
           ) }}
         </p>
+        {% endif %}
       </div>
     </div>
 

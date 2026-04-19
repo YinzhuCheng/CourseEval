@@ -17,7 +17,7 @@ from app.services.course_materials import (
     store_material_image,
     update_material,
 )
-from app.services.courses import get_course_for_staff, get_course_for_student
+from app.services.courses import get_course_for_staff, get_course_for_student, is_open_community_course
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
 from app.services.discussions import (
     attach_avatar_and_role_badges,
@@ -47,7 +47,9 @@ def teacher_new_material(course_id: int, request: Request, db: Session = Depends
         course = get_course_for_staff(db, course_id, user.id)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
-    if course is None or get_course_role(db, course.id, user.id) != CourseRole.TEACHER:
+    if course is None or (
+        get_course_role(db, course.id, user.id) != CourseRole.TEACHER and not is_open_community_course(course)
+    ):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect("/teacher/courses")
     return render_template(request, db, "teacher_material_form.html", {"course": course, "material": None})
@@ -67,7 +69,9 @@ def teacher_create_material(
         course = get_course_for_staff(db, course_id, user.id)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
-    if course is None or get_course_role(db, course_id, user.id) != CourseRole.TEACHER:
+    if course is None or (
+        get_course_role(db, course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(course)
+    ):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect("/teacher/courses")
     try:
@@ -87,7 +91,9 @@ def teacher_edit_material(course_id: int, material_id: int, request: Request, db
         course = get_course_for_staff(db, course_id, user.id)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
-    if course is None or get_course_role(db, course_id, user.id) != CourseRole.TEACHER:
+    if course is None or (
+        get_course_role(db, course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(course)
+    ):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect("/teacher/courses")
     material = get_material_for_course(db, material_id, course_id)
@@ -111,7 +117,9 @@ def teacher_update_material(
         course = get_course_for_staff(db, course_id, user.id)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
-    if course is None or get_course_role(db, course_id, user.id) != CourseRole.TEACHER:
+    if course is None or (
+        get_course_role(db, course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(course)
+    ):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect("/teacher/courses")
     material = get_material_for_course(db, material_id, course_id)
@@ -140,7 +148,9 @@ async def teacher_upload_material_image(
         course = get_course_for_staff(db, course_id, user.id)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
-    if course is None or get_course_role(db, course_id, user.id) != CourseRole.TEACHER:
+    if course is None or (
+        get_course_role(db, course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(course)
+    ):
         return _redirect("/teacher/courses")
     material = get_material_for_course(db, material_id, course_id)
     if material is None:

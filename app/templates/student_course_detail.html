@@ -19,6 +19,15 @@
   </div>
 </div>
 
+{% if course.is_open_community %}
+<div class="alert alert-info shadow-sm mb-4">
+  {{ lx(
+    "Platform open discussion space: no designated teacher; admins moderate. Verified members may publish materials and exercises from the teacher view.",
+    "平台公共讨论区：无固定任课教师，由管理员治理。已验证成员可在教师端界面发布资料与习题。",
+  ) }}
+</div>
+{% endif %}
+
 <div class="card shadow-sm">
   <div class="card-body">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">

@@ -119,6 +119,7 @@ def migrate_legacy_schema() -> None:
             )
     if "courses" in inspector.get_table_names():
         _ensure_column("courses", "join_code", "VARCHAR(32)")
+        _ensure_column("courses", "is_open_community", "BOOLEAN NOT NULL DEFAULT 0")
         _ensure_column("courses", "use_global_llm_default", "BOOLEAN NOT NULL DEFAULT 1")
         with engine.begin() as connection:
             connection.execute(
@@ -310,6 +311,57 @@ def _ensure_question_version_schema() -> None:
     _ensure_discussion_tables()
     _ensure_user_avatar_and_course_cover()
     _ensure_discussion_ai_columns()
+    _ensure_open_community_course()
+
+
+def _ensure_open_community_course() -> None:
+    """Single platform-wide course: all active users are members as students; no designated teacher."""
+    from app.constants import CourseRole, CourseStatus, MembershipStatus
+    from app.models import Course, CourseMember, User
+
+    inspector = inspect(engine)
+    if "courses" not in inspector.get_table_names() or "course_members" not in inspector.get_table_names():
+        return
+    code = "__OPEN_COMMUNITY__"
+    with SessionLocal() as db:
+        course = db.scalar(select(Course).where(Course.code == code))
+        if course is None:
+            course = Course(
+                code=code,
+                join_code=None,
+                title="自由讨论区",
+                description="全员公共交流区：可发布学习资料与习题；无固定任课教师，由平台管理员治理。",
+                status=CourseStatus.ACTIVE,
+                is_open_community=True,
+                created_by=None,
+            )
+            db.add(course)
+            db.commit()
+            db.refresh(course)
+        elif not course.is_open_community:
+            course.is_open_community = True
+            if not (course.title or "").strip():
+                course.title = "自由讨论区"
+            db.commit()
+
+        user_ids = list(db.scalars(select(User.id).where(User.is_active.is_(True))).all())
+        for uid in user_ids:
+            row = db.scalar(
+                select(CourseMember).where(CourseMember.course_id == course.id, CourseMember.user_id == uid)
+            )
+            if row is None:
+                db.add(
+                    CourseMember(
+                        course_id=course.id,
+                        user_id=uid,
+                        role=CourseRole.STUDENT,
+                        status=MembershipStatus.ACTIVE,
+                    )
+                )
+            else:
+                row.status = MembershipStatus.ACTIVE
+                row.role = CourseRole.STUDENT
+        db.commit()
 
 
 def _ensure_discussion_tables() -> None:
