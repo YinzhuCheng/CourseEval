@@ -14,9 +14,11 @@ from app.services.discussions import create_post
 from app.services.llm import generate_text
 from app.services.llm_groups import (
     available_llm_groups_for_course,
+    first_group_with_any_enabled_target,
     first_valid_group,
-    group_has_callable_target,
+    group_has_any_enabled_target,
     latest_platform_llm_group,
+    latest_platform_llm_group_relaxed,
     ordered_group_targets,
     parse_optional_tested_llm_group_id,
 )
@@ -24,17 +26,19 @@ from app.services.llm_groups import (
 if TYPE_CHECKING:
     pass
 
-_AI_AT_RE = re.compile(r"^\s*@AI\b", re.IGNORECASE)
+_AI_MENTION_RE = re.compile(r"(?i)@AI\b")
 
 
-def strip_ai_prefix(body: str) -> str:
-    return _AI_AT_RE.sub("", body or "", count=1).strip()
+def strip_ai_mentions(body: str) -> str:
+    cleaned = _AI_MENTION_RE.sub("", body or "")
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip()
 
 
 def message_requests_discussion_ai(body: str, request_ai_flag: bool) -> bool:
     if request_ai_flag:
         return True
-    return bool(_AI_AT_RE.search(body or ""))
+    return bool(_AI_MENTION_RE.search(body or ""))
 
 
 def _policy_row(db: Session) -> PlatformLlmTokenPolicy:
@@ -50,36 +54,40 @@ def parse_optional_tested_llm_config_id(db: Session, raw: str) -> int | None:
     return parse_optional_tested_llm_group_id(db, raw)
 
 
-def _first_valid_config(db: Session, config_id: int | None) -> LLMConfig | None:
-    return first_valid_group(db, config_id)
+def _first_discussion_config(db: Session, config_id: int | None) -> LLMConfig | None:
+    """Prefer connectivity-tested groups; accept enabled-but-untested like grading fallbacks."""
+    g = first_valid_group(db, config_id)
+    if g:
+        return g
+    return first_group_with_any_enabled_target(db, config_id)
 
 
 def resolve_discussion_ai_llm_config(db: Session, topic: DiscussionTopic) -> LLMConfig | None:
-    """Precedence: course override → platform kind override → platform default override → latest tested platform."""
+    """Precedence: course override → platform kind override → platform default override → latest platform group."""
     course = db.get(Course, topic.course_id)
     policy = _policy_row(db)
 
     if topic.kind == DiscussionTopicKind.QUESTION:
         if course and course.discussion_ai_question_llm_config_id:
-            c = _first_valid_config(db, course.discussion_ai_question_llm_config_id)
+            c = _first_discussion_config(db, course.discussion_ai_question_llm_config_id)
             if c:
                 return c
-        c = _first_valid_config(db, policy.discussion_ai_question_llm_config_id)
+        c = _first_discussion_config(db, policy.discussion_ai_question_llm_config_id)
         if c:
             return c
     elif topic.kind == DiscussionTopicKind.COURSE_MATERIAL:
         if course and course.discussion_ai_material_llm_config_id:
-            c = _first_valid_config(db, course.discussion_ai_material_llm_config_id)
+            c = _first_discussion_config(db, course.discussion_ai_material_llm_config_id)
             if c:
                 return c
-        c = _first_valid_config(db, policy.discussion_ai_material_llm_config_id)
+        c = _first_discussion_config(db, policy.discussion_ai_material_llm_config_id)
         if c:
             return c
 
-    c = _first_valid_config(db, policy.discussion_ai_default_llm_config_id)
+    c = _first_discussion_config(db, policy.discussion_ai_default_llm_config_id)
     if c:
         return c
-    return latest_platform_llm_group(db)
+    return latest_platform_llm_group(db) or latest_platform_llm_group_relaxed(db)
 
 
 def resolve_selected_discussion_ai_llm_config(
@@ -89,9 +97,21 @@ def resolve_selected_discussion_ai_llm_config(
 ) -> LLMConfig | None:
     if selected_group_id:
         group = first_valid_group(db, selected_group_id)
+        if group is None:
+            group = first_group_with_any_enabled_target(db, selected_group_id)
         if group and (group.course_id in (None, topic.course_id)):
             return group
     return resolve_discussion_ai_llm_config(db, topic)
+
+
+def _grading_like_llm_fallback(db: Session, topic: DiscussionTopic) -> LLMConfig | None:
+    """Match auto-grading fallback: course default (when not using global) → latest platform group."""
+    course = db.get(Course, topic.course_id)
+    if course is not None and not course.use_global_llm_default:
+        g = course.default_llm_config
+        if g is not None and group_has_any_enabled_target(g):
+            return g
+    return latest_platform_llm_group(db) or latest_platform_llm_group_relaxed(db)
 
 
 def discussion_ai_group_options(db: Session, topic: DiscussionTopic) -> list[dict[str, object]]:
@@ -179,29 +199,34 @@ def run_discussion_ai_reply(
     if not user_message:
         return None
     group = resolve_selected_discussion_ai_llm_config(db, topic, selected_group_id)
-    if group is None or not group_has_callable_target(group):
+    if group is None or not group_has_any_enabled_target(group):
+        group = _grading_like_llm_fallback(db, topic)
+    if group is None or not group_has_any_enabled_target(group):
         raise ValueError(
-            "No discussion AI group is available. An administrator must pin a connectivity-tested LLM group "
+            "No discussion AI group is available. An administrator must configure an enabled LLM group "
             "under Admin → LLM (Discussion AI defaults) or course-level overrides."
         )
 
     system_prompt, prompt = build_discussion_ai_prompts(db, topic, user_message)
     result = None
     last_exc: Exception | None = None
-    for target in ordered_group_targets(group, tested_only=True):
-        try:
-            result = generate_text(
-                target,
-                prompt,
-                system_prompt,
-                bill_user_id=requester.id,
-                bill_db=db,
-                bill_user_prompt=prompt,
-                bill_system_prompt=system_prompt,
-            )
+    for tested_only in (True, False):
+        for target in ordered_group_targets(group, tested_only=tested_only):
+            try:
+                result = generate_text(
+                    target,
+                    prompt,
+                    system_prompt,
+                    bill_user_id=requester.id,
+                    bill_db=db,
+                    bill_user_prompt=prompt,
+                    bill_system_prompt=system_prompt,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        if result is not None:
             break
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
     if result is None:
         raise ValueError(f"All LLMs in group '{group.name}' failed.") from last_exc
     text = (result.content or "").strip()
@@ -237,7 +262,7 @@ def create_user_post_and_maybe_ai_reply(
     """Create user post when there is body; AI-only button with parent skips user post. Returns (user_post_or_none, ai_error_message)."""
     raw = (body or "").strip()
     wants_ai = message_requests_discussion_ai(raw, request_ai)
-    user_body = strip_ai_prefix(raw) if wants_ai else raw
+    user_body = strip_ai_mentions(raw) if wants_ai else raw
 
     ai_err: str | None = None
     if wants_ai and not user_body and not pending_image_uploads and parent_post_id:
@@ -274,7 +299,7 @@ def create_user_post_and_maybe_ai_reply(
         has_pending_image_uploads=pending_image_uploads and not user_body,
     )
     if wants_ai:
-        prompt = strip_ai_prefix(raw)
+        prompt = strip_ai_mentions(raw)
         try:
             run_discussion_ai_reply(
                 db,

@@ -66,6 +66,11 @@ from app.services.permissions import (
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
 from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
 from app.services.discussion_forms import extract_discussion_images
+from app.services.image_uploads import (
+    ALLOWED_IMAGE_EXTENSIONS,
+    format_image_upload_error,
+    human_upload_max_bytes,
+)
 from app.services.discussions import (
     build_discussion_view_context,
     can_moderate_discussion,
@@ -261,8 +266,12 @@ async def upload_course_cover(
 
     try:
         course.cover_image_path = store_course_cover_image(course.id, raw, file.filename or "cover.png")
-    except ValueError:
-        push_flash(request, choose_text(request, "Invalid image file.", "图片格式无效或文件过大。"), "danger")
+    except ValueError as exc:
+        key = str(exc) if exc else ""
+        if key in ("unsupported_image_type", "file_too_large"):
+            push_flash(request, format_image_upload_error(request, key), "danger")
+        else:
+            push_flash(request, choose_text(request, "Invalid image file.", "图片无效。"), "danger")
         return _redirect(f"/teacher/courses/{course_id}")
     course.updated_at = utcnow()
     db.commit()
@@ -347,6 +356,8 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
     staff_can_mod = can_moderate_discussion(db, course.id, user)
     mute_rows = list(db.scalars(select(CourseDiscussionMute).where(CourseDiscussionMute.course_id == course.id)).all())
     discussion_mute_by_user = {m.user_id: m for m in mute_rows}
+    cover_exts = ", ".join(sorted(e.replace(".", "").upper() for e in sorted(ALLOWED_IMAGE_EXTENSIONS)))
+    cover_max = human_upload_max_bytes()
     return render_template(
         request,
         db,
@@ -364,6 +375,13 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "can_moderate_discussion": staff_can_mod,
             "discussion_moderation_course_id": course.id,
             "discussion_mute_by_user": discussion_mute_by_user,
+            "course_cover_image_rules_en": (
+                f"Formats: {cover_exts} (extension must match image contents). "
+                f"Max {cover_max} per file after processing."
+            ),
+            "course_cover_image_rules_zh": (
+                f"格式：{cover_exts}（扩展名需与实际图像一致）。处理后单文件不超过 {cover_max}。"
+            ),
         },
     )
 
@@ -1068,8 +1086,11 @@ async def teacher_question_discuss(
                     db, _u, question.assignment.course_id, image_files
                 )
             except ValueError as att_err:
-                if str(att_err) == "too_many_images":
+                ak = str(att_err) if att_err else ""
+                if ak == "too_many_images":
                     raise ValueError("too_many_images") from att_err
+                if ak in ("unsupported_image_type", "file_too_large"):
+                    raise ValueError(ak) from att_err
                 raise
         db.commit()
     except ValueError as exc:
@@ -1092,6 +1113,8 @@ async def teacher_question_discuss(
             )
         elif key == "too_many_images":
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        elif key in ("unsupported_image_type", "file_too_large"):
+            msg = format_image_upload_error(request, key)
         else:
             msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
         dest = safe_local_redirect(redirect_to, default_dest)

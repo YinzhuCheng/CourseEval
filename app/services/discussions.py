@@ -23,10 +23,12 @@ from app.models import (
     Question,
     User,
 )
+from app.services.discussion_attachments import DISCUSSION_MAX_IMAGES_PER_POST
 from app.services.discussion_markdown import (
     DISCUSSION_BODY_MAX_CHARS,
     has_disallowed_remote_image_markdown,
 )
+from app.services.image_uploads import ALLOWED_IMAGE_EXTENSIONS, human_upload_max_bytes
 
 
 def course_member_roles_map(db: Session, course_id: int) -> dict[int, CourseRole]:
@@ -410,11 +412,20 @@ def build_discussion_view_context(
     threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
     staff = can_moderate_discussion(db, course_id, viewer)
     topic = db.get(DiscussionTopic, topic_id)
+    exts = ", ".join(sorted(s.replace(".", "").upper() for s in ALLOWED_IMAGE_EXTENSIONS))
     return {
         "discussion_thread": threaded,
         "discussion_pagination": pag,
         "can_moderate_discussion": staff,
         "discussion_ai_groups": discussion_ai_group_options(db, topic) if topic else [],
+        "discussion_image_rules_en": (
+            f"Images: {exts}; max {human_upload_max_bytes()} per file after processing; "
+            f"up to {DISCUSSION_MAX_IMAGES_PER_POST} images per post. No remote hotlinks."
+        ),
+        "discussion_image_rules_zh": (
+            f"图片：格式 {exts}；处理后单文件不超过 {human_upload_max_bytes()}；"
+            f"每条帖子最多 {DISCUSSION_MAX_IMAGES_PER_POST} 张。禁止外链图片。"
+        ),
     }
 
 
