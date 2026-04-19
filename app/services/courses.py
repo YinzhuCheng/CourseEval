@@ -11,7 +11,6 @@ from app.constants import (
     AssignmentStatus,
     CourseRole,
     CourseStatus,
-    FeedbackSource,
     MembershipStatus,
     PlatformRole,
     QuestionType,
@@ -22,11 +21,9 @@ from app.models import (
     Assignment,
     Course,
     CourseMember,
-    Feedback,
     FileQuestionConfig,
     FinalGradeSnapshot,
     LLMConfig,
-    NotebookQuestionConfig,
     CodeQuestionConfig,
     Question,
     QuestionVersion,
@@ -48,7 +45,6 @@ DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
 def _question_loader_options():
     return (
-        joinedload(Question.notebook_config),
         joinedload(Question.code_config),
         joinedload(Question.short_answer_config),
         joinedload(Question.file_question_config),
@@ -58,7 +54,6 @@ def _question_loader_options():
 
 def _assignment_question_loader_options():
     return (
-        joinedload(Assignment.questions).joinedload(Question.notebook_config),
         joinedload(Assignment.questions).joinedload(Question.code_config),
         joinedload(Assignment.questions).joinedload(Question.short_answer_config),
         joinedload(Assignment.questions).joinedload(Question.file_question_config),
@@ -456,14 +451,10 @@ def create_question(
     scoring_rule_override: ScoringRule | None,
     runtime_image_id: int | None,
     llm_config_id: int | None,
-    notebook_config_payload: dict | None,
     code_config_payload: dict | None,
     short_answer_payload: dict | None,
     file_question_payload: dict | None,
 ) -> Question:
-    if question_type == QuestionType.NOTEBOOK:
-        raise ValueError("Legacy notebook execution questions are no longer supported.")
-
     question = Question(
         assignment_id=assignment.id,
         order_index=order_index,
@@ -514,7 +505,7 @@ def create_question(
                 updated_at=utcnow(),
             )
         )
-    elif question_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
+    elif question_type == QuestionType.FILE_LLM:
         payload = file_question_payload or {}
         db.add(
             FileQuestionConfig(
@@ -735,35 +726,6 @@ def summarize_course_grades(db: Session, assignment_id: int) -> list[dict]:
     )
     rows = db.execute(statement).all()
     return [{"student_id": row[0], "username": row[1], "score": row[2]} for row in rows]
-
-
-def resolve_submission_score(
-    submission: Submission,
-    latest_feedback: Feedback | None,
-) -> tuple[Decimal | None, FeedbackSource | None]:
-    if latest_feedback and latest_feedback.source == FeedbackSource.TEACHER:
-        return latest_feedback.score_suggestion, FeedbackSource.TEACHER
-
-    teacher_feedback = next((item for item in submission.feedback_items if item.source == FeedbackSource.TEACHER), None)
-    if teacher_feedback is not None:
-        return teacher_feedback.score_suggestion, FeedbackSource.TEACHER
-
-    llm_feedback = next((item for item in submission.feedback_items if item.source == FeedbackSource.LLM), None)
-    if llm_feedback is not None and llm_feedback.score_suggestion is not None:
-        return llm_feedback.score_suggestion, FeedbackSource.LLM
-
-    auto_feedback = next((item for item in submission.feedback_items if item.source == FeedbackSource.AUTO), None)
-    if auto_feedback is not None and auto_feedback.score_suggestion is not None:
-        return auto_feedback.score_suggestion, FeedbackSource.AUTO
-
-    result = max(submission.evaluation_results, key=lambda item: item.created_at, default=None)
-    if result is None:
-        return None, None
-    if result.final_score is not None:
-        return Decimal(result.final_score), FeedbackSource.AUTO
-    if result.auto_score is not None:
-        return Decimal(result.auto_score), FeedbackSource.AUTO
-    return None, None
 
 
 def bootstrap_sample_data(db: Session, user: User) -> None:

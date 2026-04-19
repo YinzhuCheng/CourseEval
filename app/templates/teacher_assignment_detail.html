@@ -156,7 +156,6 @@
             <label class="form-label">{{ lx("Question kind", "题目类型") }}</label>
             <select class="form-select" name="question_type">
               <option value="code">{{ lx("Code question", "代码题") }}</option>
-              <option value="notebook">{{ lx("Notebook (.ipynb) / LLM text review", "Notebook（.ipynb）/ LLM 文本评阅") }}</option>
               <option value="file_llm">{{ lx("File upload / LLM-reviewed", "文件上传 / LLM 评测题") }}</option>
             </select>
           </div>
@@ -276,16 +275,6 @@
             <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5"></textarea>
           </div>
 
-          <div class="col-12 notebook-llm-only d-none">
-            <label class="form-label">{{ lx("LLM score weight (cap for LLM portion)", "LLM 分数上限（LLM 部分不超过此值）") }}</label>
-            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" min="0.01" value="20" />
-            <input type="hidden" name="notebook_llm_feedback_enabled" value="true" />
-            <div class="form-text">{{ lx("After auto tests, the notebook is converted to text and graded by the LLM.", "自动评测后，系统会将 ipynb 转为文本并由 LLM 评分。") }}</div>
-          </div>
-          <div class="col-12 notebook-llm-only d-none">
-            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
-            <textarea class="form-control" name="llm_scoring_rubric" rows="4"></textarea>
-          </div>
           <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
             <textarea class="form-control" name="reference_answer" rows="4"></textarea>
@@ -380,20 +369,13 @@
     const toggle = () => {
       const selected = typeSelect.value;
       const isCode = selected === "code";
-      const isNotebook = selected === "notebook";
       const isLlm = selected === "file_llm";
 
       document.querySelectorAll(".code-only").forEach((el) => {
         el.classList.toggle("d-none", !isCode);
       });
-      document.querySelectorAll(".notebook-llm-only").forEach((el) => {
-        el.classList.toggle("d-none", !isNotebook);
-      });
       document.querySelectorAll(".llm-graded-only").forEach((el) => {
-        el.classList.toggle("d-none", !(isLlm || isNotebook));
-      });
-      document.querySelectorAll(".legacy-notebook-only").forEach((el) => {
-        el.classList.add("d-none");
+        el.classList.toggle("d-none", !isLlm);
       });
       if (isLlm) syncFormats();
     };

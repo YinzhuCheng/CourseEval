@@ -29,9 +29,9 @@ Routes should delegate quickly to `app/services/submissions.py`.
 
 Representative functions (grep for full list):
 
-- `create_code_submission`, `create_file_submission`, `create_short_answer_submission`, `create_notebook_submission`, …
+- `create_code_submission`, `create_file_submission`, `create_short_answer_submission`, …
 - `enqueue_submission_evaluation`, `enqueue_file_llm_evaluation`, `enqueue_short_answer_llm`, …
-- `process_code_evaluation`, `process_submission_evaluation` (legacy notebook docker path), `process_file_llm_evaluation`, …
+- `process_code_evaluation`, `process_file_llm_evaluation`, `process_short_answer_llm_evaluation`, …
 
 ## Queue / worker
 
@@ -40,7 +40,7 @@ Representative functions (grep for full list):
 | `enqueue_*` | Pushes RQ jobs, sets `EvaluationTask.backend_job_id`, updates submission to `queued` where applicable. |
 | `worker.py` | Spawns worker processes for Python queue + per-`LLMConfig` LLM queues (`llm_queue_name_for_config`). |
 
-**Invariant:** `enqueue_submission_evaluation` chooses `process_code_evaluation` vs `process_submission_evaluation` based on `EvaluationTaskType` (grep `if task.task_type`).
+**Invariant:** `enqueue_submission_evaluation` is for `CODE_EVALUATION` only. LLM tasks use their specific enqueue functions and per-config LLM queues.
 
 ## Status transitions (high level)
 
@@ -73,8 +73,8 @@ After code evaluation, `EvaluationResult` stores **relative** paths (under confi
 
 ## Common misconceptions
 
-- **`QuestionType.NOTEBOOK` vs file-upload `.ipynb`:** product may still have “notebook” typed questions for LLM workflows while **Docker notebook execution** is legacy/stubbed—verify `create_*` and `process_*` for the question type you touch.
-- **`FILE_LLM` vs old PDF/formatted values:** current file-upload LLM questions are unified under `file_llm`, but legacy `pdf_llm` and `formatted_text_llm` values still appear in constants, templates, and compatibility branches.
+- **`.ipynb` is a file upload format, not a question type:** it flows through `QuestionType.FILE_LLM` and `FileQuestionConfig.accepted_extensions`.
+- **PDF/text/notebook file review is unified:** `file_llm` chooses extraction behavior by extension.
 - **Route success ≠ evaluation done:** creation endpoints often return redirect while worker runs asynchronously.
 
 ## Source of truth

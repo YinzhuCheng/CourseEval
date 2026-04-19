@@ -15,10 +15,10 @@ Humans may prefer `README.md` for onboarding narrative; agents should use this f
 Supported workflows (see `README.md` for user-facing detail):
 
 - Code questions: Python, C, C++ via Docker-isolated runner (`runner/execute_code.py`).
-- File / LLM paths: PDF, formatted text, `.ipynb` as file upload with LLM pipelines in `app/services/llm.py` and related services.
+- File / LLM paths: PDF, text/Markdown/TeX, `.ipynb` as file upload with LLM pipelines in `app/services/llm.py` and related services.
 - Gradebook snapshots and teacher analytics built on `FinalGradeSnapshot` and submission history.
 
-**Legacy:** Standalone notebook *execution* jobs and `/jobs/*` UI are retired; `app/routes/jobs.py` redirects. Some model/table names still say `notebook` for historical reasons—verify behavior in `app/services/submissions.py` and `app/models.py`.
+**v0 baseline:** Active question types are `code`, `short_answer`, and `file_llm`. Standalone notebook execution routes, `Job`/`Notebook` ORM models, and split file-question enum values have been removed.
 
 ---
 
@@ -31,7 +31,7 @@ Supported workflows (see `README.md` for user-facing detail):
 | HTML UI | **Jinja2** templates | `app/templates/`, `app/web.py` (`render_template`) |
 | Sessions | Starlette **SessionMiddleware** | `app/main.py` |
 | Background work | **Redis + RQ** queues | `app/services/submissions.py` (`enqueue_*`, `get_queue`), `worker.py` |
-| Code sandbox | **Docker** + runner script | `app/services/submissions.py` (`run_code_in_docker`, `run_job_in_docker`), `runner/execute_code.py` |
+| Code sandbox | **Docker** + runner script | `app/services/submissions.py` (`run_code_in_docker`), `runner/execute_code.py` |
 | LLM calls | HTTP clients / provider-specific logic | `app/services/llm.py`, `app/services/llm_retry.py`, `app/services/llm_token_usage.py` |
 | i18n | Python dict catalogs + template helpers | `app/i18n.py`, `app/enum_labels.py` |
 
@@ -47,7 +47,7 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 | `app/config.py`, `app/env.py` | Settings from environment |
 | `app/constants.py` | Enums and string constants used across ORM and services |
 | `app/models.py` | SQLAlchemy models (source of truth for schema) |
-| `app/db.py` | Engine, session, migrations/bootstrap helpers |
+| `app/db.py` | Engine, session, v0 schema bootstrap |
 | `app/auth.py` | Password hashing, session user loading, platform/ account role helpers |
 | `app/routes/` | HTTP entrypoints (thin: validate, call service, redirect/render) |
 | `app/services/` | Core domain logic (submissions, courses, LLM, permissions, …) |
@@ -103,8 +103,7 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 ### Scoring / feedback / gradebook snapshots
 
 - **Owns:** `Feedback` rows, `EvaluationResult` scores, **effective** score resolution, `FinalGradeSnapshot` updates for analytics and reveal.
-- **Source of truth:** `app/services/submissions.py` — `resolve_submission_score`, `update_final_grade_snapshot`, `submission_requires_teacher_confirmation`, teacher grading in `app/routes/teacher.py`.
-- **Caution:** `app/services/courses.py` defines a **different** `resolve_submission_score` with a distinct signature—used for analytics/list paths, not the main submission pipeline (see `docs/architecture/scoring-pipeline.md`).
+- **Source of truth:** `app/services/scoring.py` for effective score and teacher-confirmation rules; `app/services/submissions.py` for `update_final_grade_snapshot`; teacher grading in `app/routes/teacher.py`.
 
 ### LLM config / usage / quota
 
@@ -141,7 +140,7 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 
 ### Evaluation lifecycle (worker)
 
-1. RQ runs `process_code_evaluation`, `process_submission_evaluation` (legacy notebook path), or LLM processors (`process_*_llm_evaluation`).
+1. RQ runs `process_code_evaluation` or LLM processors (`process_*_llm_evaluation`).
 2. They mutate `Submission`, `EvaluationTask`, create `EvaluationResult` / `Feedback`, then `commit`.
 3. **Artifacts:** `EvaluationResult` stores relative paths to stdout/stderr/summary; templates load via services.
 
@@ -182,26 +181,40 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 
 ## 7. Common traps (do-not-assume)
 
-- **Do not** infer behavior from file names alone (e.g. `notebook` types vs retired execution pipeline).
+- **Do not** reintroduce retired compatibility paths unless a migration plan explicitly calls for them.
 - **Do not** assume a FastAPI route owns all business rules—large pieces live in `app/services/submissions.py`.
 - **Do not** change a template’s variables without checking the route in `app/routes/*` and `app/web.py` context.
 - **Do not** assume renaming an enum value in `constants.py` is safe without DB migration / existing row values.
 - **Do not** assume `Submission.status` and `EvaluationTask.status` stay in sync automatically—verify both when changing worker code.
-- **Two different `resolve_submission_score` functions** exist (`submissions.py` vs `courses.py`)—different call sites; changing one may not fix the other.
+- `resolve_submission_score` has one definition in `app/services/scoring.py`; keep it that way.
 - **Branch names** are not architecture documentation.
 
 ---
 
 ## 8. Validation commands
 
-From repository root (virtualenv or `pip install -r requirements.txt` as needed):
+From repository root, prefer the shared verification script:
 
 ```bash
-python3 -m compileall app runner -q
-python3 -m pytest tests/ -q
+bash scripts/verify.sh
 ```
 
-There is **no dedicated lint script** in-repo; rely on tests and compile checks unless the host environment adds ruff/mypy.
+For a fresh local environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+bash scripts/verify.sh
+```
+
+Agent-friendly validation convention:
+
+- After code changes, run `bash scripts/verify.sh` first.
+- For documentation-only changes, run at least `python3 -m compileall app runner -q`, or explicitly state why pytest was not run.
+- Do not modify unrelated files while chasing validation failures unless the task explicitly asks for cleanup.
+
+There is **no dedicated lint script** in-repo; rely on the verification script unless the host environment adds ruff/mypy.
 
 ---
 

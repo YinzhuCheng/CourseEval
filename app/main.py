@@ -1,15 +1,17 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import JSONResponse
+from starlette.requests import Request
+from starlette.responses import JSONResponse, RedirectResponse
 
+from app.auth import get_current_user, landing_path_for_user
 from app.config import get_settings
-from app.db import ensure_data_directories, init_database
+from app.db import ensure_data_directories, get_db, init_database
 from app.routes.admin import router as admin_router
 from app.routes.auth import router as auth_router
-from app.routes.jobs import router as jobs_router
 from app.routes.course_content import router as course_content_router
 from app.routes.student import router as student_router
 from app.routes.teacher import router as teacher_router
@@ -36,7 +38,6 @@ app.include_router(student_router)
 app.include_router(course_content_router)
 app.include_router(teacher_router)
 app.include_router(admin_router)
-app.include_router(jobs_router)
 
 
 @app.on_event("startup")
@@ -48,3 +49,9 @@ def startup() -> None:
 @app.get("/healthz")
 def healthz():
     return JSONResponse({"status": "ok"})
+
+
+@app.get("/")
+def home(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    return RedirectResponse(url=landing_path_for_user(user), status_code=303)

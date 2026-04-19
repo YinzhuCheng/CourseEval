@@ -56,7 +56,7 @@ Grouped by **responsibility**, not directory listing. Use this to answer: *where
 | Teacher course UI, members, covers | `app/routes/teacher.py` |
 | Models | `Course`, `CourseMember`, related in `app/models.py` |
 
-**Note:** `app/services/courses.py` contains analytics helpers and a **second** `resolve_submission_score`—see `docs/architecture/scoring-pipeline.md`.
+**Note:** effective score resolution now lives in `app/services/scoring.py`; keep course listing and analytics code on that shared helper.
 
 **Tests:** `tests/test_open_community_course.py`, others touching courses.
 
@@ -97,7 +97,6 @@ Grouped by **responsibility**, not directory listing. Use this to answer: *where
 |------|--------|
 | RQ queue names, enqueue, job functions | `app/services/submissions.py` (`enqueue_*`, `process_*`) |
 | Worker process layout | `worker.py` |
-| Legacy route redirects | `app/routes/jobs.py` |
 
 **Invariant:** `EvaluationTask.task_type` selects processor in enqueue paths—grep `EvaluationTaskType`.
 
@@ -107,7 +106,8 @@ Grouped by **responsibility**, not directory listing. Use this to answer: *where
 
 | Role | Files |
 |------|--------|
-| Effective score resolution, teacher gating | `app/services/submissions.py` (`resolve_submission_score`, `submission_requires_teacher_confirmation`, `update_final_grade_snapshot`) |
+| Effective score resolution, teacher gating | `app/services/scoring.py` |
+| Gradebook snapshot recompute | `app/services/submissions.py` (`update_final_grade_snapshot`) |
 | Teacher grading HTTP | `app/routes/teacher.py` (`grade_submission`, related) |
 | Teacher analytics queries | `app/services/teacher_analytics.py` |
 | Student submission UI | `app/templates/student_submission_detail.html` |
@@ -125,7 +125,7 @@ Grouped by **responsibility**, not directory listing. Use this to answer: *where
 | Prompt text assembly | `app/services/llm_grading_prompts.py` |
 | Token accounting | `app/services/llm_token_usage.py` |
 | Admin CRUD / tests | `app/routes/admin.py` |
-| Notebook multimodal / PDF images | `app/services/notebook_multimodal.py` |
+| `.ipynb` multimodal extraction / PDF images | `app/services/notebook_multimodal.py`, `app/services/submissions.py` |
 
 **Tests:** `tests/test_llm_retry.py`, `tests/test_llm_token_usage.py`, `tests/test_file_llm_image_inputs.py`.
 
@@ -135,7 +135,7 @@ Grouped by **responsibility**, not directory listing. Use this to answer: *where
 
 | Role | Files |
 |------|--------|
-| Docker invocation, host bind mounts, summary ingestion | `app/services/submissions.py` (`run_code_in_docker`, `run_job_in_docker`, artifact readers) |
+| Docker invocation, host bind mounts, summary ingestion | `app/services/submissions.py` (`run_code_in_docker`, artifact readers) |
 | In-container test driver | `runner/execute_code.py` |
 | Default runner image / package metadata for UI | `app/runtime_support.py` |
 
@@ -170,11 +170,11 @@ Changing copy: often **both** `i18n.py` and `enum_labels.py` (for enum-backed la
 
 | Role | Files |
 |------|--------|
-| Engine, session factory, init | `app/db.py` |
+| Engine, session factory, v0 bootstrap | `app/db.py` |
 | Schema | `app/models.py` |
 | One-off maintenance | `scripts/init_db.py`, `scripts/init_super_admin.py` |
 
-**Migration note:** There is no Alembic tree. Startup uses `init_database()` plus compatibility shims in `app/db.py`; see `docs/deployment-and-upgrades.md`.
+**Migration note:** There is no Alembic tree. Startup creates the v0 schema and seeds the open community course; see `docs/deployment-and-upgrades.md` before adding upgrade scripts.
 
 ## Operations and review notes
 

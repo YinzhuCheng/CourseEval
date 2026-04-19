@@ -12,11 +12,11 @@ Describe how a **numeric score** visible to students/teachers is derived from **
 | `EvaluationResult` | Holds `auto_score`, `visible_score`, `hidden_score`, `final_score`, and `summary_json` from code runner. |
 | `FinalGradeSnapshot` | One row per (student, question) for gradebook / analytics; updated by `update_final_grade_snapshot`. |
 
-Models: `app/models.py`. Logic: `app/services/submissions.py`.
+Models: `app/models.py`. Effective score logic: `app/services/scoring.py`. Snapshot recompute: `app/services/submissions.py`.
 
 ## Resolution order (student-facing effective score)
 
-**Authoritative for submission UI:** `resolve_submission_score` in `app/services/submissions.py`.
+**Authoritative for submission UI:** `resolve_submission_score` in `app/services/scoring.py`.
 
 Order (simplified—read function body for edge cases):
 
@@ -25,7 +25,7 @@ Order (simplified—read function body for edge cases):
 3. Else latest **LLM** `Feedback` score **unless** `submission_requires_teacher_confirmation(submission)` is true—in that strict mode, LLM score is suppressed until teacher feedback exists.
 4. Else latest **auto** `Feedback` from code evaluation path.
 
-Related helpers in same file:
+Related helpers in the same file:
 
 - `submission_requires_teacher_confirmation` — reads `short_answer_config` or `file_question_config` flags.
 - `submission_eligible_for_gradebook` — includes edge case where strict mode + LLM exists but teacher has not scored yet.
@@ -47,15 +47,11 @@ Related helpers in same file:
 
 **Route:** `grade_submission` (POST) in `app/routes/teacher.py` — creates teacher `Feedback`, then should trigger snapshot recompute (grep `update_final_grade_snapshot` in that flow).
 
-## ⚠️ Duplicate `resolve_submission_score` name
+## Single Score Resolver
 
-`app/services/courses.py` defines **`resolve_submission_score(submission, latest_feedback)`** with a **different signature and priority rules** (teacher → LLM → auto → evaluation result).
+There should be exactly one `resolve_submission_score` definition in the repository: `app/services/scoring.py`.
 
-It is used on **some listing/analytics code paths**, not the main student submission detail builder.
-
-**Invariant for agents:** If you change scoring semantics, grep **both** symbols and reconcile or rename to reduce future confusion (requires careful refactor + tests).
-
-This is a confirmed code-structure inconsistency, not just a documentation warning. It is also tracked in `docs/known-issues.md`.
+Analytics, routes, and submission views should import that resolver or the related teacher-review helpers instead of duplicating priority rules.
 
 ## Templates & student view
 
@@ -75,9 +71,10 @@ This is a confirmed code-structure inconsistency, not just a documentation warni
 
 ## Source of truth
 
-1. `app/services/submissions.py` — `resolve_submission_score`, `update_final_grade_snapshot`, confirmation flags.
-2. `app/routes/teacher.py` — teacher feedback persistence.
-3. `app/models.py` — schema for `Feedback`, `EvaluationResult`, `FinalGradeSnapshot`.
+1. `app/services/scoring.py` — `resolve_submission_score`, confirmation flags.
+2. `app/services/submissions.py` — `update_final_grade_snapshot`.
+3. `app/routes/teacher.py` — teacher feedback persistence.
+4. `app/models.py` — schema for `Feedback`, `EvaluationResult`, `FinalGradeSnapshot`.
 
 ## Coordinated changes
 

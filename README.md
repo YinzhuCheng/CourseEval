@@ -5,10 +5,10 @@ CourseEval is a lightweight course-assignment evaluation platform for teaching t
 The current product direction is:
 
 - **Code evaluation** for executable Python, C, and C++ programming questions
-- **File / LLM-reviewed evaluation** for `.pdf`, `.txt`, `.tex`, and `.ipynb` submissions
+- **File / LLM-reviewed evaluation** for `.pdf`, `.txt`, `.tex`, `.md`, and `.ipynb` submissions
 - **Teacher-confirmed grading** for workflows where automatic suggestions should not directly become final grades
 
-The old standalone Notebook execution workflow has been retired. Existing `/dashboard` and `/jobs/*` links now redirect users to the in-product code runtime help page so they can move to the supported flows.
+The v0 baseline keeps only three active question types: code, short answer, and file / LLM-reviewed upload.
 
 ## Repository map for coding agents
 
@@ -33,8 +33,7 @@ Please read **AGENTS.md** and the relevant `docs/` pages **before making non-tri
 - View courses, assignments, questions, and submission history
 - Submit:
   - `.py`, `.c`, `.cpp`, `.cc`, `.cxx`, or `.zip` files for code questions
-  - `.pdf` files for PDF / LLM-reviewed questions
-  - `.txt`, `.tex`, or `.ipynb` files for formatted-text / LLM-reviewed questions
+  - `.pdf`, `.txt`, `.tex`, `.md`, or `.ipynb` files for file / LLM-reviewed questions
 - View evaluation progress, feedback, and downloadable artifacts
 - Read built-in code runtime help inside the product UI
 
@@ -45,7 +44,7 @@ Please read **AGENTS.md** and the relevant `docs/` pages **before making non-tri
 - Create assignments
 - Create question types for:
   - Python, C, and C++ code evaluation
-  - file upload / LLM-reviewed evaluation with configurable `.pdf`, `.txt`, `.tex`, and `.ipynb` extensions
+  - file upload / LLM-reviewed evaluation with configurable `.pdf`, `.txt`, `.tex`, `.md`, and `.ipynb` extensions
 - Configure code test cases, allowed language sets, reference solutions, scoring rules, and submission limits
 - Review submissions and confirm final grades
 
@@ -120,12 +119,12 @@ Supported submission file types:
 - `.pdf`
 - `.txt`
 - `.tex`
+- `.md`
 - `.ipynb`
 
 For `.ipynb`:
 
 - `.ipynb` is supported through the **file / LLM-reviewed** route
-- The old standalone Notebook execution page is **not** part of the active workflow anymore
 - Teachers can require notebooks to already contain executed outputs before upload
 
 Typical flow:
@@ -155,8 +154,9 @@ Typical flow:
 - `app/routes/student.py`: student pages and submission entrypoints
 - `app/routes/teacher.py`: teacher course, assignment, question, and grading pages
 - `app/routes/admin.py`: admin pages and runtime / LLM configuration pages
-- `app/routes/jobs.py`: compatibility redirects for the retired notebook runner routes
 - `app/services/submissions.py`: submission orchestration and background evaluation logic
+- `app/services/scoring.py`: effective score resolution and teacher-confirmation gating
+- `app/services/storage_paths.py`: shared data-directory path safety helpers
 - `app/services/courses.py`: course, assignment, and question helpers
 - `app/runtime_support.py`: canonical language and package support matrix used by the help UI
 - `runner/requirements.txt`: Python packages installed into the default runner image
@@ -177,13 +177,16 @@ Typical flow:
 │   ├── routes/
 │   │   ├── admin.py
 │   │   ├── auth.py
-│   │   ├── jobs.py
+│   │   ├── course_content.py
 │   │   ├── student.py
-│   │   └── teacher.py
+│   │   ├── teacher.py
+│   │   └── uploads.py
 │   ├── services/
 │   │   ├── courses.py
 │   │   ├── llm.py
 │   │   ├── permissions.py
+│   │   ├── scoring.py
+│   │   ├── storage_paths.py
 │   │   └── submissions.py
 │   ├── static/
 │   │   └── style.css
@@ -204,13 +207,22 @@ Typical flow:
 
 ## Local development
 
-### 1. Install dependencies
+### 1. Create a virtual environment
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-### 2. Prepare environment file
+### 2. Install development dependencies
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+`requirements-dev.txt` includes the app dependencies plus the test runner used by the shared verification script.
+
+### 3. Prepare environment file
 
 ```bash
 cp .env.example .env
@@ -218,13 +230,21 @@ cp .env.example .env
 
 Update `SECRET_KEY` before real deployment.
 
-### 3. Initialize the database
+### 4. Initialize the database
 
 ```bash
 python scripts/init_db.py
 ```
 
-### 4. Start Redis
+### 5. Run local verification
+
+```bash
+bash scripts/verify.sh
+```
+
+This is the standard verification entrypoint for local development, Codex, and other agents. It runs Python compilation checks and the pytest suite.
+
+### 6. Start Redis
 
 If Redis is already installed:
 
@@ -238,21 +258,21 @@ Or with Docker:
 docker run --rm -p 6379:6379 redis:7-alpine
 ```
 
-### 5. Build the default runner image
+### 7. Build the default runner image
 
 ```bash
-docker build -t notebook-runner-mvp:latest runner
+docker build -t courseeval-runner:latest runner
 ```
 
 This image contains the default Docker-isolated code runtime used for Python, C, and C++ evaluation. To add Python packages to the default runtime, update both `app/runtime_support.py` and `runner/requirements.txt`, then rebuild this image.
 
-### 6. Start the web service
+### 8. Start the web service
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 7. Start the worker
+### 9. Start the worker
 
 In another shell:
 
@@ -381,9 +401,10 @@ High-level deployment requirements:
 
 Migration / upgrade summary:
 
-- Startup runs `init_database()`, which calls `metadata.create_all()` plus hand-written compatibility shims in `app/db.py`
+- Startup runs `init_database()`, which calls `metadata.create_all()` and seeds the open community course
 - There is no Alembic migration tree in this repository
-- `create_all()` will not rewrite existing columns or constraints; schema changes need explicit idempotent upgrade code in `app/db.py`
+- `create_all()` will not rewrite existing columns or constraints; schema changes need an explicit migration script, an idempotent upgrade function, or a documented Alembic adoption
+- Run `bash scripts/verify.sh` in an environment with `requirements-dev.txt` installed
 - Test upgrades against a copy of production data before deploying
 
 ## Data model notes
@@ -404,14 +425,6 @@ Main teaching-domain tables include:
 - `evaluation_results`
 - `feedback`
 - `final_grade_snapshots`
-
-Legacy compatibility tables are still present in the schema:
-
-- `notebooks`
-- `jobs`
-- `job_outputs`
-
-Those tables remain only for backward compatibility and route migration. They are no longer the primary product workflow.
 
 ## Artifacts
 
@@ -452,7 +465,7 @@ Check:
 - The runner image exists:
 
 ```bash
-docker images | rg notebook-runner-mvp
+docker images | rg courseeval-runner
 ```
 
 ### Session login does not persist
@@ -472,3 +485,15 @@ Check:
 - No automatic cleanup for old artifacts
 - No advanced sandbox hardening beyond Docker flags
 - Intended for a single worker process and small-scale deployments
+
+## Upgrade and migration policy
+
+CourseEval is currently treated as a clean v0 baseline. Startup creates the current schema with SQLAlchemy metadata and seeds the open community course. It does not preserve retired notebook/job tables or legacy question enum values.
+
+For future schema changes:
+
+- Write an explicit migration note in `docs/deployment-and-upgrades.md`
+- Back up `DATABASE_URL` and `DATA_DIR` before deploying
+- Keep enum values stable once real deployments depend on them
+- Add a migration script or idempotent upgrade step before removing a column/table that may exist in deployed data
+- Run `bash scripts/verify.sh` in an environment with `requirements-dev.txt` installed

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.constants import QuestionType
 from app.models import FinalGradeSnapshot, Question, Submission
 from app.services.assignment_visibility import assignment_reference_bundle_public
-from app.services.submissions import absolute_data_path, read_submission_text_artifact
+from app.services.storage_paths import absolute_data_path
+from app.services.submissions import read_submission_text_artifact
 
 
 def reveal_bundle_for_question(db: Session, question: Question) -> dict:
@@ -39,10 +40,6 @@ def reveal_bundle_for_question(db: Session, question: Question) -> dict:
             parts.append("### C++\n```\n" + c.reference_solution_cpp.strip() + "\n```")
         reference_text = "\n\n".join(parts) if parts else None
         rubric_text = "Visible/hidden tests per question configuration."
-    elif qt == QuestionType.NOTEBOOK and question.notebook_config:
-        nbc = question.notebook_config
-        reference_text = (nbc.reference_answer_text or "").strip() or None
-        rubric_text = (nbc.llm_scoring_rubric or "").strip() or None
     elif question.file_question_config:
         fqc = question.file_question_config
         reference_text = (fqc.reference_answer_text or "").strip() or None
@@ -102,8 +99,4 @@ def _submission_preview_text(submission: Submission) -> str:
             return ""
     if submission.answer_text:
         return (submission.answer_text or "")[:12000]
-    if qt == QuestionType.NOTEBOOK:
-        return read_submission_text_artifact(submission, "executed_notebook", max_chars=12000) or read_submission_text_artifact(
-            submission, "html", max_chars=8000
-        )
     return read_submission_text_artifact(submission, "summary", max_chars=8000)

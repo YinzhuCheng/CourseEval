@@ -106,7 +106,7 @@
         <h2 class="h5 mb-3">
           {% if submission.submission_type.value == "code" %}
           {{ lx("Submitted code", "提交的代码") }}
-          {% elif submission.submission_type.value in ["pdf_llm", "formatted_text_llm", "file_llm"] %}
+          {% elif submission.submission_type.value == "file_llm" %}
           {{ lx("Extracted submission text", "提取后的提交文本") }}
           {% else %}
           {{ lx("Student answer", "学生答案") }}

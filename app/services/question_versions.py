@@ -58,15 +58,6 @@ def _serialize_question(question: Question) -> dict[str, Any]:
             "teacher_confirmation_required": cfg.teacher_confirmation_required,
             "notebook_outputs_required": cfg.notebook_outputs_required,
         }
-    if question.notebook_config:
-        cfg = question.notebook_config
-        payload["notebook_question_config"] = {
-            "llm_score_weight": str(cfg.llm_score_weight),
-            "llm_scoring_rubric": cfg.llm_scoring_rubric,
-            "llm_feedback_enabled": cfg.llm_feedback_enabled,
-            "reference_answer_text": cfg.reference_answer_text,
-            "reference_answer_file_path": cfg.reference_answer_file_path,
-        }
     return payload
 
 
@@ -163,21 +154,6 @@ def restore_question_from_version_payload(db: Session, question: Question, paylo
             cfg.teacher_confirmation_required = bool(fq["teacher_confirmation_required"])
         if fq.get("notebook_outputs_required") is not None:
             cfg.notebook_outputs_required = bool(fq["notebook_outputs_required"])
-
-    nb = payload.get("notebook_question_config")
-    if nb and question.notebook_config:
-        cfg = question.notebook_config
-        if nb.get("llm_score_weight") is not None:
-            cfg.llm_score_weight = Decimal(str(nb["llm_score_weight"]))
-        if nb.get("llm_scoring_rubric") is not None:
-            cfg.llm_scoring_rubric = nb.get("llm_scoring_rubric")
-        if nb.get("llm_feedback_enabled") is not None:
-            cfg.llm_feedback_enabled = bool(nb["llm_feedback_enabled"])
-        if nb.get("reference_answer_text") is not None:
-            cfg.reference_answer_text = str(nb["reference_answer_text"])
-        if "reference_answer_file_path" in nb:
-            cfg.reference_answer_file_path = nb.get("reference_answer_file_path")
-
 
 def ensure_question_has_current_version(db: Session, question: Question) -> None:
     if question.current_question_version_id is not None:

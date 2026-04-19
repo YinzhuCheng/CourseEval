@@ -234,13 +234,6 @@
             <label class="form-label">{{ lx("CPU", "CPU") }}</label>
             <input class="form-control" name="cpu_limit" value="{{ pyc.cpu_limit }}" />
           </div>
-          <div class="col-12">
-            <label class="form-label">{{ lx("Allow network", "允许网络") }}</label>
-            <select class="form-select" name="allow_network">
-              <option value="false" {% if not pyc.allow_network %}selected{% endif %}>{{ lx("No", "否") }}</option>
-              <option value="true" {% if pyc.allow_network %}selected{% endif %}>{{ lx("Yes", "是") }}</option>
-            </select>
-          </div>
           {% set vt = pyc.visible_tests() %}
           {% set ht = pyc.hidden_tests() %}
           <div class="col-md-6">
@@ -295,31 +288,6 @@
             <label class="form-label">{{ lx("Reference solution - C++", "参考答案 - C++") }}</label>
             <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5">{{ pyc.reference_solution_cpp }}</textarea>
           </div>
-          {% elif question.question_type.value == 'notebook' and question.notebook_config %}
-          {% set nbc = question.notebook_config %}
-          <div class="col-md-6">
-            <label class="form-label">{{ lx("LLM score weight", "LLM 分数权重") }}</label>
-            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" value="{{ nbc.llm_score_weight }}" />
-          </div>
-          <div class="col-12">
-            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
-            <textarea class="form-control" name="notebook_llm_rubric" rows="5">{{ nbc.llm_scoring_rubric or '' }}</textarea>
-          </div>
-          <div class="col-12">
-            <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
-            <textarea class="form-control" name="reference_answer" rows="4">{{ nbc.reference_answer_text or '' }}</textarea>
-          </div>
-          <div class="col-12">
-            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
-            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
-            {% if nbc.reference_answer_file_path %}
-            <div class="form-text small">{{ lx("Current file is stored on the server.", "当前已在服务器保存附件。") }}</div>
-            <div class="form-check mt-1">
-              <input class="form-check-input" type="checkbox" name="clear_reference_answer_file" value="true" id="clear_ref_nb" />
-              <label class="form-check-label" for="clear_ref_nb">{{ lx("Remove uploaded reference file", "删除已上传的参考答案附件") }}</label>
-            </div>
-            {% endif %}
-          </div>
           {% elif question.file_question_config %}
           {% set fqc = question.file_question_config %}
           {% set ext_csv = ',' ~ fqc.accepted_extensions.lower().replace(' ', '') ~ ',' %}
@@ -368,7 +336,7 @@
           </div>
           {% endif %}
 
-          {% if question.short_answer_config or question.code_config or question.file_question_config or question.notebook_config %}
+          {% if question.short_answer_config or question.code_config or question.file_question_config %}
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Save changes", "保存修改") }}</button>
           </div>

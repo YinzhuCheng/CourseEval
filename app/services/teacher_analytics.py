@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.constants import CourseRole, MembershipStatus, SubmissionStatus
 from app.models import Assignment, CourseMember, FinalGradeSnapshot, Question, Submission, User
-from app.services.submissions import is_submission_pending_teacher_review
+from app.services.scoring import is_submission_pending_teacher_review
 
 
 def active_student_ids(db: Session, course_id: int) -> list[int]:

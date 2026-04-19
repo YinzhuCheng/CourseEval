@@ -13,11 +13,8 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "scoring_rule": {"latest": "Latest attempt", "highest": "Highest score"},
         "submission_limit_mode": {"daily": "Per day", "total": "Total cap", "unlimited": "No cap"},
         "question_type": {
-            "notebook": "Notebook (.ipynb) / LLM",
             "short_answer": "Short answer",
             "code": "Code question",
-            "pdf_llm": "PDF / LLM",
-            "formatted_text_llm": "Formatted text / LLM",
             "file_llm": "File upload / LLM",
         },
         "submission_status": {
@@ -44,7 +41,6 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
             "claude": "Claude",
         },
         "llm_test_status": {"never": "Never tested", "success": "OK", "failed": "Failed"},
-        "job_status": {"queued": "Queued", "running": "Running", "success": "Success", "failed": "Failed"},
         "runtime_scope": {"platform": "Platform", "course": "Course"},
     },
     "zh": {
@@ -52,11 +48,8 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "scoring_rule": {"latest": "按最后一次", "highest": "按最高分"},
         "submission_limit_mode": {"daily": "每日上限", "total": "总次数上限", "unlimited": "不限制"},
         "question_type": {
-            "notebook": "Notebook（.ipynb）/ LLM",
             "short_answer": "简答题",
             "code": "代码题",
-            "pdf_llm": "PDF / LLM",
-            "formatted_text_llm": "格式化文本 / LLM",
             "file_llm": "文件上传 / LLM",
         },
         "submission_status": {
@@ -83,7 +76,6 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
             "claude": "Claude",
         },
         "llm_test_status": {"never": "未测试", "success": "通过", "failed": "失败"},
-        "job_status": {"queued": "排队中", "running": "运行中", "success": "成功", "failed": "失败"},
         "runtime_scope": {"platform": "平台", "course": "课程"},
     },
 }

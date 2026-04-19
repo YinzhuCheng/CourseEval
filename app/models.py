@@ -15,7 +15,6 @@ from app.constants import (
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
-    JobStatus,
     LLMProvider,
     LLMScope,
     LLMTestStatus,
@@ -107,8 +106,6 @@ class User(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    notebooks: Mapped[list["Notebook"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    jobs: Mapped[list["Job"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     course_memberships: Mapped[list["CourseMember"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -155,20 +152,6 @@ class User(Base):
         if self.account_role == AccountRole.TEACHER:
             return UserRole.TEACHER
         return UserRole.STUDENT
-
-
-class Notebook(Base):
-    __tablename__ = "notebooks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    stored_path: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
-    uploaded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
-    user: Mapped[User] = relationship(back_populates="notebooks")
-    jobs: Mapped[list["Job"]] = relationship(back_populates="notebook", cascade="all, delete-orphan")
-    submissions: Mapped[list["Submission"]] = relationship(back_populates="notebook")
 
 
 class Course(Base):
@@ -482,11 +465,6 @@ class Question(Base):
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     assignment: Mapped[Assignment] = relationship(back_populates="questions")
-    notebook_config: Mapped["NotebookQuestionConfig | None"] = relationship(
-        back_populates="question",
-        cascade="all, delete-orphan",
-        uselist=False,
-    )
     code_config: Mapped["CodeQuestionConfig | None"] = relationship(
         back_populates="question",
         cascade="all, delete-orphan",
@@ -555,36 +533,6 @@ class QuestionVersion(Base):
 
 
 Index("ix_question_versions_question_version", QuestionVersion.question_id, QuestionVersion.version_number, unique=True)
-
-
-class NotebookQuestionConfig(Base):
-    __tablename__ = "notebook_question_configs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    question_id: Mapped[int] = mapped_column(
-        ForeignKey("questions.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    time_limit_seconds: Mapped[int] = mapped_column(Integer, default=300, nullable=False)
-    memory_limit_mb: Mapped[int] = mapped_column(Integer, default=1024, nullable=False)
-    cpu_limit: Mapped[str] = mapped_column(String(16), default="1", nullable=False)
-    allow_network: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    visible_tests_source: Mapped[str | None] = mapped_column(Text, nullable=True)
-    hidden_tests_source: Mapped[str | None] = mapped_column(Text, nullable=True)
-    execution_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
-    visible_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=100, nullable=False)
-    hidden_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
-    llm_score_weight: Mapped[Numeric] = mapped_column(Numeric(10, 2), default=0, nullable=False)
-    llm_scoring_rubric: Mapped[str | None] = mapped_column(Text, nullable=True)
-    llm_feedback_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    reference_answer_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    reference_answer_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    question: Mapped[Question] = relationship(back_populates="notebook_config")
 
 
 class CodeQuestionConfig(Base):
@@ -711,7 +659,6 @@ class Submission(Base):
         index=True,
     )
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    notebook_id: Mapped[int | None] = mapped_column(ForeignKey("notebooks.id", ondelete="SET NULL"), nullable=True)
     stored_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_language: Mapped[CodeLanguage | None] = mapped_column(
@@ -742,7 +689,6 @@ class Submission(Base):
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
     question: Mapped[Question] = relationship(back_populates="submissions")
     user: Mapped[User] = relationship(back_populates="submissions")
-    notebook: Mapped[Notebook | None] = relationship(back_populates="submissions")
     evaluation_tasks: Mapped[list["EvaluationTask"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
     evaluation_results: Mapped[list["EvaluationResult"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
     feedback_items: Mapped[list["Feedback"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
@@ -764,7 +710,7 @@ class EvaluationTask(Base):
     task_type: Mapped[EvaluationTaskType] = mapped_column(
         Enum(EvaluationTaskType, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,
-        default=EvaluationTaskType.NOTEBOOK_EVALUATION,
+        default=EvaluationTaskType.CODE_EVALUATION,
     )
     backend_type: Mapped[str] = mapped_column(String(32), default="rq", nullable=False)
     backend_job_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
@@ -807,8 +753,6 @@ class EvaluationResult(Base):
     log_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     stdout_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     stderr_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    rendered_html_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    executed_notebook_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -959,47 +903,3 @@ class DiscussionPost(Base):
 
 
 Index("ix_discussion_posts_topic_created", DiscussionPost.topic_id, DiscussionPost.created_at)
-
-
-class Job(Base):
-    __tablename__ = "jobs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    notebook_id: Mapped[int] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False, index=True)
-    status: Mapped[JobStatus] = mapped_column(
-        Enum(JobStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
-        nullable=False,
-        default=JobStatus.QUEUED,
-        index=True,
-    )
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    user: Mapped[User] = relationship(back_populates="jobs")
-    notebook: Mapped[Notebook] = relationship(back_populates="jobs")
-    output: Mapped["JobOutput | None"] = relationship(back_populates="job", cascade="all, delete-orphan", uselist=False)
-
-
-Index("ix_jobs_user_status_created", Job.user_id, Job.status, Job.created_at)
-
-
-class JobOutput(Base):
-    __tablename__ = "job_outputs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    job_id: Mapped[int] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    executed_notebook_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    html_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    stdout_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    stderr_path: Mapped[str] = mapped_column(String(512), nullable=False)
-
-    job: Mapped[Job] = relationship(back_populates="output")

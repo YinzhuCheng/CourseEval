@@ -3,10 +3,7 @@
 {% block title %}{{ question.title }} - {{ t("site.title") }}{% endblock %}
 
 {% block content %}
-{% set accepted = question.file_question_config.accepted_extensions if question.file_question_config and question.file_question_config.accepted_extensions else '.pdf' if question.question_type.value == 'pdf_llm' else '.txt,.tex,.ipynb' %}
-{% if question.question_type.value == 'file_llm' and question.file_question_config %}
-  {% set accepted = question.file_question_config.accepted_extensions %}
-{% endif %}
+{% set accepted = question.file_question_config.accepted_extensions if question.file_question_config and question.file_question_config.accepted_extensions else '.pdf,.txt,.tex,.md,.ipynb' %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
     <h1 class="h3 mb-1">{{ question.title }}</h1>
@@ -42,25 +39,7 @@
       <div class="card-body p-4">
         <h2 class="h5 mb-3">{{ lx("Submit your work", "提交作业") }}</h2>
 
-        {% if question.question_type.value == "notebook" %}
-        <form method="post" action="/student/questions/{{ question.id }}/submit-notebook" enctype="multipart/form-data" class="row g-3">
-          <div class="col-12">
-            <div class="section-note">
-              {{ lx(
-                "Upload your .ipynb file. It will be converted to text for automated tests (if any) and LLM review. Diagram-heavy answers may lose image detail in text form—consider a PDF-based question if you rely on figures.",
-                "请上传 .ipynb 文件。系统会先转为文本用于自动测试（如有）和 LLM 评阅。若答案强依赖示意图，纯文本可能丢失图片信息，可考虑使用支持 PDF 的题目。",
-              ) }}
-            </div>
-          </div>
-          <div class="col-12">
-            <label class="form-label">{{ lx("Notebook file", "Notebook 文件") }}</label>
-            <input class="form-control" type="file" name="notebook_file" accept=".ipynb,application/x-ipynb+json" required />
-          </div>
-          <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">{{ lx("Upload notebook", "上传 Notebook") }}</button>
-          </div>
-        </form>
-        {% elif question.question_type.value == "code" %}
+        {% if question.question_type.value == "code" %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-code" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
             <div class="section-note">
@@ -124,21 +103,14 @@
             <button class="btn btn-primary" type="submit">{{ lx("Upload code solution", "上传代码解答") }}</button>
           </div>
         </form>
-        {% elif question.question_type.value in ["pdf_llm", "formatted_text_llm", "file_llm"] %}
+        {% elif question.question_type.value == "file_llm" %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-file" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
             <div class="section-note">
-              {% if question.question_type.value in ["formatted_text_llm", "file_llm"] %}
               {{ lx(
                 "Use this route for open-ended files such as .txt, .tex, or .ipynb. ipynb files are reviewed through the file / LLM workflow instead of the retired notebook runner.",
                 "开放式文件题请走这里提交，例如 .txt、.tex 或 .ipynb。ipynb 会通过文件 / LLM 评测流程处理，不再走旧版 Notebook 执行链路。"
               ) }}
-              {% else %}
-              {{ lx(
-                "Use this route for PDF-based answers that need rubric-based LLM review and teacher confirmation.",
-                "PDF 类作答请走这里提交，系统会先生成基于评分细则的 LLM 评阅建议，再由教师确认。"
-              ) }}
-              {% endif %}
             </div>
           </div>
           <div class="col-12">
@@ -148,7 +120,7 @@
           {% if question.file_question_config %}
           <div class="col-12">
             <div class="alert alert-warning mb-0">
-              {% if question.question_type.value == "pdf_llm" or (question.question_type.value == "file_llm" and question.file_question_config and '.pdf' in question.file_question_config.accepted_extensions.lower()) %}
+              {% if question.file_question_config and '.pdf' in question.file_question_config.accepted_extensions.lower() %}
               {{ lx(
                 "PDF pages are rendered as images for multimodal LLM review.",
                 "PDF 页面会渲染为图片，并交由多模态 LLM 评阅。"

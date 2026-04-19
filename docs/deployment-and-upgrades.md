@@ -49,10 +49,10 @@ For invitation-code registration, set `REGISTRATION_INVITE_CODE`. Keep it server
 Build the default runner image before accepting code submissions:
 
 ```bash
-docker build -t notebook-runner-mvp:latest runner
+docker build -t courseeval-runner:latest runner
 ```
 
-The image tag is historical. It is currently used for Python, C, and C++ code evaluation.
+This image is used for Python, C, and C++ code evaluation.
 
 When changing the default Python package set, update both:
 
@@ -86,9 +86,9 @@ Current behavior:
 
 1. `app/main.py` calls `init_database()` at startup.
 2. `init_database()` runs `Base.metadata.create_all(bind=engine)`.
-3. `migrate_legacy_schema()` applies hand-written compatibility changes in `app/db.py`.
+3. `init_database()` seeds the open community course.
 
-There is no Alembic migration directory. Treat `app/db.py` as the current upgrade shim.
+There is no Alembic migration directory. The current code is a clean v0 baseline and does not preserve retired notebook/job tables or old question enum values.
 
 Before production upgrades:
 
@@ -96,17 +96,23 @@ Before production upgrades:
 2. Back up the database and `DATA_DIR`.
 3. Run the new code against a copy of the database.
 4. Verify `python scripts/init_db.py` completes successfully on the copy.
-5. Run at least `python3 -m compileall app runner -q` and the relevant pytest subset.
+5. Run `bash scripts/verify.sh` in an environment with `requirements-dev.txt` installed.
 6. Start web and worker processes with the same `.env`.
 7. Submit a small code question and, if enabled, a small LLM/file question to verify queues and artifacts.
 
-For schema changes, add idempotent upgrade logic in `app/db.py` and tests where feasible. Avoid assuming `create_all` modifies existing columns or constraints; it does not.
+For future schema changes with real deployments, choose one of these patterns before shipping:
+
+- Add a focused migration script under `scripts/` and document the exact command here.
+- Add a clearly named, idempotent upgrade function called by `init_database()` only when it is safe on existing data.
+- Adopt a formal migration tool such as Alembic and document the revision command.
+
+Avoid assuming `create_all` modifies existing columns or constraints; it does not.
 
 ## Rollback notes
 
 Rollback is safest from a database and `DATA_DIR` backup taken before startup with the new code.
 
-Because upgrade shims may mutate enum values or backfill rows, code rollback without data rollback can leave old code reading newer values. Review `app/db.py` before relying on code-only rollback.
+Code rollback without data rollback can leave old code reading newer values after schema or enum changes. Prefer restoring the database and `DATA_DIR` backup taken before startup with the new code.
 
 ## Security and deployment caveats
 
@@ -116,4 +122,3 @@ Because upgrade shims may mutate enum values or backfill rows, code rollback wit
 - There is no CSRF protection layer yet.
 - Docker isolation is basic and depends on the configured runner image and Docker flags.
 - Uploaded files and artifacts are not automatically cleaned up.
-

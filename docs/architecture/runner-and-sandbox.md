@@ -42,13 +42,11 @@ Absolute path resolution uses helpers near `get_submission_artifact_path` / `rea
 
 Changing marker strings requires updating **both** runner emission (if any) and strip logic.
 
-## Legacy notebook execution
+## Notebook files
 
-`run_job_in_docker` still exists for historical **notebook job** compatibility; it writes a stub failure summary (grep in `submissions.py`). Product redirects old `/jobs` UI via `app/routes/jobs.py`.
+`.ipynb` submissions are not executed by Docker. They are accepted only through `file_llm` questions, sanitized by `app/services/notebook_multimodal.py`, and reviewed by the LLM pipeline.
 
-**Do not assume** notebook Docker execution equals the modern file/LLM `.ipynb` flow.
-
-The default runner image tag, `notebook-runner-mvp:latest`, is also historical. It is currently the default image for Python, C, and C++ code evaluation.
+The default runner image tag is `courseeval-runner:latest`.
 
 ## Tests
 

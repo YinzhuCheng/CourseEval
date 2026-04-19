@@ -170,86 +170,6 @@ def _grading_system_preamble() -> str:
     )
 
 
-def generate_notebook_evaluation_with_llm(
-    config: LLMConfig,
-    *,
-    question_title: str,
-    question_description: str,
-    rubric_text: str,
-    reference_answer_text: str = "",
-    student_submission_text: str = "",
-    summary_json: str,
-    stdout_text: str,
-    stderr_text: str,
-    auto_score: float,
-    max_llm_score: float,
-    previous_submission_text: str = "",
-    previous_feedback_text: str = "",
-    previous_teacher_score_text: str = "",
-    truncation_notice: str = "",
-    course_llm_response_language: str | None = None,
-    bill_user_id: int | None = None,
-    bill_db: Session | None = None,
-    notebook_images: list[ImageInput] | None = None,
-    notebook_multimodal_instructions: str = "",
-) -> dict:
-    lang = _response_language_instruction(course_llm_response_language, student_submission_text)
-    has_mm_images = bool(notebook_images)
-    quality = language_and_quality_block(
-        lang,
-        text_submission_may_lose_images=bool(student_submission_text.strip()) and not has_mm_images,
-        student_submission_is_pdf_pages=False,
-    )
-    mm_extra = (" " + notebook_multimodal_instructions.strip()) if notebook_multimodal_instructions.strip() else ""
-    system_prompt = _grading_system_preamble() + " " + quality + mm_extra
-    prev_block = ""
-    if (previous_submission_text or "").strip() or (previous_feedback_text or "").strip():
-        prev_block = (
-            "\nPrevious graded attempt (for comparison; teacher final score on that attempt is authoritative):\n"
-            f"Teacher score on previous attempt: {previous_teacher_score_text or 'Not recorded.'}\n"
-            f"Previous submission excerpt:\n{previous_submission_text[:12000]}\n\n"
-            f"Previous feedback:\n{previous_feedback_text[:8000]}\n"
-        )
-    prompt = (
-        truncation_notice_block(truncation_notice)
-        + f"Question title: {question_title}\n"
-        f"Question description:\n{question_description}\n\n"
-        f"Reference answer:\n{reference_answer_text or 'No reference answer provided.'}\n\n"
-        f"Notebook grading rubric:\n{rubric_text or 'No explicit rubric provided.'}\n\n"
-        f"Automatic score from runner (code/tests, not your score): {auto_score}\n"
-        f"Maximum additional score you may assign (LLM portion cap): {max_llm_score}\n"
-        f"Your score_suggestion must be between 0 and {max_llm_score} (this is the LLM-weighted portion only).\n\n"
-        f"Student submission as text (e.g. ipynb or source extracted for review):\n{student_submission_text[:24000]}\n\n"
-        f"Evaluation summary JSON:\n{summary_json[:12000]}\n\n"
-        f"stdout:\n{stdout_text[:8000]}\n\n"
-        f"stderr:\n{stderr_text[:8000]}\n"
-        + prev_block
-        + "\nReturn valid JSON only."
-    )
-    if notebook_images:
-        img_bytes_total = sum(len(im.data) for im in notebook_images)
-        raw = generate_multimodal(
-            config,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            images=notebook_images,
-            bill_user_id=bill_user_id,
-            bill_db=bill_db,
-            bill_image_bytes_total=img_bytes_total,
-        ).content
-    else:
-        raw = generate_text(
-            config,
-            prompt,
-            system_prompt,
-            bill_user_id=bill_user_id,
-            bill_db=bill_db,
-            bill_user_prompt=prompt,
-            bill_system_prompt=system_prompt,
-        ).content
-    return _parse_grading_json(raw)
-
-
 def generate_short_answer_evaluation(
     config: LLMConfig,
     *,
@@ -267,14 +187,18 @@ def generate_short_answer_evaluation(
     text_format_may_lose_images: bool = False,
     bill_user_id: int | None = None,
     bill_db: Session | None = None,
+    images: list[ImageInput] | None = None,
+    multimodal_instructions: str = "",
 ) -> dict:
     lang = _response_language_instruction(course_llm_response_language, answer_text)
+    has_images = bool(images)
     quality = language_and_quality_block(
         lang,
-        text_submission_may_lose_images=text_format_may_lose_images,
+        text_submission_may_lose_images=text_format_may_lose_images and not has_images,
         student_submission_is_pdf_pages=False,
     )
-    system_prompt = _grading_system_preamble() + " " + quality
+    mm_extra = (" " + multimodal_instructions.strip()) if multimodal_instructions.strip() else ""
+    system_prompt = _grading_system_preamble() + " " + quality + mm_extra
     prev_block = ""
     if (previous_submission_text or "").strip() or (previous_feedback_text or "").strip():
         prev_block = (
@@ -294,15 +218,26 @@ def generate_short_answer_evaluation(
         + prev_block
         + "\nReturn valid JSON only."
     )
-    raw = generate_text(
-        config,
-        prompt,
-        system_prompt,
-        bill_user_id=bill_user_id,
-        bill_db=bill_db,
-        bill_user_prompt=prompt,
-        bill_system_prompt=system_prompt,
-    ).content
+    if images:
+        raw = generate_multimodal(
+            config,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            images=images,
+            bill_user_id=bill_user_id,
+            bill_db=bill_db,
+            bill_image_bytes_total=sum(len(image.data) for image in images),
+        ).content
+    else:
+        raw = generate_text(
+            config,
+            prompt,
+            system_prompt,
+            bill_user_id=bill_user_id,
+            bill_db=bill_db,
+            bill_user_prompt=prompt,
+            bill_system_prompt=system_prompt,
+        ).content
     return _parse_grading_json(raw)
 
 

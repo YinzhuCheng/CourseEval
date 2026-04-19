@@ -10,7 +10,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import fitz
-import nbformat
 from redis import Redis
 from rq import Queue
 from sqlalchemy import and_, func, select
@@ -21,7 +20,6 @@ from app.constants import (
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
-    JobStatus,
     CodeLanguage,
     CodeSubmissionMode,
     LLMScope,
@@ -35,12 +33,23 @@ from app.constants import (
 from app.db import SessionLocal, utcnow
 from app.services.llm import (
     ImageInput,
-    generate_notebook_evaluation_with_llm,
     generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
 )
 from app.services.llm_retry import retry_llm_grading_call
 from app.services.notebook_multimodal import notebook_placeholder_alignment_block, sanitize_notebook_for_llm
+from app.services.scoring import (
+    is_submission_pending_teacher_review,
+    resolve_submission_score,
+    submission_eligible_for_gradebook,
+    submission_requires_teacher_confirmation,
+)
+from app.services.storage_paths import (
+    absolute_data_path,
+    ensure_parent_dir,
+    ensure_writable_directory,
+    relative_to_data,
+)
 from app.models import (
     Assignment,
     Course,
@@ -50,11 +59,7 @@ from app.models import (
     FileQuestionConfig,
     Feedback,
     FinalGradeSnapshot,
-    Job,
-    JobOutput,
-    Notebook,
     LLMConfig,
-    NotebookQuestionConfig,
     CodeQuestionConfig,
     Question,
     QuestionVersion,
@@ -109,23 +114,8 @@ def _resolve_llm_config_for_question(question: Question, db: Session | None = No
     return _latest_platform_llm_config(db)
 
 
-def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
-    return max(lower, min(value, upper))
-
-
 _HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
 _HIDDEN_STDERR_MARKER = "=== Hidden Test stderr ==="
-_RETIRED_NOTEBOOK_MESSAGE = (
-    "Notebook execution has been retired. Use code questions for Python, C, or C++ submissions, "
-    "or use file / LLM-reviewed questions for .ipynb submissions."
-)
-
-
-def _latest_feedback(submission: Submission, source: FeedbackSource) -> Feedback | None:
-    matching_feedback = [item for item in submission.feedback_items if item.source == source]
-    if not matching_feedback:
-        return None
-    return max(matching_feedback, key=lambda item: item.created_at)
 
 
 def _parsed_summary_json(evaluation_result: EvaluationResult | None) -> dict:
@@ -162,76 +152,6 @@ def _resolve_runner_image_tag(question: Question) -> tuple[str, RuntimeImage | N
 
 def _runner_script_path(script_name: str) -> Path:
     return settings.base_dir / "runner" / script_name
-
-
-def submission_requires_teacher_confirmation(submission: Submission) -> bool:
-    """True only when the question explicitly opts into \"teacher must confirm before any score\".
-
-    Default product behavior: LLM scores (when present) are effective without teacher confirmation.
-    This flag is then an optional strict gate for rare courses that want no score until a teacher posts.
-    """
-    question = submission.question
-    if submission.submission_type == QuestionType.SHORT_ANSWER:
-        config = question.short_answer_config if question is not None else None
-        return bool(config and config.teacher_confirmation_required)
-    if submission.submission_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM, QuestionType.FILE_LLM}:
-        config = _file_question_config(question)
-        return bool(config and config.teacher_confirmation_required)
-    return False
-
-
-def _submission_has_llm_score(submission: Submission) -> bool:
-    return any(
-        item.source == FeedbackSource.LLM and item.score_suggestion is not None for item in submission.feedback_items
-    )
-
-
-def submission_eligible_for_gradebook(submission: Submission) -> bool:
-    if submission.counts_toward_limit or submission.is_effective_submission:
-        return True
-    if submission_requires_teacher_confirmation(submission) and _submission_has_llm_score(submission):
-        return True
-    return False
-
-
-def submission_has_teacher_feedback(submission: Submission) -> bool:
-    return _latest_feedback(submission, FeedbackSource.TEACHER) is not None
-
-
-def is_submission_pending_teacher_review(submission: Submission) -> bool:
-    """Pending only when the question opted into strict teacher-first grading and no teacher score yet.
-
-    With the default (no strict flag), LLM scores are effective and this is always False.
-    """
-    if not submission_requires_teacher_confirmation(submission):
-        return False
-    return not submission_has_teacher_feedback(submission)
-
-
-def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, FeedbackSource | None]:
-    teacher_feedback = _latest_feedback(submission, FeedbackSource.TEACHER)
-    if teacher_feedback is not None:
-        return (
-            Decimal(str(teacher_feedback.score_suggestion)) if teacher_feedback.score_suggestion is not None else None,
-            FeedbackSource.TEACHER,
-        )
-
-    latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
-    if latest_result is not None and latest_result.final_score is not None:
-        return Decimal(str(latest_result.final_score)), FeedbackSource.AUTO
-
-    llm_feedback = _latest_feedback(submission, FeedbackSource.LLM)
-    if llm_feedback is not None and llm_feedback.score_suggestion is not None:
-        if submission_requires_teacher_confirmation(submission):
-            # Strict opt-in: no displayed/final score from LLM until a teacher posts feedback.
-            return None, None
-        return Decimal(str(llm_feedback.score_suggestion)), FeedbackSource.LLM
-
-    auto_feedback = _latest_feedback(submission, FeedbackSource.AUTO)
-    if auto_feedback is not None and auto_feedback.score_suggestion is not None:
-        return Decimal(str(auto_feedback.score_suggestion)), FeedbackSource.AUTO
-
-    return None, None
 
 
 def build_student_result_view(submission: Submission) -> dict:
@@ -304,21 +224,6 @@ def read_student_safe_submission_artifact_text(
     return sanitized
 
 
-def _recompute_notebook_final_score(submission: Submission, latest_result: EvaluationResult) -> Decimal:
-    auto_score = Decimal(str(latest_result.auto_score or 0))
-    notebook_config = submission.question.notebook_config if submission.question else None
-    llm_weight = Decimal(str(notebook_config.llm_score_weight if notebook_config else 0))
-    llm_score_candidates = [
-        Decimal(str(item.score_suggestion or 0))
-        for item in submission.feedback_items
-        if item.source == FeedbackSource.LLM and item.score_suggestion is not None
-    ]
-    llm_score = llm_score_candidates[-1] if llm_score_candidates else Decimal("0")
-    llm_score = _clamp_score(llm_score, Decimal("0"), llm_weight)
-    max_score = Decimal(str(submission.question.max_score if submission.question else 100))
-    return _clamp_score(auto_score + llm_score, Decimal("0"), max_score)
-
-
 def redis_connection() -> Redis:
     return Redis.from_url(settings.redis_url)
 
@@ -388,34 +293,6 @@ def _mark_submission_system_failed(
         submission.is_effective_submission = False
         submission.failure_reason_code = "system_error"
     db.commit()
-
-
-def relative_to_data(path: Path) -> str:
-    data_dir = settings.data_dir.resolve()
-    resolved = path.resolve()
-    try:
-        return resolved.relative_to(data_dir).as_posix()
-    except ValueError:
-        raise ValueError("Path is outside the data directory.")
-
-
-def absolute_data_path(relative_path: str) -> Path:
-    p = Path(relative_path)
-    candidate = p if p.is_absolute() else settings.data_dir / p
-    data_dir = settings.data_dir.resolve()
-    resolved = candidate.resolve()
-    if data_dir not in resolved.parents and resolved != data_dir:
-        raise ValueError("Path is outside the data directory.")
-    return resolved
-
-
-def ensure_parent_dir(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def ensure_writable_directory(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    path.chmod(0o777)
 
 
 def write_text(path: Path, content: str, append: bool = False) -> None:
@@ -535,7 +412,7 @@ def _merged_reference_answer_text(
         elif ext in {".tex", ".txt", ".md"}:
             extracted = path.read_text(encoding="utf-8", errors="replace").strip()
         elif ext == ".ipynb":
-            extracted = _render_notebook_as_text(path, require_outputs=False)
+            extracted = sanitize_notebook_for_llm(path, require_outputs=False).text.strip()
         else:
             notices.append(f"Unsupported reference answer file type {ext}; using text field only.")
             return merged
@@ -582,14 +459,6 @@ def _submission_text_for_llm_context(submission: Submission) -> str:
     text = (submission.answer_text or "").strip()
     if text:
         return text
-    if submission.notebook:
-        try:
-            return _render_notebook_as_text(
-                absolute_data_path(submission.notebook.stored_path),
-                require_outputs=False,
-            )
-        except Exception:
-            return ""
     return ""
 
 
@@ -598,7 +467,6 @@ def _find_previous_submission_with_feedback(db: Session, submission: Submission)
         select(Submission)
         .options(
             joinedload(Submission.feedback_items),
-            joinedload(Submission.notebook),
         )
         .where(
             Submission.question_id == submission.question_id,
@@ -620,47 +488,11 @@ def _truncate_for_llm(label: str, text: str, max_len: int, notices: list[str]) -
     return text[:max_len] + "\n...[truncated]"
 
 
-def _render_notebook_as_text(file_path: Path, *, require_outputs: bool) -> str:
-    notebook = nbformat.read(file_path, as_version=4)
-    has_outputs = False
-    sections: list[str] = []
-    for index, cell in enumerate(notebook.cells, start=1):
-        cell_type = cell.get("cell_type", "unknown")
-        sections.append(f"Cell {index} [{cell_type}]")
-        source = (cell.get("source") or "").strip()
-        if source:
-            sections.append(source)
-        outputs = cell.get("outputs") or []
-        if outputs:
-            has_outputs = True
-            rendered_outputs: list[str] = []
-            for output in outputs:
-                text = ""
-                if output.get("output_type") == "stream":
-                    text = output.get("text", "")
-                elif "text" in output:
-                    text = output.get("text", "")
-                elif "data" in output and isinstance(output["data"], dict):
-                    text = output["data"].get("text/plain", "")
-                if text:
-                    rendered_outputs.append(str(text).strip())
-            if rendered_outputs:
-                sections.append("Outputs:")
-                sections.append("\n".join(item for item in rendered_outputs if item))
-        sections.append("")
-    if require_outputs and not has_outputs:
-        raise ValueError("Notebook submissions for this question must include executed outputs before upload.")
-    rendered = "\n".join(section for section in sections if section is not None).strip()
-    if not rendered:
-        raise ValueError("The uploaded notebook is empty.")
-    return rendered
-
-
 def _extract_formatted_text(file_path: Path, extension: str, *, require_ipynb_output: bool) -> str:
-    if extension in {".txt", ".tex", ".py"}:
+    if extension in {".txt", ".tex", ".md", ".py"}:
         return file_path.read_text(encoding="utf-8", errors="replace").strip()
     if extension == ".ipynb":
-        return _render_notebook_as_text(file_path, require_outputs=require_ipynb_output)
+        return sanitize_notebook_for_llm(file_path, require_outputs=require_ipynb_output).text.strip()
     raise ValueError(f"Unsupported formatted-text file type: {extension}.")
 
 
@@ -684,108 +516,6 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
             }
         )
     return normalized
-
-
-def create_legacy_job_with_upload(
-    db: Session,
-    *,
-    user_id: int,
-    original_filename: str,
-    notebook_bytes: bytes,
-) -> Job:
-    upload_dir = settings.uploads_dir / f"user-{user_id}"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    stored_path = upload_dir / f"{uuid4().hex}.ipynb"
-    stored_path.write_bytes(notebook_bytes)
-
-    notebook = Notebook(
-        user_id=user_id,
-        original_filename=original_filename,
-        stored_path=relative_to_data(stored_path),
-    )
-    db.add(notebook)
-    db.flush()
-
-    job = Job(user_id=user_id, notebook_id=notebook.id, status=JobStatus.QUEUED)
-    db.add(job)
-    db.flush()
-
-    output_dir = settings.outputs_dir / f"job-{job.id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    output = JobOutput(
-        job_id=job.id,
-        executed_notebook_path=relative_to_data(output_dir / "executed.ipynb"),
-        html_path=relative_to_data(output_dir / "executed.html"),
-        stdout_path=relative_to_data(output_dir / "stdout.txt"),
-        stderr_path=relative_to_data(output_dir / "stderr.txt"),
-    )
-    db.add(output)
-    db.commit()
-    db.refresh(job)
-    return job
-
-
-def enqueue_legacy_job(job_id: int) -> str:
-    rq_job = get_queue(get_python_queue_name()).enqueue(
-        process_legacy_job,
-        job_id,
-        job_timeout=settings.execution_timeout_seconds + 90,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
-    return rq_job.id
-
-
-def list_jobs_for_user(db: Session, user_id: int) -> list[Job]:
-    statement = (
-        select(Job)
-        .options(joinedload(Job.notebook), joinedload(Job.output))
-        .where(Job.user_id == user_id)
-        .order_by(Job.created_at.desc())
-    )
-    return list(db.scalars(statement).unique())
-
-
-def get_job_for_user(db: Session, job_id: int, user_id: int) -> Job | None:
-    statement = (
-        select(Job)
-        .options(joinedload(Job.notebook), joinedload(Job.output))
-        .where(Job.id == job_id, Job.user_id == user_id)
-    )
-    return db.scalar(statement)
-
-
-def get_artifact_path_from_job(job: Job, artifact_name: str) -> Path:
-    if job.output is None:
-        raise FileNotFoundError("Job output metadata is missing.")
-
-    mapping = {
-        "executed_notebook": job.output.executed_notebook_path,
-        "html": job.output.html_path,
-        "stdout": job.output.stdout_path,
-        "stderr": job.output.stderr_path,
-    }
-    relative_path = mapping.get(artifact_name)
-    if not relative_path:
-        raise FileNotFoundError("Unknown artifact.")
-    artifact_path = absolute_data_path(relative_path)
-    if not artifact_path.exists():
-        raise FileNotFoundError("Artifact file does not exist.")
-    return artifact_path
-
-
-def read_text_artifact_from_job(job: Job, artifact_name: str, max_chars: int = 200000) -> str:
-    try:
-        artifact_path = get_artifact_path_from_job(job, artifact_name)
-    except FileNotFoundError:
-        return ""
-
-    content = artifact_path.read_text(encoding="utf-8", errors="replace")
-    if len(content) > max_chars:
-        return f"{content[:max_chars]}\n\n... output truncated in web view ..."
-    return content
 
 
 def list_student_courses(db: Session, user_id: int) -> list:
@@ -815,7 +545,6 @@ def get_question_for_student(db: Session, question_id: int, user_id: int) -> Que
         select(Question)
         .options(
             joinedload(Question.assignment).joinedload(Assignment.course),
-            joinedload(Question.notebook_config),
             joinedload(Question.code_config),
             joinedload(Question.file_question_config),
             joinedload(Question.short_answer_config),
@@ -848,14 +577,12 @@ def get_submission_for_student(db: Session, submission_id: int, user_id: int) ->
         select(Submission)
         .options(
             joinedload(Submission.question).joinedload(Question.assignment).joinedload(Assignment.course),
-            joinedload(Submission.question).joinedload(Question.notebook_config),
             joinedload(Submission.question).joinedload(Question.code_config),
             joinedload(Submission.question).joinedload(Question.file_question_config),
             joinedload(Submission.question).joinedload(Question.short_answer_config),
             joinedload(Submission.evaluation_tasks),
             joinedload(Submission.evaluation_results),
             joinedload(Submission.feedback_items),
-            joinedload(Submission.notebook),
         )
         .where(Submission.id == submission_id, Submission.user_id == user_id)
     )
@@ -868,14 +595,12 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
         .options(
             joinedload(Submission.user),
             joinedload(Submission.question).joinedload(Question.assignment).joinedload(Assignment.course),
-            joinedload(Submission.question).joinedload(Question.notebook_config),
             joinedload(Submission.question).joinedload(Question.code_config),
             joinedload(Submission.question).joinedload(Question.file_question_config),
             joinedload(Submission.question).joinedload(Question.short_answer_config),
             joinedload(Submission.evaluation_tasks),
             joinedload(Submission.evaluation_results),
             joinedload(Submission.feedback_items),
-            joinedload(Submission.notebook),
         )
         .join(Assignment, Submission.assignment_id == Assignment.id)
         .join(Course, Course.id == Assignment.course_id)
@@ -918,23 +643,6 @@ def read_submission_artifact_text(
     if len(content) > max_chars:
         return f"{content[:max_chars]}\n\n... output truncated in web view ..."
     return content
-
-
-def resolve_submission_artifact_path(evaluation_result: EvaluationResult, artifact_name: str) -> Path:
-    mapping = {
-        "executed_notebook": evaluation_result.executed_notebook_path,
-        "html": evaluation_result.rendered_html_path,
-        "stdout": evaluation_result.stdout_path,
-        "stderr": evaluation_result.stderr_path,
-        "summary": evaluation_result.log_path,
-    }
-    relative_path = mapping.get(artifact_name)
-    if not relative_path:
-        raise FileNotFoundError("Unknown artifact.")
-    artifact_path = absolute_data_path(relative_path)
-    if not artifact_path.exists():
-        raise FileNotFoundError("Artifact file does not exist.")
-    return artifact_path
 
 
 def refresh_final_grade_snapshot(db: Session, question_id: int, user_id: int) -> None:
@@ -1009,82 +717,6 @@ def _check_submission_limit(db: Session, question: Question, user_id: int) -> tu
         return True, None
 
     return True, None
-
-
-def create_notebook_submission(
-    db: Session,
-    *,
-    user_id: int,
-    question: Question,
-    original_filename: str,
-    notebook_bytes: bytes,
-) -> Submission:
-    allowed, message = _submission_window_open(question)
-    if not allowed:
-        raise ValueError(message or "Submission window is closed.")
-
-    allowed, message = _check_submission_limit(db, question, user_id)
-    if not allowed:
-        raise ValueError(message or "Submission limit reached.")
-
-    ncfg = question.notebook_config
-    if ncfg is None:
-        raise ValueError("Notebook question configuration is missing.")
-
-    _ensure_text_file_extension(original_filename, {".ipynb"})
-    upload_dir = settings.uploads_dir / f"user-{user_id}"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = upload_dir / f"{uuid4().hex}.ipynb"
-    stored_path.write_bytes(notebook_bytes)
-    relative_nb = relative_to_data(stored_path)
-
-    notebook = Notebook(
-        user_id=user_id,
-        original_filename=original_filename,
-        stored_path=relative_nb,
-    )
-    db.add(notebook)
-    db.flush()
-
-    extracted = _render_notebook_as_text(stored_path, require_outputs=False)
-    llm_enabled = ncfg.llm_feedback_enabled and _resolve_llm_config_for_question(question, db) is not None
-    submission = Submission(
-        course_id=question.assignment.course_id,
-        assignment_id=question.assignment_id,
-        question_id=question.id,
-        user_id=user_id,
-        submission_type=QuestionType.NOTEBOOK,
-        status=SubmissionStatus.SUBMITTED if llm_enabled else SubmissionStatus.COMPLETED,
-        original_filename=original_filename,
-        notebook_id=notebook.id,
-        answer_text=extracted,
-        submitted_at=utcnow(),
-        completed_at=utcnow() if not llm_enabled else None,
-        is_late=_is_late(question),
-        counts_toward_limit=True,
-        is_effective_submission=not llm_enabled,
-        question_version_id=question.current_question_version_id,
-    )
-    db.add(submission)
-    db.flush()
-    if llm_enabled:
-        db.add(
-            EvaluationTask(
-                submission_id=submission.id,
-                task_type=EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
-                backend_type="rq",
-                status=EvaluationTaskStatus.QUEUED,
-            )
-        )
-        db.commit()
-        db.refresh(submission)
-        enqueue_notebook_llm_feedback(db, submission.id)
-    else:
-        db.commit()
-        db.refresh(submission)
-    if submission.is_effective_submission:
-        update_final_grade_snapshot(db, submission)
-    return submission
 
 
 def create_short_answer_submission(
@@ -1309,10 +941,7 @@ def create_file_submission(
     )
     stored_path = absolute_data_path(stored_relative_path)
     pdf_page_paths: list[Path] = []
-    use_pdf_pipeline = extension == ".pdf" and question.question_type in {
-        QuestionType.PDF_LLM,
-        QuestionType.FILE_LLM,
-    }
+    use_pdf_pipeline = extension == ".pdf"
     if use_pdf_pipeline:
         pdf_page_paths = _render_pdf_pages_to_images(stored_path)
         extracted_text = f"PDF rendered into {len(pdf_page_paths)} page image(s) for multimodal LLM review."
@@ -1381,12 +1010,10 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
     if existing_job_id:
         return existing_job_id
 
-    if task.task_type == EvaluationTaskType.CODE_EVALUATION:
-        target_func = process_code_evaluation
-        timeout_seconds = settings.execution_timeout_seconds + 60
-    else:
-        target_func = process_submission_evaluation
-        timeout_seconds = settings.execution_timeout_seconds + 120
+    if task.task_type != EvaluationTaskType.CODE_EVALUATION:
+        raise ValueError("Only code evaluation tasks use the Python runner queue.")
+    target_func = process_code_evaluation
+    timeout_seconds = settings.execution_timeout_seconds + 60
 
     rq_job = get_queue(get_python_queue_name()).enqueue(
         target_func,
@@ -1476,45 +1103,8 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
     return rq_job.id
 
 
-def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
-    submission = db.get(Submission, submission_id)
-    if submission is None:
-        raise ValueError("Submission not found.")
-
-    task = db.scalar(
-        select(EvaluationTask)
-        .where(
-            EvaluationTask.submission_id == submission_id,
-            EvaluationTask.task_type == EvaluationTaskType.NOTEBOOK_LLM_FEEDBACK,
-        )
-        .order_by(EvaluationTask.created_at.desc())
-    )
-    if task is None:
-        raise ValueError("Notebook LLM task not found.")
-    existing_job_id = _existing_backend_job_id(task)
-    if existing_job_id:
-        return existing_job_id
-
-    llm_config = _resolve_llm_config_for_question(submission.question, db)
-    if llm_config is None:
-        raise ValueError("No enabled LLM config available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
-        process_notebook_llm_feedback,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
-    task.backend_job_id = rq_job.id
-    task.status = EvaluationTaskStatus.QUEUED
-    db.commit()
-    return rq_job.id
-
-
 def cleanup_stale_running_items() -> int:
     with SessionLocal() as db:
-        running_jobs = list(db.scalars(select(Job).where(Job.status == JobStatus.RUNNING)).all())
         running_submissions = list(
             db.scalars(select(Submission).where(Submission.status == SubmissionStatus.RUNNING)).all()
         )
@@ -1523,12 +1113,6 @@ def cleanup_stale_running_items() -> int:
         )
 
         finished_at = utcnow()
-        for job in running_jobs:
-            job.status = JobStatus.FAILED
-            job.finished_at = finished_at
-            job.exit_code = -1
-            job.error_message = "Worker restarted before this notebook job completed."
-
         for submission in running_submissions:
             submission.status = SubmissionStatus.FAILED_SYSTEM
             submission.completed_at = finished_at
@@ -1542,214 +1126,7 @@ def cleanup_stale_running_items() -> int:
             task.error_message = "Worker restarted before this evaluation task completed."
 
         db.commit()
-        return len(running_jobs) + len(running_submissions)
-
-
-def process_legacy_job(job_id: int) -> None:
-    db = SessionLocal()
-    try:
-        statement = (
-            select(Job)
-            .options(joinedload(Job.notebook), joinedload(Job.output))
-            .where(Job.id == job_id)
-        )
-        job = db.scalar(statement)
-        if job is None or job.output is None or job.notebook is None:
-            logger.error("Legacy job %s could not be loaded for execution.", job_id)
-            return
-
-        job.status = JobStatus.RUNNING
-        job.started_at = utcnow()
-        job.finished_at = None
-        job.exit_code = None
-        job.error_message = None
-        db.commit()
-
-        result = run_job_in_docker(
-            input_relative_path=job.notebook.stored_path,
-            output_dir_relative_path=Path(job.output.executed_notebook_path).parent.as_posix(),
-            runner_image=settings.runner_image,
-            timeout_seconds=settings.execution_timeout_seconds,
-            memory_limit=settings.runner_memory_limit,
-            cpus=settings.runner_cpus,
-            network_disabled=settings.docker_network_disabled,
-        )
-
-        job.exit_code = result.exit_code
-        job.finished_at = utcnow()
-        if result.exit_code == 0:
-            job.status = JobStatus.SUCCESS
-            job.error_message = None
-        else:
-            job.status = JobStatus.FAILED
-            job.error_message = result.error_message or "Notebook execution failed."
-        db.commit()
-    except Exception as exc:  # pragma: no cover
-        logger.exception("Unexpected error while processing legacy job %s", job_id)
-        failed_job = db.get(Job, job_id)
-        if failed_job is not None:
-            failed_job.status = JobStatus.FAILED
-            failed_job.finished_at = utcnow()
-            failed_job.exit_code = -1
-            failed_job.error_message = str(exc)
-            db.commit()
-    finally:
-        db.close()
-
-
-def process_submission_evaluation(submission_id: int, task_id: int) -> None:
-    db = SessionLocal()
-    try:
-        statement = (
-            select(Submission)
-            .options(
-                joinedload(Submission.notebook),
-                joinedload(Submission.question).joinedload(Question.notebook_config),
-                joinedload(Submission.assignment),
-                joinedload(Submission.evaluation_results),
-                joinedload(Submission.evaluation_tasks),
-            )
-            .where(Submission.id == submission_id)
-        )
-        submission = db.scalar(statement)
-        task = db.get(EvaluationTask, task_id)
-        if submission is None or task is None or submission.notebook is None:
-            logger.error("Submission %s or task %s could not be loaded for evaluation.", submission_id, task_id)
-            return
-        if not _task_can_start(task):
-            logger.info("Skipping submission task %s because it is already %s.", task_id, task.status.value)
-            return
-
-        question = submission.question
-        notebook_config = question.notebook_config
-        runtime_image_tag, runtime_image = _resolve_runner_image_tag(question)
-        timeout_seconds = notebook_config.time_limit_seconds if notebook_config else settings.execution_timeout_seconds
-        memory_limit = (
-            f"{notebook_config.memory_limit_mb}m" if notebook_config else settings.runner_memory_limit
-        )
-        cpus = notebook_config.cpu_limit if notebook_config else settings.runner_cpus
-        network_disabled = True
-
-        submission.status = SubmissionStatus.RUNNING
-        submission.started_at = utcnow()
-        task.status = EvaluationTaskStatus.RUNNING
-        task.runtime_image_id = runtime_image.id if runtime_image is not None else None
-        task.started_at = utcnow()
-        task.error_message = None
-        db.commit()
-
-        output_dir = settings.outputs_dir / "submissions" / f"submission-{submission.id}"
-        ensure_writable_directory(output_dir)
-
-        result = run_job_in_docker(
-            input_relative_path=submission.notebook.stored_path,
-            output_dir_relative_path=relative_to_data(output_dir),
-            runner_image=runtime_image_tag,
-            timeout_seconds=timeout_seconds,
-            memory_limit=memory_limit,
-            cpus=cpus,
-            network_disabled=network_disabled,
-            visible_tests_source=notebook_config.visible_tests_source if notebook_config else "",
-            hidden_tests_source=notebook_config.hidden_tests_source if notebook_config else "",
-            execution_weight=str(notebook_config.execution_weight if notebook_config else Decimal("0")),
-            visible_weight=str(notebook_config.visible_weight if notebook_config else Decimal("100")),
-            hidden_weight=str(notebook_config.hidden_weight if notebook_config else Decimal("0")),
-        )
-
-        evaluation_result = EvaluationResult(
-            submission_id=submission.id,
-            evaluation_task_id=task.id,
-            run_success=result.exit_code == 0,
-            visible_score=Decimal(str(result.summary_json.get("visible_score", 0))) if result.summary_json else Decimal("0"),
-            hidden_score=Decimal(str(result.summary_json.get("hidden_score", 0))) if result.summary_json else Decimal("0"),
-            auto_score=Decimal(str(result.summary_json.get("auto_score", 0))) if result.summary_json else Decimal("0"),
-            final_score=Decimal(str(result.summary_json.get("auto_score", 0))) if result.summary_json else Decimal("0"),
-            log_path=relative_to_data(output_dir / "summary.json"),
-            stdout_path=relative_to_data(output_dir / "stdout.txt"),
-            stderr_path=relative_to_data(output_dir / "stderr.txt"),
-            rendered_html_path=relative_to_data(output_dir / "executed.html"),
-            executed_notebook_path=relative_to_data(output_dir / "executed.ipynb"),
-            summary_json=json.dumps(result.summary_json or {}, ensure_ascii=True, indent=2),
-        )
-        db.add(evaluation_result)
-
-        task.finished_at = utcnow()
-        if result.exit_code == 0:
-            task.status = EvaluationTaskStatus.SUCCEEDED
-            submission.status = SubmissionStatus.COMPLETED
-            submission.completed_at = utcnow()
-            submission.counts_toward_limit = True
-            submission.is_effective_submission = True
-            submission.failure_reason_code = None
-            db.flush()
-            db.add(
-                Feedback(
-                    submission_id=submission.id,
-                    evaluation_result=evaluation_result,
-                    source=FeedbackSource.AUTO,
-                    score_suggestion=evaluation_result.auto_score,
-                    comment_text=(result.summary_json or {}).get("message", "Automatic evaluation completed."),
-                )
-            )
-            evaluation_result.final_score = _recompute_notebook_final_score(submission, evaluation_result)
-        else:
-            task.status = EvaluationTaskStatus.FAILED
-            task.error_message = result.error_message
-            submission.completed_at = utcnow()
-            if result.error_message and (
-                "Docker is not installed" in result.error_message
-                or "Runner finished without producing" in result.error_message
-                or "Docker runner exited" in result.error_message
-                or "system_error" == (result.summary_json or {}).get("failure_type")
-            ):
-                submission.status = SubmissionStatus.FAILED_SYSTEM
-                submission.counts_toward_limit = False
-                submission.is_effective_submission = False
-                submission.failure_reason_code = "system_error"
-            else:
-                submission.status = SubmissionStatus.FAILED_ANSWER
-                submission.counts_toward_limit = True
-                submission.is_effective_submission = True
-                submission.failure_reason_code = "answer_error"
-            db.flush()
-            db.add(
-                Feedback(
-                    submission_id=submission.id,
-                    evaluation_result=evaluation_result,
-                    source=FeedbackSource.AUTO,
-                    score_suggestion=evaluation_result.auto_score,
-                    comment_text=result.error_message or "Automatic evaluation failed.",
-                )
-            )
-            evaluation_result.final_score = _recompute_notebook_final_score(submission, evaluation_result)
-
-        db.commit()
-        update_final_grade_snapshot(db, submission)
-        if (
-            submission.status in {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED_ANSWER}
-            and notebook_config
-            and notebook_config.llm_feedback_enabled
-            and _resolve_llm_config_for_question(question)
-        ):
-            with SessionLocal() as enqueue_db:
-                enqueue_notebook_llm_feedback(enqueue_db, submission.id)
-    except Exception as exc:  # pragma: no cover
-        logger.exception("Unexpected error while processing submission %s", submission_id)
-        submission = db.get(Submission, submission_id)
-        task = db.get(EvaluationTask, task_id)
-        if task is not None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.finished_at = utcnow()
-            task.error_message = str(exc)
-        if submission is not None:
-            submission.status = SubmissionStatus.FAILED_SYSTEM
-            submission.completed_at = utcnow()
-            submission.counts_toward_limit = False
-            submission.is_effective_submission = False
-            submission.failure_reason_code = "system_error"
-        db.commit()
-    finally:
-        db.close()
+        return len(running_submissions)
 
 
 def process_code_evaluation(submission_id: int, task_id: int) -> None:
@@ -1879,45 +1256,6 @@ def process_code_evaluation(submission_id: int, task_id: int) -> None:
         db.commit()
     finally:
         db.close()
-
-
-def run_job_in_docker(
-    *,
-    input_relative_path: str,
-    output_dir_relative_path: str,
-    runner_image: str,
-    timeout_seconds: int,
-    memory_limit: str,
-    cpus: str,
-    network_disabled: bool,
-    visible_tests_source: str,
-    hidden_tests_source: str,
-    execution_weight: str,
-    visible_weight: str,
-    hidden_weight: str,
-) -> RunnerResult:
-    output_dir = absolute_data_path(output_dir_relative_path)
-    stdout_path = output_dir / "stdout.txt"
-    stderr_path = output_dir / "stderr.txt"
-    summary_path = output_dir / "summary.json"
-    ensure_writable_directory(output_dir)
-
-    for artifact_path in (stdout_path, stderr_path, summary_path):
-        if artifact_path.exists():
-            artifact_path.unlink()
-
-    summary = {
-        "failure_type": "system_error",
-        "message": _RETIRED_NOTEBOOK_MESSAGE,
-        "run_success": False,
-        "auto_score": 0,
-        "visible_score": 0,
-        "hidden_score": 0,
-    }
-    write_text(stdout_path, "")
-    write_text(stderr_path, f"{_RETIRED_NOTEBOOK_MESSAGE}\n")
-    summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
-    return RunnerResult(exit_code=1, error_message=_RETIRED_NOTEBOOK_MESSAGE, summary_json=summary)
 
 
 def run_code_in_docker(
@@ -2199,10 +1537,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             trunc_notice = " ".join(notices)
 
         ext = Path(submission.original_filename or "").suffix.lower()
-        if submission.stored_file_path and (
-            submission.submission_type == QuestionType.PDF_LLM
-            or (submission.submission_type == QuestionType.FILE_LLM and ext == ".pdf")
-        ):
+        if submission.stored_file_path and ext == ".pdf":
             pdf_path = absolute_data_path(submission.stored_file_path)
             page_dir = pdf_path.parent / f"{pdf_path.stem}-pages"
             page_paths = sorted(page_dir.glob("page-*.png"))
@@ -2232,6 +1567,15 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             ans = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
             if notices and not trunc_notice:
                 trunc_notice = " ".join(notices)
+            notebook_images = None
+            notebook_instructions = ""
+            if ext == ".ipynb" and submission.stored_file_path:
+                nb_mm = sanitize_notebook_for_llm(
+                    absolute_data_path(submission.stored_file_path),
+                    require_outputs=question_config.notebook_outputs_required,
+                )
+                notebook_images = nb_mm.images or None
+                notebook_instructions = notebook_placeholder_alignment_block(nb_mm.registry, len(nb_mm.images))
 
             def _run_text() -> dict:
                 return generate_short_answer_evaluation(
@@ -2250,6 +1594,8 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     text_format_may_lose_images=ext in {".tex", ".ipynb", ".txt"},
                     bill_user_id=submission.user_id,
                     bill_db=db,
+                    images=notebook_images,
+                    multimodal_instructions=notebook_instructions,
                 )
 
             result = retry_llm_grading_call(llm_config, _run_text, label="file_llm_text")
@@ -2277,133 +1623,6 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("File LLM evaluation failed for submission %s", submission_id)
-        submission = db.get(Submission, submission_id)
-        task = db.get(EvaluationTask, task_id)
-        _mark_submission_system_failed(db, submission, task, str(exc))
-        raise
-    finally:
-        db.close()
-
-
-def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
-    db = SessionLocal()
-    try:
-        submission = db.scalar(
-            select(Submission)
-            .options(
-                joinedload(Submission.question).joinedload(Question.notebook_config),
-                joinedload(Submission.assignment).joinedload(Assignment.course),
-                joinedload(Submission.notebook),
-                joinedload(Submission.evaluation_results),
-                joinedload(Submission.feedback_items),
-            )
-            .where(Submission.id == submission_id)
-        )
-        task = db.get(EvaluationTask, task_id)
-        if submission is None or task is None:
-            return
-        if not _task_can_start(task):
-            logger.info("Skipping notebook LLM task %s because it is already %s.", task_id, task.status.value)
-            return
-
-        llm_config = _resolve_llm_config_for_question(submission.question, db)
-        ncfg = submission.question.notebook_config if submission.question else None
-        if llm_config is None or not llm_config.enabled or ncfg is None:
-            _mark_submission_system_failed(db, submission, task, "No enabled LLM config or notebook question config.")
-            return
-
-        if submission.notebook is None:
-            _mark_submission_system_failed(db, submission, task, "Notebook file is missing for this submission.")
-            return
-
-        task.status = EvaluationTaskStatus.RUNNING
-        task.started_at = utcnow()
-        db.commit()
-
-        nb_path = absolute_data_path(submission.notebook.stored_path)
-        nb_mm = sanitize_notebook_for_llm(nb_path, require_outputs=False)
-        student_text = nb_mm.text
-        notebook_images = nb_mm.images
-        notebook_mm_instructions = notebook_placeholder_alignment_block(nb_mm.registry, len(notebook_images))
-        latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
-        summary_payload = _parsed_summary_json(latest_result)
-        summary_json = json.dumps(summary_payload, ensure_ascii=True, indent=2) if summary_payload else "{}"
-        stdout_text = read_submission_artifact_text(latest_result, "stdout", max_chars=8000) if latest_result else ""
-        stderr_text = read_submission_artifact_text(latest_result, "stderr", max_chars=8000) if latest_result else ""
-        auto_score = float(latest_result.auto_score) if latest_result and latest_result.auto_score is not None else 0.0
-        max_llm = float(ncfg.llm_score_weight or 0)
-
-        notices: list[str] = []
-        ref_merged = _merged_reference_answer_text(
-            base_text=ncfg.reference_answer_text or "",
-            file_relative_path=ncfg.reference_answer_file_path,
-            notices=notices,
-        )
-        prev = _find_previous_submission_with_feedback(db, submission)
-        prev_answer = _submission_text_for_llm_context(prev) if prev else ""
-        prev_answer = _truncate_for_llm("Previous submission", prev_answer, 12000, notices)
-        prev_fb = _truncate_for_llm("Previous feedback", _latest_feedback_comment(prev) if prev else "", 8000, notices)
-        prev_score = _latest_teacher_score_text(prev) if prev else ""
-        student_text = _truncate_for_llm("Student submission", student_text, 24000, notices)
-        ref_for_prompt = _truncate_for_llm("Reference answer", ref_merged, 24000, notices)
-        summary_json = _truncate_for_llm("Evaluation summary JSON", summary_json, 12000, notices)
-        stdout_text = _truncate_for_llm("stdout", stdout_text, 8000, notices)
-        stderr_text = _truncate_for_llm("stderr", stderr_text, 8000, notices)
-        trunc_notice = " ".join(notices) if notices else ""
-
-        def _run_nb() -> dict:
-            return generate_notebook_evaluation_with_llm(
-                llm_config,
-                question_title=submission.question.title,
-                question_description=submission.question.description or "",
-                rubric_text=ncfg.llm_scoring_rubric or "",
-                reference_answer_text=ref_for_prompt,
-                student_submission_text=student_text,
-                summary_json=summary_json,
-                stdout_text=stdout_text,
-                stderr_text=stderr_text,
-                auto_score=auto_score,
-                max_llm_score=max_llm,
-                previous_submission_text=prev_answer,
-                previous_feedback_text=prev_fb,
-                previous_teacher_score_text=prev_score,
-                truncation_notice=trunc_notice,
-                course_llm_response_language=_course_llm_response_language(submission.question),
-                bill_user_id=submission.user_id,
-                bill_db=db,
-                notebook_images=notebook_images or None,
-                notebook_multimodal_instructions=notebook_mm_instructions,
-            )
-
-        result = retry_llm_grading_call(llm_config, _run_nb, label="notebook_llm")
-        comment = result.get("comment_text") or ""
-        if notices:
-            comment = (
-                comment + "\n\n" + "\n".join(f"[Grading system notice] {item}" for item in notices)
-            ).strip()
-        db.add(
-            Feedback(
-                submission_id=submission.id,
-                evaluation_result_id=latest_result.id if latest_result else None,
-                source=FeedbackSource.LLM,
-                score_suggestion=Decimal(str(result.get("score_suggestion", 0))),
-                comment_text=comment,
-            )
-        )
-        db.flush()
-        if latest_result is not None:
-            db.refresh(submission)
-            latest_result.final_score = _recompute_notebook_final_score(submission, latest_result)
-        submission.status = SubmissionStatus.COMPLETED
-        submission.completed_at = utcnow()
-        submission.is_effective_submission = True
-        submission.failure_reason_code = None
-        task.status = EvaluationTaskStatus.SUCCEEDED
-        task.finished_at = utcnow()
-        db.commit()
-        refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
-    except Exception as exc:
-        logger.exception("Notebook LLM feedback failed for submission %s", submission_id)
         submission = db.get(Submission, submission_id)
         task = db.get(EvaluationTask, task_id)
         _mark_submission_system_failed(db, submission, task, str(exc))
@@ -2517,8 +1736,6 @@ def get_submission_artifact_path(submission: Submission, artifact_name: str) -> 
         raise FileNotFoundError("Submission artifacts are not available yet.")
 
     mapping = {
-        "executed_notebook": result.executed_notebook_path,
-        "html": result.rendered_html_path,
         "stdout": result.stdout_path,
         "stderr": result.stderr_path,
         "summary": result.log_path,

@@ -34,7 +34,6 @@ from app.models import (
     FinalGradeSnapshot,
     FileQuestionConfig,
     LLMConfig,
-    NotebookQuestionConfig,
     CodeQuestionConfig,
     Question,
     QuestionVersion,
@@ -73,9 +72,9 @@ from app.services.discussions import (
 )
 from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
+from app.services.scoring import is_submission_pending_teacher_review
 from app.services.submissions import (
     get_submission_for_teacher,
-    is_submission_pending_teacher_review,
     read_submission_artifact_text,
     refresh_final_grade_snapshot,
     store_reference_answer_file,
@@ -693,17 +692,6 @@ async def create_question(
     time_limit_seconds: str = Form("300"),
     memory_limit_mb: str = Form("1024"),
     cpu_limit: str = Form("1"),
-    allow_network: str = Form("false"),
-    visible_tests_source: str = Form(""),
-    hidden_tests_source: str = Form(""),
-    execution_weight: str = Form("0"),
-    visible_weight: str = Form("100"),
-    hidden_weight: str = Form("0"),
-    llm_score_weight: str = Form("0"),
-    llm_scoring_rubric: str = Form(""),
-    llm_feedback_enabled: str = Form("false"),
-    notebook_llm_score_weight: str = Form("20"),
-    notebook_llm_feedback_enabled: str = Form("true"),
     rubric_text: str = Form(""),
     reference_answer: str = Form(""),
     reference_answer_file: UploadFile | None = File(None),
@@ -777,72 +765,7 @@ async def create_question(
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
 
-    if q_type == QuestionType.NOTEBOOK:
-        rubric = llm_scoring_rubric.strip() or rubric_text.strip()
-        if not rubric:
-            push_flash(
-                request,
-                choose_text(request, "Notebook LLM questions require an LLM scoring rubric.", "Notebook LLM 题必须填写 LLM 评分细则。"),
-                "danger",
-            )
-            db.rollback()
-            return _redirect(f"/teacher/assignments/{assignment.id}")
-        try:
-            n_weight = _parse_decimal_input(notebook_llm_score_weight or "0", "LLM score weight")
-        except ValueError:
-            push_flash(request, choose_text(request, "Invalid LLM score weight.", "LLM 分数权重无效。"), "danger")
-            db.rollback()
-            return _redirect(f"/teacher/assignments/{assignment.id}")
-        if n_weight <= 0 or notebook_llm_feedback_enabled != "true":
-            push_flash(
-                request,
-                choose_text(
-                    request,
-                    "Notebook LLM questions require a positive LLM score weight and LLM feedback enabled.",
-                    "Notebook LLM 题需要填写大于 0 的 LLM 分数权重并启用 LLM 反馈。",
-                ),
-                "danger",
-            )
-            db.rollback()
-            return _redirect(f"/teacher/assignments/{assignment.id}")
-        if n_weight > max_score_decimal:
-            push_flash(
-                request,
-                choose_text(request, "LLM score weight cannot exceed the question max score.", "LLM 分数权重不能超过题目满分。"),
-                "danger",
-            )
-            db.rollback()
-            return _redirect(f"/teacher/assignments/{assignment.id}")
-        if not reference_answer.strip() and not ref_file_rel:
-            push_flash(
-                request,
-                choose_text(
-                    request,
-                    "Provide a reference answer (text and/or upload) for notebook LLM grading.",
-                    "请为 Notebook LLM 评阅提供参考答案（文本和/或上传附件）。",
-                ),
-                "danger",
-            )
-            db.rollback()
-            return _redirect(f"/teacher/assignments/{assignment.id}")
-        db.add(
-            NotebookQuestionConfig(
-                question_id=question.id,
-                time_limit_seconds=300,
-                memory_limit_mb=1024,
-                cpu_limit="1",
-                allow_network=False,
-                execution_weight=Decimal("0"),
-                visible_weight=Decimal("100"),
-                hidden_weight=Decimal("0"),
-                llm_score_weight=n_weight,
-                llm_scoring_rubric=rubric,
-                llm_feedback_enabled=True,
-                reference_answer_text=reference_answer.strip(),
-                reference_answer_file_path=ref_file_rel,
-            )
-        )
-    elif q_type == QuestionType.SHORT_ANSWER:
+    if q_type == QuestionType.SHORT_ANSWER:
         try:
             parsed_min_length = _parse_optional_length(min_length, "Minimum length")
             parsed_max_length = _parse_optional_length(max_length, "Maximum length")
@@ -985,39 +908,6 @@ async def create_question(
                 llm_suggestion_enabled=True,
                 teacher_confirmation_required=teacher_confirmation_required,
                 notebook_outputs_required=notebook_outputs_required,
-                updated_at=utcnow(),
-            )
-        )
-    elif q_type in {QuestionType.PDF_LLM, QuestionType.FORMATTED_TEXT_LLM}:
-        normalized_extensions = [
-            ext.strip().lower()
-            for ext in (accepted_extensions or ".txt,.tex,.ipynb").split(",")
-            if ext.strip()
-        ]
-        if q_type == QuestionType.PDF_LLM:
-            normalized_extensions = [".pdf"]
-        if not rubric_text.strip() or (not reference_answer.strip() and not ref_file_rel):
-            push_flash(
-                request,
-                choose_text(
-                    request,
-                    "Rubric is required, and you must provide a reference answer (text and/or upload).",
-                    "必须填写评分细则，并提供参考答案（文本和/或上传附件）。",
-                ),
-                "danger",
-            )
-            db.rollback()
-            return _redirect(f"/teacher/assignments/{assignment.id}")
-        db.add(
-            FileQuestionConfig(
-                question_id=question.id,
-                accepted_extensions=",".join(normalized_extensions),
-                rubric_text=rubric_text.strip(),
-                reference_answer_text=reference_answer.strip(),
-                reference_answer_file_path=ref_file_rel,
-                llm_suggestion_enabled=True,
-                teacher_confirmation_required=teacher_confirmation_required,
-                notebook_outputs_required=q_type == QuestionType.FORMATTED_TEXT_LLM,
                 updated_at=utcnow(),
             )
         )
@@ -1315,7 +1205,6 @@ async def update_question(
     time_limit_seconds: str = Form("300"),
     memory_limit_mb: str = Form("1024"),
     cpu_limit: str = Form("1"),
-    allow_network: str = Form("false"),
     rubric_text: str = Form(""),
     reference_answer: str = Form(""),
     reference_answer_file: UploadFile | None = File(None),
@@ -1324,8 +1213,6 @@ async def update_question(
     require_teacher_confirmation: str = Form("false"),
     min_length: str = Form(""),
     max_length: str = Form(""),
-    notebook_llm_score_weight: str = Form(""),
-    notebook_llm_rubric: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -1425,30 +1312,6 @@ async def update_question(
             push_flash(request, choose_text(request, str(exc), "运行资源限制无效，请检查时间、内存和 CPU。"), "danger")
             return _redirect(f"/teacher/questions/{question.id}")
         cfg.allow_network = False
-        cfg.updated_at = utcnow()
-    elif question.question_type == QuestionType.NOTEBOOK and question.notebook_config:
-        cfg = question.notebook_config
-        if notebook_llm_score_weight.strip():
-            try:
-                nw = _parse_decimal_input(notebook_llm_score_weight, "LLM score weight")
-            except ValueError:
-                push_flash(request, choose_text(request, "Invalid LLM score weight.", "LLM 分数权重无效。"), "danger")
-                return _redirect(f"/teacher/questions/{question.id}")
-            if nw <= 0 or nw > question.max_score:
-                push_flash(
-                    request,
-                    choose_text(request, "Invalid LLM score weight.", "LLM 分数权重无效。"),
-                    "danger",
-                )
-                return _redirect(f"/teacher/questions/{question.id}")
-            cfg.llm_score_weight = nw
-        if notebook_llm_rubric.strip():
-            cfg.llm_scoring_rubric = notebook_llm_rubric.strip()
-        cfg.reference_answer_text = reference_answer.strip()
-        if clear_reference_answer_file == "true":
-            cfg.reference_answer_file_path = None
-        elif uploaded_ref:
-            cfg.reference_answer_file_path = new_reference_file_path
         cfg.updated_at = utcnow()
     elif question.file_question_config:
         cfg = question.file_question_config

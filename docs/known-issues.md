@@ -8,22 +8,15 @@ If a note here disagrees with code, trust the code and update this page in the s
 
 ## Confirmed notes from the current review
 
-### Two `resolve_submission_score` functions
+### Score resolution has one owner
 
-There are two functions named `resolve_submission_score`:
+`resolve_submission_score` now has a single definition in `app/services/scoring.py`. Keep it that way. If a route, analytics helper, or template needs effective score semantics, import from `scoring.py` instead of recreating the priority rules.
 
-- `app/services/submissions.py`: `resolve_submission_score(submission)`
-- `app/services/courses.py`: `resolve_submission_score(submission, latest_feedback)`
+### Migration strategy is intentionally lightweight v0
 
-They have different signatures and different priority rules. The `submissions.py` version is authoritative for student submission detail, teacher-confirmation gating, and final grade snapshots. The `courses.py` version is used by course/listing-style analytics helpers and does not apply the strict teacher-confirmation gate in the same way.
+There is no Alembic migration tree in the repository. Startup calls `init_database()` from `app/main.py`, which runs `Base.metadata.create_all()` and seeds the open community course.
 
-When changing scoring behavior, grep both functions and their callers. A one-file scoring change can produce mismatched student UI, teacher analytics, and gradebook snapshots.
-
-### Migration strategy is intentionally lightweight
-
-There is no Alembic migration tree in the repository. Startup calls `init_database()` from `app/main.py`, which runs `Base.metadata.create_all()` and a set of hand-written compatibility steps in `app/db.py` (`migrate_legacy_schema`, `_ensure_column`, enum normalization, backfills).
-
-This is suitable for small deployments and local upgrades, but it is not a general production migration framework. Before a schema-changing deployment, inspect `app/db.py`, test the upgrade against a copy of the production database, and document any manual migration steps.
+This v0 baseline intentionally does not keep legacy notebook/job tables or old file-question enum shims. Before a schema-changing deployment with real data, add a documented migration script or explicit idempotent upgrade step and test it against a database copy.
 
 ### Permission tests are scattered
 
@@ -31,27 +24,27 @@ Access control is enforced by explicit route-level calls to helpers in `app/serv
 
 When reviewing permission changes, grep for `require_`, `can_`, route handlers, and template controls that expose the action. Tests are often integration-style and spread across route or subsystem tests.
 
-### Legacy notebook naming remains in active code
+### Notebook wording means file/LLM notebook uploads
 
-Standalone notebook execution and `/jobs/*` UI are retired, but `notebook` names still appear in models, task types, queue defaults, config names, templates, and compatibility helpers.
+Standalone notebook execution UI and job models are gone. Remaining notebook wording refers to `.ipynb` files handled by `file_llm` and `app/services/notebook_multimodal.py`.
 
-Current supported `.ipynb` work is file/LLM-style review. Do not infer behavior from names like `Notebook`, `Job`, `QuestionType.NOTEBOOK`, or `notebook_question_configs`; inspect `app/services/submissions.py`, `app/routes/jobs.py`, and the question type being handled.
+Do not reintroduce a notebook question type unless the product is explicitly adding a new active workflow with tests and migration notes.
 
 ---
 
 ## Similar issues found in the repository
 
-### Unified file/LLM questions coexist with legacy enum values
+### File/LLM depends on extension-specific extraction
 
-The current teacher UI creates unified file upload / LLM-reviewed questions as `QuestionType.FILE_LLM`. Legacy enum values `PDF_LLM` and `FORMATTED_TEXT_LLM` still exist in `app/constants.py`, templates, and service branches. `app/db.py` backfills old rows to `file_llm`.
+The teacher UI creates unified file upload / LLM-reviewed questions as `QuestionType.FILE_LLM`. PDF, text, TeX, Markdown, and ipynb behavior is controlled by `FileQuestionConfig.accepted_extensions` and the uploaded file extension.
 
-When changing file-question behavior, include all three values in greps:
+When changing file-question behavior, inspect:
 
-- `file_llm`
-- `pdf_llm`
-- `formatted_text_llm`
-
-Also inspect `FileQuestionConfig.accepted_extensions`, because PDF, TeX, text, and ipynb behavior is now controlled more by allowed extensions than by the old split question types.
+- `create_file_submission`
+- `process_file_llm_evaluation`
+- `FileQuestionConfig.accepted_extensions`
+- `app/services/notebook_multimodal.py`
+- student and teacher question templates
 
 ### PDF grading behavior is image-first
 
@@ -73,22 +66,22 @@ Discussion AI uses `resolve_discussion_ai_llm_config` in `app/services/discussio
 
 These paths intentionally share `LLMConfig` rows but not the same precedence rules. When changing LLM selection, quota, or admin UI wording, check both paths and tests.
 
-### Data-path helpers are duplicated
+### Data-path helpers are centralized
 
-`relative_to_data` and `absolute_data_path` exist in both `app/services/submissions.py` and `app/services/course_materials.py` with similar safety checks.
+`relative_to_data`, `absolute_data_path`, and writable-directory helpers live in `app/services/storage_paths.py`.
 
-If path security, upload layout, or data-directory behavior changes, update both implementations or factor them into a shared helper with focused tests. Do not weaken the "path must remain inside data dir" invariant.
+If path security, upload layout, or data-directory behavior changes, update the shared helper and all callers. Do not weaken the "path must remain inside data dir" invariant.
 
-### Queue names include retired terminology
+### Queue names are explicit
 
-`RQ_QUEUE_NAME` and the default `notebook-jobs` setting remain in `app/config.py` for compatibility, but current enqueue/worker code uses:
+Current enqueue/worker code uses:
 
 - `PYTHON_QUEUE_NAME`
 - `LLM_QUEUE_PREFIX`
 - `get_python_queue_name`
 - `llm_queue_name_for_config`
 
-For worker deployment or queue debugging, use the current queue names. Treat `RQ_QUEUE_NAME` as legacy unless a caller is reintroduced.
+Do not add a generic queue setting unless a new worker topology requires it.
 
 ### Question version snapshots are not a full audit log
 

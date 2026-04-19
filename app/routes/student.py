@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -36,18 +36,16 @@ from app.services.discussions import (
     flat_thread_for_template,
 )
 from app.services.post_close_reveal import reveal_bundle_for_question
+from app.services.scoring import is_submission_pending_teacher_review
 from app.services.submissions import (
     build_student_result_view,
     create_file_submission,
-    create_notebook_submission,
     create_code_submission,
     create_short_answer_submission,
     enqueue_submission_evaluation,
     get_submission_for_student,
-    is_submission_pending_teacher_review,
     list_submissions_for_question,
     read_student_safe_submission_artifact_text,
-    resolve_submission_artifact_path,
 )
 from app.web import render_template
 
@@ -252,57 +250,6 @@ def student_question_discuss(
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
 
 
-@router.post("/questions/{question_id}/submit-notebook")
-async def submit_notebook(
-    question_id: int,
-    request: Request,
-    notebook_file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-):
-    try:
-        user = require_user(request, db)
-    except RedirectRequired as redirect:
-        return RedirectResponse(url=redirect.location, status_code=303)
-
-    question = get_question_for_student(db, question_id, user.id)
-    if question is None or question.question_type != QuestionType.NOTEBOOK:
-        push_flash(
-            request,
-            choose_text(request, "Notebook question not found.", "未找到 Notebook 题目。"),
-            "danger",
-        )
-        return RedirectResponse(url="/student/courses", status_code=303)
-
-    file_bytes = await notebook_file.read()
-    filename = notebook_file.filename or "submission.ipynb"
-    try:
-        submission = create_notebook_submission(
-            db,
-            user_id=user.id,
-            question=question,
-            original_filename=filename,
-            notebook_bytes=file_bytes,
-        )
-        push_flash(
-            request,
-            choose_text(
-                request,
-                f"Submission #{submission.id} was received.",
-                f"已收到提交 #{submission.id}。",
-            ),
-            "success",
-        )
-    except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
-    except Exception as exc:
-        push_flash(
-            request,
-            choose_text(request, f"Notebook upload failed: {exc}", f"Notebook 上传失败：{exc}"),
-            "danger",
-        )
-    return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
-
-
 @router.post("/questions/{question_id}/submit-python")
 async def submit_python_code(
     question_id: int,
@@ -433,11 +380,7 @@ async def submit_file_question(
         return RedirectResponse(url=redirect.location, status_code=303)
 
     question = get_question_for_student(db, question_id, user.id)
-    if question is None or question.question_type not in {
-        QuestionType.PDF_LLM,
-        QuestionType.FORMATTED_TEXT_LLM,
-        QuestionType.FILE_LLM,
-    }:
+    if question is None or question.question_type != QuestionType.FILE_LLM:
         push_flash(
             request,
             choose_text(request, "File question not found.", "未找到文件题。"),
@@ -540,31 +483,9 @@ def student_submission_artifact(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
-    if artifact_name not in {"html", "executed_notebook"}:
-        push_flash(
-            request,
-            choose_text(request, "The requested artifact is not available.", "所请求的产物不可查看。"),
-            "warning",
-        )
-        return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
-
-    try:
-        artifact_path = resolve_submission_artifact_path(latest_result, artifact_name)
-    except FileNotFoundError:
-        push_flash(
-            request,
-            choose_text(request, "The requested artifact is not available yet.", "所请求的产物暂时还不可用。"),
-            "warning",
-        )
-        return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
-
-    media_type = "text/plain"
-    filename = artifact_path.name
-    if artifact_name == "html":
-        media_type = "text/html"
-        filename = f"submission-{submission_id}.html"
-    elif artifact_name == "executed_notebook":
-        media_type = "application/x-ipynb+json"
-        filename = f"submission-{submission_id}.ipynb"
-
-    return FileResponse(path=artifact_path, media_type=media_type, filename=filename)
+    push_flash(
+        request,
+        choose_text(request, "The requested artifact is not available.", "所请求的产物不可查看。"),
+        "warning",
+    )
+    return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)

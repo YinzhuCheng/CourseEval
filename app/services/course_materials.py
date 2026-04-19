@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -12,27 +11,9 @@ from app.config import get_settings
 from app.db import utcnow
 from app.models import Course, CourseMaterial, User
 from app.services.discussions import get_or_create_material_topic
+from app.services.storage_paths import absolute_data_path, relative_to_data
 
 settings = get_settings()
-
-
-def relative_to_data(path: Path) -> str:
-    data_dir = settings.data_dir.resolve()
-    resolved = path.resolve()
-    try:
-        return resolved.relative_to(data_dir).as_posix()
-    except ValueError:
-        raise ValueError("Path is outside the data directory.")
-
-
-def absolute_data_path(relative_path: str) -> Path:
-    p = Path(relative_path)
-    candidate = p if p.is_absolute() else settings.data_dir / p
-    data_dir = settings.data_dir.resolve()
-    resolved = candidate.resolve()
-    if data_dir not in resolved.parents and resolved != data_dir:
-        raise ValueError("Path is outside the data directory.")
-    return resolved
 
 
 def list_materials_for_course(db: Session, course_id: int) -> list[CourseMaterial]:

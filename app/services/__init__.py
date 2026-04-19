@@ -1,1 +1,1 @@
-"""Service layer for jobs and runner orchestration."""
+"""Service layer for CourseEval domain workflows."""

@@ -30,9 +30,9 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 ## Scoring logic & gradebook snapshots
 
-**Touch together:** `app/services/submissions.py` — especially `resolve_submission_score`, `submission_requires_teacher_confirmation`, `submission_eligible_for_gradebook`, `update_final_grade_snapshot` — plus **callers** in `app/routes/teacher.py` (grading), templates that show “pending teacher review”, and `app/services/teacher_analytics.py` / `post_close_reveal.py` for snapshot consumers.
+**Touch together:** `app/services/scoring.py` — especially `resolve_submission_score`, `submission_requires_teacher_confirmation`, `submission_eligible_for_gradebook` — plus `app/services/submissions.py` (`update_final_grade_snapshot`), **callers** in `app/routes/teacher.py` (grading), templates that show “pending teacher review”, and `app/services/teacher_analytics.py` / `post_close_reveal.py` for snapshot consumers.
 
-**Also verify:** `app/services/courses.py` defines **`resolve_submission_score(submission, latest_feedback)`** (different signature) used on some analytics paths—it does **not** implement the teacher-confirmation gate the same way as `submissions.py`. Changing scoring rules in one may leave the other inconsistent.
+**Invariant:** Keep only one `resolve_submission_score` definition. If another module needs score semantics, import from `app/services/scoring.py`.
 
 **Failure mode:** Teacher sees one score in UI while gradebook snapshot or analytics shows another.
 
@@ -50,7 +50,7 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 ---
 
-## Notebook / file / short-answer LLM flows
+## File / short-answer LLM flows
 
 **Touch together:** `app/services/submissions.py` (which task type is created per `QuestionType`, enqueue functions) + `app/services/llm.py` + type-specific helpers (`notebook_multimodal.py`, PDF path in file evaluation) + question config models in `app/models.py`.
 
@@ -58,9 +58,7 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 **Failure mode:** Submission stuck `submitted` with no LLM task; or wrong extractor used for `.ipynb`/PDF.
 
-**Note:** Legacy **notebook execution** in Docker is stubbed via `run_job_in_docker`—grep in `submissions.py` if touching old notebook job paths.
-
-**Also verify:** Unified file/LLM questions use `QuestionType.FILE_LLM`, while legacy `PDF_LLM` and `FORMATTED_TEXT_LLM` values still appear in compatibility branches and templates. See `docs/known-issues.md`.
+**Invariant:** `QuestionType.FILE_LLM` is the only file-upload LLM question type. PDF, text, TeX, Markdown, and ipynb behavior is selected by file extension.
 
 ---
 
@@ -112,9 +110,9 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 **Touch together:** `app/models.py` + any raw SQL in services + `scripts/init_db.py` / migration habits (if added later).
 
-**Why:** This repo leans on `init_database` / metadata create—production may need Alembic not present here.
+**Why:** v0 startup creates the current schema from metadata; future deployed upgrades need explicit migration steps.
 
-**Uncertainty:** Confirm deployment migration strategy before assuming `create_all` is enough.
+**Invariant:** Do not add compatibility shims casually to `app/db.py`. Prefer a documented migration script or clearly named idempotent upgrade function.
 
 **Operations:** See `docs/deployment-and-upgrades.md` before schema-changing deployments.
 

@@ -26,7 +26,6 @@ class Settings:
     internal_email_domain: str
     database_url: str
     redis_url: str
-    rq_queue_name: str
     python_queue_name: str
     llm_queue_prefix: str
     upload_max_bytes: int
@@ -68,12 +67,11 @@ def get_settings() -> Settings:
         internal_email_domain=os.getenv("INTERNAL_EMAIL_DOMAIN", "invite.local").strip() or "invite.local",
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{(data_dir / 'app.db').as_posix()}"),
         redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
-        rq_queue_name=os.getenv("RQ_QUEUE_NAME", "notebook-jobs"),
         python_queue_name=os.getenv("PYTHON_QUEUE_NAME", "python-evaluations"),
         llm_queue_prefix=os.getenv("LLM_QUEUE_PREFIX", "llm-evaluations"),
         upload_max_bytes=int(os.getenv("UPLOAD_MAX_BYTES", str(5 * 1024 * 1024))),
         execution_timeout_seconds=int(os.getenv("EXECUTION_TIMEOUT_SECONDS", "300")),
-        runner_image=os.getenv("RUNNER_IMAGE", "notebook-runner-mvp:latest"),
+        runner_image=os.getenv("RUNNER_IMAGE", "courseeval-runner:latest"),
         runner_memory_limit=os.getenv("RUNNER_MEMORY_LIMIT", "1g"),
         runner_cpus=os.getenv("RUNNER_CPUS", "1"),
         docker_network_disabled=_bool_env("DOCKER_NETWORK_DISABLED", True),

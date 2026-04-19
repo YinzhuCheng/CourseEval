@@ -10,9 +10,9 @@ from starlette.requests import Request
 
 from app.config import get_settings
 from app.db import get_db
-from app.services.course_materials import absolute_data_path
 from app.services.courses import get_course_for_staff, get_course_for_student
 from app.services.permissions import RedirectRequired, require_user
+from app.services.storage_paths import absolute_data_path
 from app.services.user_media import can_view_user_avatar_path
 
 router = APIRouter(tags=["uploads"])

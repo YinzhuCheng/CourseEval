@@ -50,11 +50,8 @@ class AssignmentStatus(str, Enum):
 
 
 class QuestionType(str, Enum):
-    NOTEBOOK = "notebook"
     SHORT_ANSWER = "short_answer"
     CODE = "code"
-    PDF_LLM = "pdf_llm"
-    FORMATTED_TEXT_LLM = "formatted_text_llm"
     FILE_LLM = "file_llm"
 
 
@@ -97,9 +94,7 @@ class EvaluationTaskStatus(str, Enum):
 
 
 class EvaluationTaskType(str, Enum):
-    NOTEBOOK_EVALUATION = "notebook_evaluation"
     SHORT_ANSWER_LLM = "short_answer_llm"
-    NOTEBOOK_LLM_FEEDBACK = "notebook_llm_feedback"
     CODE_EVALUATION = "code_evaluation"
     FILE_LLM_EVALUATION = "file_llm_evaluation"
 
@@ -138,17 +133,9 @@ class LLMResponseLanguage(str, Enum):
     EN = "en"
 
 
-class JobStatus(str, Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
-
-
 class DiscussionTopicKind(str, Enum):
     COURSE_MATERIAL = "course_material"
     QUESTION = "question"
 
 
-ACTIVE_JOB_STATUSES = {JobStatus.QUEUED.value, JobStatus.RUNNING.value}
 ACTIVE_SUBMISSION_STATUSES = {SubmissionStatus.QUEUED.value, SubmissionStatus.RUNNING.value}
