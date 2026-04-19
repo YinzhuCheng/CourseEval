@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 from email_validator import EmailNotValidError, validate_email
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -45,6 +45,15 @@ from app.services.llm_token_usage import (
     beijing_today_str,
     get_platform_default_daily_limit,
 )
+from app.services.user_storage import (
+    MAX_USER_STORAGE_BYTES,
+    PROFILE_ASSETS_PAGE_SIZE,
+    describe_asset_for_profile,
+    list_user_assets_page,
+    purge_user_asset,
+    storage_summary_for_admin,
+    viewer_may_purge_asset,
+)
 from app.services.discussion_ai import parse_optional_tested_llm_config_id
 from app.services.discussions import hard_delete_post, mute_user_in_course, unmute_user_in_course
 from app.services.email import send_smtp_test_email
@@ -80,7 +89,23 @@ def admin_users(request: Request, db: Session = Depends(get_db)):
         return _redirect("/login")
 
     users = list(db.scalars(select(User).order_by(User.created_at.desc())).all())
-    return render_template(request, db, "admin_users.html", {"users": users})
+    storage_by_id: dict[int, dict] = {}
+    for u in users:
+        storage_by_id[u.id] = storage_summary_for_admin(db, u)
+    policy = db.get(PlatformLlmTokenPolicy, 1)
+    student_def = int(policy.default_student_storage_bytes) if policy else 100 * 1024 * 1024
+    teacher_def = int(policy.default_teacher_storage_bytes) if policy else 1024 * 1024 * 1024
+    return render_template(
+        request,
+        db,
+        "admin_users.html",
+        {
+            "users": users,
+            "storage_by_user_id": storage_by_id,
+            "default_student_storage_bytes": student_def,
+            "default_teacher_storage_bytes": teacher_def,
+        },
+    )
 
 
 @router.post("/users/{user_id}/avatar/ban")
@@ -163,6 +188,148 @@ def admin_update_user_role(
     db.commit()
     push_flash(request, t(request, "flash.user_role_updated"), "success")
     return _redirect("/admin/users")
+
+
+@router.post("/system/storage-defaults")
+def admin_storage_defaults(
+    request: Request,
+    student_mb: str = Form(""),
+    teacher_mb: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    row = db.get(PlatformLlmTokenPolicy, 1)
+    if row is None:
+        row = PlatformLlmTokenPolicy(id=1, default_user_daily_llm_tokens=100000)
+        db.add(row)
+        db.flush()
+    try:
+        sm = int((student_mb or "100").strip() or "100")
+        tm = int((teacher_mb or "1024").strip() or "1024")
+    except ValueError:
+        push_flash(request, choose_text(request, "Invalid storage default.", "默认存储额度无效。"), "danger")
+        return _redirect("/admin/users")
+    row.default_student_storage_bytes = max(1, sm) * 1024 * 1024
+    row.default_teacher_storage_bytes = max(1, tm) * 1024 * 1024
+    row.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Default storage quotas updated.", "默认存储额度已更新。"), "success")
+    return _redirect("/admin/users")
+
+
+@router.post("/users/{user_id}/storage-override")
+def admin_user_storage_override(
+    user_id: int,
+    request: Request,
+    override_mb: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        viewer = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
+    from app.services.user_storage import can_platform_staff_purge_target
+
+    if not can_platform_staff_purge_target(viewer, target):
+        push_flash(request, choose_text(request, "You cannot change this user's quota.", "你无法修改该用户的存储额度。"), "danger")
+        return _redirect("/admin/users")
+    raw = (override_mb or "").strip()
+    if raw == "":
+        target.storage_quota_override_bytes = None
+    else:
+        try:
+            mb = int(raw)
+        except ValueError:
+            push_flash(request, choose_text(request, "Invalid override.", "覆盖额度无效。"), "danger")
+            return _redirect("/admin/users")
+        target.storage_quota_override_bytes = max(0, min(mb * 1024 * 1024, MAX_USER_STORAGE_BYTES))
+    target.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "User storage override saved.", "用户存储额度已保存。"), "success")
+    return _redirect("/admin/users")
+
+
+@router.get("/users/{user_id}/storage")
+def admin_user_storage_page(
+    user_id: int,
+    request: Request,
+    page: int = Query(1, ge=1),
+    db: Session = Depends(get_db),
+):
+    try:
+        viewer = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
+    from app.services.user_storage import can_platform_staff_purge_target
+
+    if not can_platform_staff_purge_target(viewer, target):
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect("/admin/users")
+    rows, total, total_pages = list_user_assets_page(db, user_id, page=max(1, page))
+    assets = []
+    for row in rows:
+        item = describe_asset_for_profile(db, row, viewer.id)
+        assets.append(
+            {
+                "id": item.object_id,
+                "label_en": item.label_en,
+                "label_zh": item.label_zh,
+                "link_url": item.link_url,
+                "size_bytes": item.size_bytes,
+                "can_delete": viewer_may_purge_asset(db, viewer, user_id, row),
+            }
+        )
+    return render_template(
+        request,
+        db,
+        "admin_user_storage.html",
+        {
+            "target_user": target,
+            "storage": storage_summary_for_admin(db, target),
+            "assets": assets,
+            "page": max(1, page),
+            "total_pages": total_pages,
+            "total": total,
+            "page_size": PROFILE_ASSETS_PAGE_SIZE,
+        },
+    )
+
+
+@router.post("/users/{user_id}/storage/{object_id}/delete")
+def admin_delete_user_stored_object(user_id: int, object_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        viewer = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    err = purge_user_asset(db, viewer=viewer, target_user_id=user_id, object_id=object_id)
+    if err == "not_found":
+        push_flash(request, choose_text(request, "Asset not found.", "未找到该文件。"), "danger")
+    elif err == "forbidden":
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+    elif err == "unsupported":
+        push_flash(request, choose_text(request, "Cannot remove this asset.", "无法删除该资源。"), "warning")
+    else:
+        push_flash(request, choose_text(request, "Asset removed.", "已删除。"), "success")
+    return _redirect(f"/admin/users/{user_id}/storage")
 
 
 @router.get("/runtime-images")

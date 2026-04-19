@@ -212,7 +212,9 @@ def list_posts_for_topic(
     return list(db.scalars(stmt).all())
 
 
-def attach_avatar_and_role_badges(db: Session, course_id: int, flat_rows: list[dict]) -> list[dict]:
+def attach_avatar_and_role_badges(
+    db: Session, course_id: int, flat_rows: list[dict], viewer: User | None = None
+) -> list[dict]:
     """Add avatar_url, role_badges, body_html for template."""
     from app.services.discussion_markdown import render_discussion_markdown
     from app.services.user_media import user_avatar_public_url
@@ -239,7 +241,12 @@ def attach_avatar_and_role_badges(db: Session, course_id: int, flat_rows: list[d
             elif u.account_role == AccountRole.TEACHER and not badges:
                 badges.append("account_teacher")
             r["role_badges"] = badges
-        r["body_html"] = render_discussion_markdown(r["post"].body_text, for_ai=is_ai)
+        r["body_html"] = render_discussion_markdown(
+            r["post"].body_text,
+            for_ai=is_ai,
+            viewer_user_id=viewer.id if viewer else None,
+            post_author_id=r["post"].author_id,
+        )
     return flat_rows
 
 
@@ -409,7 +416,7 @@ def build_discussion_view_context(
                 "can_delete": can_delete_discussion_post(db, viewer, p, course_id),
             }
         )
-    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
+    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated), viewer)
     staff = can_moderate_discussion(db, course_id, viewer)
     topic = db.get(DiscussionTopic, topic_id)
     exts = ", ".join(sorted(s.replace(".", "").upper() for s in ALLOWED_IMAGE_EXTENSIONS))

@@ -101,6 +101,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     avatar_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     avatar_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    storage_quota_override_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -152,6 +153,11 @@ class User(Base):
     email_delivery_logs: Mapped[list["EmailDeliveryLog"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    stored_objects: Mapped[list["UserStoredObject"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="UserStoredObject.user_id",
     )
 
     @property
@@ -314,6 +320,8 @@ class PlatformLlmTokenPolicy(Base):
         ForeignKey("llm_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    default_student_storage_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=100 * 1024 * 1024)
+    default_teacher_storage_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=1024 * 1024 * 1024)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -729,6 +737,8 @@ class Submission(Base):
     is_effective_submission: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     failure_reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    stored_file_purged_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stored_file_purge_actor: Mapped[str | None] = mapped_column(String(32), nullable=True)
     question_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("question_versions.id", ondelete="SET NULL"),
         nullable=True,
@@ -1006,3 +1016,25 @@ class DiscussionModerationLog(Base):
     target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     post_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class UserStoredObject(Base):
+    """Tracks per-user storage usage for quota enforcement and asset deletion."""
+
+    __tablename__ = "user_stored_objects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    ref_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    relative_path: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_actor: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="stored_objects")
+
+
+Index("ix_user_stored_objects_user_deleted", UserStoredObject.user_id, UserStoredObject.deleted_at)

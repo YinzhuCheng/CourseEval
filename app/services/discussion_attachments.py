@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.services.image_uploads import normalize_uploaded_image
-from app.services.storage_paths import relative_to_data
+from app.services.storage_paths import absolute_data_path, relative_to_data
 
 if TYPE_CHECKING:
     from app.models import DiscussionPost
@@ -55,10 +55,29 @@ def attach_discussion_images_to_post(
     extra_lines: list[str] = []
     stored_paths: list[str] = []
     try:
+        from app.services.user_storage import QuotaExceededError, record_stored_object
+
         for raw, name in files:
             rel = store_discussion_post_image(course_id, post.id, raw, name)
             stored_paths.append(rel)
-            db.add(DiscussionPostAttachment(post_id=post.id, relative_path=rel))
+            att = DiscussionPostAttachment(post_id=post.id, relative_path=rel)
+            db.add(att)
+            db.flush()
+            try:
+                sz = absolute_data_path(rel).stat().st_size
+                record_stored_object(
+                    db,
+                    user_id=post.author_id,
+                    category="discussion_attachment",
+                    relative_path=rel,
+                    size_bytes=sz,
+                    ref_type="attachment",
+                    ref_id=att.id,
+                )
+            except QuotaExceededError:
+                db.delete(att)
+                delete_attachment_file(rel)
+                raise ValueError("storage_quota_exceeded")
             extra_lines.append(f"![]({discussion_image_public_path(rel)})")
         if extra_lines:
             base = (post.body_text or "").rstrip()

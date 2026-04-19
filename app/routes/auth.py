@@ -34,12 +34,25 @@ from app.auth import (
 )
 from app.constants import AccountRole, PlatformRole, UserRole
 from app.db import get_db, utcnow
-from app.i18n import set_locale, t
+from app.i18n import choose_text, set_locale, t
 from app.models import User
 from app.services.courses import bootstrap_sample_data, ensure_user_in_open_community_course
 from app.services.email import send_password_reset_email, send_verification_email
 from app.services.permissions import RedirectRequired, require_user
+from app.services.storage_paths import absolute_data_path
 from app.services.user_media import store_user_avatar
+from app.services.user_storage import (
+    PROFILE_ASSETS_PAGE_SIZE,
+    QuotaExceededError,
+    describe_asset_for_profile,
+    effective_storage_quota_bytes,
+    list_user_assets_page,
+    purge_user_asset,
+    record_stored_object,
+    remove_avatar_storage,
+    total_used_bytes,
+    viewer_may_purge_asset,
+)
 from app.web import render_template
 
 
@@ -436,12 +449,62 @@ async def logout(request: Request):
 
 
 @router.get("/me/profile")
-async def profile_page(request: Request, db: Session = Depends(get_db)):
+async def profile_page(
+    request: Request,
+    page: int = Query(1, ge=1),
+    db: Session = Depends(get_db),
+):
     try:
         user = require_user(request, db)
     except RedirectRequired as redirect:
         return RedirectResponse(url=redirect.location, status_code=303)
-    return render_template(request, db, "profile.html", {"profile_user": user})
+    rows, total, total_pages = list_user_assets_page(db, user.id, page=page)
+    assets = []
+    for row in rows:
+        item = describe_asset_for_profile(db, row, user.id)
+        assets.append(
+            {
+                "id": item.object_id,
+                "label_en": item.label_en,
+                "label_zh": item.label_zh,
+                "link_url": item.link_url,
+                "size_bytes": item.size_bytes,
+                "can_delete": viewer_may_purge_asset(db, user, user.id, row),
+            }
+        )
+    return render_template(
+        request,
+        db,
+        "profile.html",
+        {
+            "profile_user": user,
+            "storage_used_bytes": total_used_bytes(db, user.id),
+            "storage_quota_bytes": effective_storage_quota_bytes(db, user),
+            "profile_assets": assets,
+            "profile_assets_page": page,
+            "profile_assets_total_pages": total_pages,
+            "profile_assets_total": total,
+            "profile_assets_page_size": PROFILE_ASSETS_PAGE_SIZE,
+        },
+    )
+
+
+@router.post("/me/profile/assets/{object_id}/delete")
+async def profile_delete_asset(object_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+    err = purge_user_asset(db, viewer=user, target_user_id=user.id, object_id=object_id)
+    if err == "not_found":
+        push_flash(request, choose_text(request, "Asset not found.", "未找到该文件记录。"), "danger")
+    elif err == "forbidden":
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+    elif err == "unsupported":
+        push_flash(request, choose_text(request, "This asset cannot be removed here.", "无法在此处删除该资源。"), "warning")
+    else:
+        push_flash(request, choose_text(request, "Asset removed.", "已删除。"), "success")
+    return RedirectResponse(url="/me/profile", status_code=303)
 
 
 @router.post("/me/profile/avatar")
@@ -455,7 +518,25 @@ async def profile_upload_avatar(request: Request, file: UploadFile = File(...), 
         return RedirectResponse(url="/me/profile", status_code=303)
     raw = await file.read()
     try:
+        remove_avatar_storage(db, user)
         rel = store_user_avatar(user.id, raw, file.filename or "avatar.png")
+        sz = absolute_data_path(rel).stat().st_size
+        record_stored_object(
+            db,
+            user_id=user.id,
+            category="avatar",
+            relative_path=rel,
+            size_bytes=sz,
+            ref_type="user",
+            ref_id=user.id,
+        )
+    except QuotaExceededError:
+        push_flash(
+            request,
+            choose_text(request, "Storage quota exceeded.", "存储空间已满，无法上传。"),
+            "danger",
+        )
+        return RedirectResponse(url="/me/profile", status_code=303)
     except ValueError as exc:
         msg = "unsupported_image_type" if str(exc) == "unsupported_image_type" else str(exc)
         push_flash(request, t(request, "flash.invalid_avatar") if msg == "unsupported_image_type" else msg, "danger")
@@ -474,6 +555,7 @@ async def profile_remove_avatar(request: Request, db: Session = Depends(get_db))
         user = require_user(request, db)
     except RedirectRequired as redirect:
         return RedirectResponse(url=redirect.location, status_code=303)
+    remove_avatar_storage(db, user)
     user.avatar_path = None
     user.updated_at = utcnow()
     db.commit()

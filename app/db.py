@@ -66,6 +66,34 @@ def _patch_sqlite_schema(conn) -> None:
         cols = {c["name"] for c in insp.get_columns("llm_configs")}
         if "description" not in cols:
             conn.execute(text("ALTER TABLE llm_configs ADD COLUMN description TEXT"))
+    if "users" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("users")}
+        if "storage_quota_override_bytes" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN storage_quota_override_bytes INTEGER"))
+    if "platform_llm_token_policy" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("platform_llm_token_policy")}
+        if "default_student_storage_bytes" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE platform_llm_token_policy "
+                    "ADD COLUMN default_student_storage_bytes INTEGER NOT NULL DEFAULT "
+                    + str(100 * 1024 * 1024)
+                )
+            )
+        if "default_teacher_storage_bytes" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE platform_llm_token_policy "
+                    "ADD COLUMN default_teacher_storage_bytes INTEGER NOT NULL DEFAULT "
+                    + str(1024 * 1024 * 1024)
+                )
+            )
+    if "submissions" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("submissions")}
+        if "stored_file_purged_at" not in cols:
+            conn.execute(text("ALTER TABLE submissions ADD COLUMN stored_file_purged_at DATETIME"))
+        if "stored_file_purge_actor" not in cols:
+            conn.execute(text("ALTER TABLE submissions ADD COLUMN stored_file_purge_actor VARCHAR(32)"))
 
 
 def init_database() -> None:
@@ -76,6 +104,18 @@ def init_database() -> None:
         with engine.begin() as conn:
             _patch_sqlite_schema(conn)
     _ensure_open_community_course()
+    _backfill_user_storage()
+
+
+def _backfill_user_storage() -> None:
+    from app.services.user_storage import backfill_stored_objects_from_disk
+
+    with SessionLocal() as db:
+        try:
+            backfill_stored_objects_from_disk(db)
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 def ensure_data_directories() -> None:

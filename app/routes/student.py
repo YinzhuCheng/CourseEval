@@ -48,6 +48,7 @@ from app.services.submissions import (
     list_submissions_for_question,
     read_student_safe_submission_artifact_text,
 )
+from app.services.user_storage import purge_submission_as_viewer
 from app.web import render_template
 
 
@@ -259,6 +260,8 @@ async def student_question_discuss(
                 ak = str(att_err) if att_err else ""
                 if ak == "too_many_images":
                     raise ValueError("too_many_images") from att_err
+                if ak == "storage_quota_exceeded":
+                    raise ValueError("storage_quota_exceeded") from att_err
                 if ak in ("unsupported_image_type", "file_too_large"):
                     raise ValueError(ak) from att_err
                 raise
@@ -283,6 +286,8 @@ async def student_question_discuss(
             )
         elif key == "too_many_images":
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        elif key == "storage_quota_exceeded":
+            msg = choose_text(request, "Storage quota exceeded.", "存储空间已满，无法上传图片。")
         elif key in ("unsupported_image_type", "file_too_large"):
             msg = format_image_upload_error(request, key)
         else:
@@ -355,7 +360,15 @@ async def submit_code(
             "success",
         )
     except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+        msg = str(exc)
+        if msg == "storage_quota_exceeded":
+            push_flash(
+                request,
+                choose_text(request, "Storage quota exceeded.", "存储空间已满，无法提交。"),
+                "danger",
+            )
+        else:
+            push_flash(request, choose_text(request, msg, msg), "danger")
     except Exception as exc:
         push_flash(
             request,
@@ -459,7 +472,15 @@ async def submit_file_question(
             "success",
         )
     except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+        msg = str(exc)
+        if msg == "storage_quota_exceeded":
+            push_flash(
+                request,
+                choose_text(request, "Storage quota exceeded.", "存储空间已满，无法提交。"),
+                "danger",
+            )
+        else:
+            push_flash(request, choose_text(request, msg, msg), "danger")
     except Exception as exc:
         push_flash(
             request,
@@ -467,6 +488,34 @@ async def submit_file_question(
             "danger",
         )
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+
+
+@router.post("/submissions/{submission_id}/purge-files")
+def student_purge_submission_files(submission_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+    submission = get_submission_for_student(db, submission_id, user.id)
+    if submission is None:
+        push_flash(request, choose_text(request, "Submission not found.", "未找到该提交。"), "danger")
+        return RedirectResponse(url="/student/courses", status_code=303)
+    err = purge_submission_as_viewer(db, user, submission)
+    if err == "not_found":
+        push_flash(request, choose_text(request, "No file stored for this submission.", "该提交没有可删除的文件。"), "warning")
+    elif err == "forbidden":
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+    else:
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "Stored files were removed. Your scores and feedback are unchanged.",
+                "已删除服务器上的提交文件，成绩与反馈保持不变。",
+            ),
+            "success",
+        )
+    return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
 
 
 @router.get("/submissions/{submission_id}")

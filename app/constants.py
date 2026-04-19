@@ -136,4 +136,13 @@ class DiscussionTopicKind(str, Enum):
     QUESTION = "question"
 
 
+class StorageDeletionActor(str, Enum):
+    """Who removed a stored asset (shown to viewers without personal names)."""
+
+    SELF = "self"
+    TEACHER = "teacher"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+
+
 ACTIVE_SUBMISSION_STATUSES = {SubmissionStatus.QUEUED.value, SubmissionStatus.RUNNING.value}

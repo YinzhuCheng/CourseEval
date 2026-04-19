@@ -154,6 +154,22 @@ async def teacher_upload_material_image(
     raw = await file.read()
     try:
         rel = store_material_image(course_id, material_id, raw, file.filename or "image.png")
+        from app.services.storage_paths import absolute_data_path
+        from app.services.user_storage import QuotaExceededError, record_stored_object
+
+        sz = absolute_data_path(rel).stat().st_size
+        record_stored_object(
+            db,
+            user_id=user.id,
+            category="course_material_image",
+            relative_path=rel,
+            size_bytes=sz,
+            ref_type="material",
+            ref_id=material_id,
+        )
+    except QuotaExceededError:
+        push_flash(request, choose_text(request, "Storage quota exceeded.", "存储空间已满，无法上传。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}/edit")
     except ValueError as e:
         push_flash(request, choose_text(request, str(e), "上传失败。"), "danger")
         return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}/edit")
@@ -262,6 +278,8 @@ async def teacher_material_discuss(
                 ak = str(att_err) if att_err else ""
                 if ak == "too_many_images":
                     raise ValueError("too_many_images") from att_err
+                if ak == "storage_quota_exceeded":
+                    raise ValueError("storage_quota_exceeded") from att_err
                 if ak in ("unsupported_image_type", "file_too_large"):
                     raise ValueError(ak) from att_err
                 raise
@@ -286,6 +304,8 @@ async def teacher_material_discuss(
             )
         elif key == "too_many_images":
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        elif key == "storage_quota_exceeded":
+            msg = choose_text(request, "Storage quota exceeded.", "存储空间已满，无法上传图片。")
         elif key in ("unsupported_image_type", "file_too_large"):
             msg = format_image_upload_error(request, key)
         else:
@@ -394,6 +414,8 @@ async def student_material_discuss(
                 ak = str(att_err) if att_err else ""
                 if ak == "too_many_images":
                     raise ValueError("too_many_images") from att_err
+                if ak == "storage_quota_exceeded":
+                    raise ValueError("storage_quota_exceeded") from att_err
                 if ak in ("unsupported_image_type", "file_too_large"):
                     raise ValueError(ak) from att_err
                 raise
@@ -418,6 +440,8 @@ async def student_material_discuss(
             )
         elif key == "too_many_images":
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        elif key == "storage_quota_exceeded":
+            msg = choose_text(request, "Storage quota exceeded.", "存储空间已满，无法上传图片。")
         elif key in ("unsupported_image_type", "file_too_large"):
             msg = format_image_upload_error(request, key)
         else:

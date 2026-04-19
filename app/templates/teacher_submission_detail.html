@@ -115,6 +115,13 @@
         {% if submission.original_filename %}
         <div class="small text-muted mb-2">{{ lx("Original file", "原始文件") }}: {{ submission.original_filename }}</div>
         {% endif %}
+        {% if submission.stored_file_path %}
+        <form method="post" action="/teacher/submissions/{{ submission.id }}/purge-files" class="mb-3" onsubmit="return confirm('Remove the student file from the server? Grades stay the same.');">
+          <button class="btn btn-outline-danger btn-sm" type="submit">{{ lx("Remove student file from server", "从服务器删除学生文件") }}</button>
+        </form>
+        {% elif submission.stored_file_purged_at %}
+        <p class="small text-muted mb-2">{{ lx("The original file was removed from the server.", "原始文件已从服务器移除。") }}</p>
+        {% endif %}
         <pre class="artifact-block">{{ submission.answer_text }}</pre>
       </div>
     </div>

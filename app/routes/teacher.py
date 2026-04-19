@@ -91,6 +91,7 @@ from app.services.submissions import (
     refresh_final_grade_snapshot,
     store_reference_answer_file,
 )
+from app.services.user_storage import purge_submission_as_viewer
 from app.services.teacher_analytics import (
     active_student_ids,
     compute_assignment_staff_stats,
@@ -1089,6 +1090,8 @@ async def teacher_question_discuss(
                 ak = str(att_err) if att_err else ""
                 if ak == "too_many_images":
                     raise ValueError("too_many_images") from att_err
+                if ak == "storage_quota_exceeded":
+                    raise ValueError("storage_quota_exceeded") from att_err
                 if ak in ("unsupported_image_type", "file_too_large"):
                     raise ValueError(ak) from att_err
                 raise
@@ -1113,6 +1116,8 @@ async def teacher_question_discuss(
             )
         elif key == "too_many_images":
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        elif key == "storage_quota_exceeded":
+            msg = choose_text(request, "Storage quota exceeded.", "存储空间已满，无法上传图片。")
         elif key in ("unsupported_image_type", "file_too_large"):
             msg = format_image_upload_error(request, key)
         else:
@@ -1541,6 +1546,49 @@ async def update_question(
             refresh_final_grade_snapshot(db, question.id, uid)
     push_flash(request, choose_text(request, "Question was updated.", "题目已更新。"), "success")
     return _redirect(f"/teacher/questions/{question.id}")
+
+
+@router.post("/submissions/{submission_id}/purge-files")
+def teacher_purge_submission_files(submission_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_teacher_account(request, db)
+        submission = get_submission_for_teacher(db, submission_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "You do not have teacher access to this submission.",
+                "你没有该提交记录的教师端访问权限。",
+            ),
+            "danger",
+        )
+        return _redirect("/teacher/courses")
+    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER:
+        push_flash(
+            request,
+            choose_text(request, "Only teachers can remove files for this course.", "只有本课程教师可以删除学生提交文件。"),
+            "danger",
+        )
+        return _redirect(f"/teacher/submissions/{submission.id}")
+    err = purge_submission_as_viewer(db, user, submission)
+    if err == "not_found":
+        push_flash(request, choose_text(request, "No file stored for this submission.", "该提交没有可删除的文件。"), "warning")
+    elif err == "forbidden":
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+    else:
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "Stored files were removed. Grades and feedback are unchanged.",
+                "已删除服务器上的提交文件，成绩与反馈保持不变。",
+            ),
+            "success",
+        )
+    return _redirect(f"/teacher/submissions/{submission_id}")
 
 
 @router.get("/submissions/{submission_id}")
