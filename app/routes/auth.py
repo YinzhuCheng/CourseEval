@@ -1,5 +1,5 @@
 from email_validator import EmailNotValidError, validate_email
-from fastapi import APIRouter, Depends, Form, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -36,8 +36,10 @@ from app.constants import AccountRole, PlatformRole, UserRole
 from app.db import get_db, utcnow
 from app.i18n import set_locale, t
 from app.models import User
-from app.services.courses import bootstrap_sample_data
+from app.services.courses import bootstrap_sample_data, ensure_user_in_open_community_course
 from app.services.email import send_password_reset_email, send_verification_email
+from app.services.permissions import RedirectRequired, require_user
+from app.services.user_media import store_user_avatar
 from app.web import render_template
 
 
@@ -287,6 +289,7 @@ def register_user(
         db.commit()
         db.refresh(user)
         bootstrap_sample_data(db, user)
+        ensure_user_in_open_community_course(db, user)
         db.commit()
         db.refresh(user)
         login_user(request, user)
@@ -346,6 +349,8 @@ def login(
         return RedirectResponse(url=f"/login?email={user.email}", status_code=303)
 
     login_user(request, user)
+    ensure_user_in_open_community_course(db, user)
+    db.commit()
     push_flash(request, t(request, "flash.login_success"), "success")
     return RedirectResponse(url=landing_path_for_user(user), status_code=303)
 
@@ -379,6 +384,7 @@ def verify_email(
     if not has_super_admin(db, require_verified=True):
         assign_user_role(user, UserRole.SUPER_ADMIN)
     bootstrap_sample_data(db, user)
+    ensure_user_in_open_community_course(db, user)
     db.commit()
     db.refresh(user)
 
@@ -427,3 +433,49 @@ def resend_verification_email(
 def logout(request: Request):
     logout_user(request)
     return RedirectResponse(url="/login", status_code=303)
+
+
+@router.get("/me/profile")
+def profile_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+    return render_template(request, db, "profile.html", {"profile_user": user})
+
+
+@router.post("/me/profile/avatar")
+async def profile_upload_avatar(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+    if user.avatar_banned:
+        push_flash(request, t(request, "flash.avatar_banned"), "danger")
+        return RedirectResponse(url="/me/profile", status_code=303)
+    raw = await file.read()
+    try:
+        rel = store_user_avatar(user.id, raw, file.filename or "avatar.png")
+    except ValueError as exc:
+        msg = "unsupported_image_type" if str(exc) == "unsupported_image_type" else str(exc)
+        push_flash(request, t(request, "flash.invalid_avatar") if msg == "unsupported_image_type" else msg, "danger")
+        return RedirectResponse(url="/me/profile", status_code=303)
+    user.avatar_path = rel
+    user.avatar_banned = False
+    user.updated_at = utcnow()
+    db.commit()
+    push_flash(request, t(request, "flash.avatar_updated"), "success")
+    return RedirectResponse(url="/me/profile", status_code=303)
+
+
+@router.post("/me/profile/avatar/remove")
+def profile_remove_avatar(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+    user.avatar_path = None
+    user.updated_at = utcnow()
+    db.commit()
+    push_flash(request, t(request, "flash.avatar_removed"), "success")
+    return RedirectResponse(url="/me/profile", status_code=303)

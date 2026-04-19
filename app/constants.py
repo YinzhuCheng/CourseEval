@@ -145,5 +145,10 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+class DiscussionTopicKind(str, Enum):
+    COURSE_MATERIAL = "course_material"
+    QUESTION = "question"
+
+
 ACTIVE_JOB_STATUSES = {JobStatus.QUEUED.value, JobStatus.RUNNING.value}
 ACTIVE_SUBMISSION_STATUSES = {SubmissionStatus.QUEUED.value, SubmissionStatus.RUNNING.value}

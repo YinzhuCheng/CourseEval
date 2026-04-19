@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -43,13 +43,17 @@ from app.models import (
     User,
 )
 from app.runtime_support import default_allowed_code_libraries_text
+from app.services.course_materials import list_materials_for_course
 from app.services.courses import (
     DEFAULT_ALLOWED_CODE_LIBRARIES,
+    OPEN_COMMUNITY_COURSE_CODE,
+    ensure_user_in_open_community_course,
     get_assignment_for_staff,
     get_course_for_staff,
     get_course_for_teacher,
     get_question_for_staff,
     get_question_for_teacher,
+    is_open_community_course,
     summarize_course_grade_matrix,
 )
 from app.services.permissions import (
@@ -59,6 +63,16 @@ from app.services.permissions import (
     require_login,
     require_teacher_account,
 )
+from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
+from app.services.discussions import (
+    attach_avatar_and_role_badges,
+    can_post_on_question_topic,
+    display_label_for_post,
+    get_or_create_question_topic,
+    list_posts_for_topic,
+    flat_thread_for_template,
+)
+from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
 from app.services.submissions import (
     get_submission_for_teacher,
@@ -66,6 +80,16 @@ from app.services.submissions import (
     read_submission_artifact_text,
     refresh_final_grade_snapshot,
     store_reference_answer_file,
+)
+from app.services.teacher_analytics import (
+    active_student_ids,
+    compute_assignment_staff_stats,
+    compute_course_staff_overview,
+    compute_question_class_stats,
+    enrich_course_grade_matrix,
+    grade_summary_from_float_scores,
+    percentile_rank,
+    score_distribution_by_question,
 )
 from app.web import render_template
 
@@ -86,15 +110,23 @@ def teacher_courses(request: Request, db: Session = Depends(get_db)):
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
 
+    ensure_user_in_open_community_course(db, user)
+    db.commit()
     memberships = (
         db.query(CourseMember)
         .join(Course)
         .filter(
             CourseMember.user_id == user.id,
-            CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
+            or_(
+                CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
+                Course.is_open_community.is_(True),
+            ),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
-        .order_by(Course.title.asc())
+        .order_by(
+            case((Course.is_open_community.is_(True), 0), else_=1).asc(),
+            Course.title.asc(),
+        )
         .all()
     )
     courses = [membership.course for membership in memberships]
@@ -128,6 +160,10 @@ def create_course(
         push_flash(request, choose_text(request, "Course code already exists.", "课程编号已存在。"), "danger")
         return _redirect("/teacher/courses")
 
+    if code == OPEN_COMMUNITY_COURSE_CODE:
+        push_flash(request, choose_text(request, "Reserved course code.", "该课程编号为系统保留。"), "danger")
+        return _redirect("/teacher/courses")
+
     course = Course(code=code, title=title, description=description.strip() or None, created_by=user.id)
     db.add(course)
     db.flush()
@@ -146,6 +182,54 @@ def create_course(
         "success",
     )
     return _redirect(f"/teacher/courses/{course.id}")
+
+
+@router.post("/courses/{course_id}/cover")
+async def upload_course_cover(
+    course_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect("/teacher/courses")
+    raw = await file.read()
+    from app.services.user_media import store_course_cover_image
+
+    try:
+        course.cover_image_path = store_course_cover_image(course.id, raw, file.filename or "cover.png")
+    except ValueError:
+        push_flash(request, choose_text(request, "Invalid image file.", "图片格式无效或文件过大。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Course image updated.", "课程图片已更新。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
+
+
+@router.post("/courses/{course_id}/cover/remove")
+def remove_course_cover(course_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        return _redirect("/teacher/courses")
+    from app.services.user_media import clear_course_cover_files
+
+    clear_course_cover_files(course.id)
+    course.cover_image_path = None
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Course image removed.", "已移除课程图片。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
 
 
 @router.get("/courses/{course_id}")
@@ -195,7 +279,13 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .all()
     )
     course_role = get_course_role(db, course.id, user.id)
-    grade_matrix = summarize_course_grade_matrix(db, course.id) if course_role == CourseRole.TEACHER else None
+    grade_matrix = None
+    course_staff_overview = None
+    materials = list_materials_for_course(db, course.id)
+    if course_role in (CourseRole.TEACHER, CourseRole.TA):
+        course_staff_overview = compute_course_staff_overview(db, course.id)
+    if course_role == CourseRole.TEACHER:
+        grade_matrix = enrich_course_grade_matrix(db, course.id, summarize_course_grade_matrix(db, course.id))
     return render_template(
         request,
         db,
@@ -203,11 +293,13 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         {
             "course": course,
             "assignments": assignments,
+            "materials": materials,
             "members": members,
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "available_llm_configs": available_llm_configs,
             "grade_matrix": grade_matrix,
+            "course_staff_overview": course_staff_overview,
         },
     )
 
@@ -286,6 +378,43 @@ def update_course_llm_config(
         "success",
     )
     return _redirect(f"/teacher/courses/{course.id}")
+
+
+@router.post("/courses/{course_id}/discussion-ai-llm")
+def update_course_discussion_ai_llm(
+    course_id: int,
+    request: Request,
+    discussion_question_llm_config_id: str = Form(""),
+    discussion_material_llm_config_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/teacher/courses")
+    if course is None:
+        return _redirect("/teacher/courses")
+
+    from app.services.discussion_ai import parse_optional_tested_llm_config_id
+
+    dq = parse_optional_tested_llm_config_id(db, discussion_question_llm_config_id)
+    dm = parse_optional_tested_llm_config_id(db, discussion_material_llm_config_id)
+    if discussion_question_llm_config_id.strip() and dq is None:
+        push_flash(request, choose_text(request, "Invalid question discussion AI model.", "习题讨论 AI 模型无效或未通过测试。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    if discussion_material_llm_config_id.strip() and dm is None:
+        push_flash(request, choose_text(request, "Invalid material discussion AI model.", "资料讨论 AI 模型无效或未通过测试。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+
+    course.discussion_ai_question_llm_config_id = dq
+    course.discussion_ai_material_llm_config_id = dm
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Discussion AI overrides saved.", "讨论区 AI 课程覆盖已保存。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
 
 
 @router.post("/courses/{course_id}/members")
@@ -454,6 +583,8 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
         .all()
     )
     course_role = get_course_role(db, assignment.course_id, user.id)
+    student_ids = active_student_ids(db, assignment.course_id)
+    assignment_staff_stats = compute_assignment_staff_stats(db, assignment.id, assignment.course_id, student_ids)
     return render_template(
         request,
         db,
@@ -465,6 +596,7 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
+            "assignment_staff_stats": assignment_staff_stats,
         },
     )
 
@@ -527,7 +659,7 @@ async def create_question(
             .filter(
                 Assignment.id == assignment_id,
                 CourseMember.user_id == user.id,
-                CourseMember.role == CourseRole.TEACHER,
+                or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
                 CourseMember.status == MembershipStatus.ACTIVE,
             )
             .first()
@@ -849,6 +981,20 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
         .order_by(QuestionVersion.version_number.desc())
         .all()
     )
+    sid_list = active_student_ids(db, question.assignment.course_id)
+    question_class_stats = compute_question_class_stats(db, question.id, question.assignment.course_id, sid_list)
+    topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
+    db.commit()
+    posts = list_posts_for_topic(db, topic.id)
+    decorated = []
+    for p in posts:
+        label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
+        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
+    threaded = attach_avatar_and_role_badges(
+        db, question.assignment.course_id, flat_thread_for_template(posts, decorated)
+    )
+    reveal = reveal_bundle_for_question(db, question)
+    can_discuss = can_post_on_question_topic(db, question, user)
     return render_template(
         request,
         db,
@@ -861,8 +1007,59 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
+            "question_class_stats": question_class_stats,
+            "topic_id": topic.id,
+            "discussion_thread": threaded,
+            "can_post_discussion": can_discuss,
+            "reveal": reveal,
+            "discussion_post_url": f"/teacher/questions/{question_id}/discuss",
+            "discussion_notice": "",
         },
     )
+
+
+@router.post("/questions/{question_id}/discuss")
+def teacher_question_discuss(
+    question_id: int,
+    request: Request,
+    body: str = Form(""),
+    parent_post_id: str = Form(""),
+    anonymous: str = Form(""),
+    request_ai: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        question = get_question_for_staff(db, question_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if question is None:
+        return _redirect("/teacher/courses")
+    if not can_post_on_question_topic(db, question, user):
+        push_flash(request, choose_text(request, "You cannot post here.", "你无法在此发言。"), "danger")
+        return _redirect(f"/teacher/questions/{question_id}")
+    topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
+    db.commit()
+    pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    try:
+        _u, ai_err = create_user_post_and_maybe_ai_reply(
+            db,
+            topic=topic,
+            user=user,
+            body=body,
+            parent_post_id=pid,
+            is_anonymous=(anonymous == "on" or anonymous == "true"),
+            request_ai=(request_ai == "on" or request_ai == "true"),
+        )
+        db.commit()
+    except ValueError:
+        db.rollback()
+        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
+        return _redirect(f"/teacher/questions/{question_id}")
+    push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+    if ai_err:
+        push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
+    return _redirect(f"/teacher/questions/{question_id}")
 
 
 @router.get("/courses/{course_id}/grades/student/{student_id}")
@@ -901,11 +1098,14 @@ def teacher_student_course_grades(course_id: int, student_id: int, request: Requ
     assignments = (
         db.query(Assignment).filter(Assignment.course_id == course_id).order_by(Assignment.created_at.desc()).all()
     )
+    all_student_ids = active_student_ids(db, course_id)
     rows = []
     for asn in assignments:
         questions = (
             db.query(Question).filter(Question.assignment_id == asn.id).order_by(Question.order_index.asc()).all()
         )
+        q_ids = [q.id for q in questions]
+        class_scores_by_q = score_distribution_by_question(db, q_ids, all_student_ids)
         q_cells = []
         for q in questions:
             sub = (
@@ -922,12 +1122,16 @@ def teacher_student_course_grades(course_id: int, student_id: int, request: Requ
                 )
                 .first()
             )
+            peer_scores = class_scores_by_q.get(q.id, [])
+            st_score = float(snap.score) if snap is not None and snap.score is not None else None
             q_cells.append(
                 {
                     "question": q,
                     "submitted": sub is not None,
                     "submission": sub,
                     "snapshot": snap,
+                    "class_score_summary": grade_summary_from_float_scores(peer_scores),
+                    "percentile_rank": percentile_rank(peer_scores, st_score),
                 }
             )
         asn_total = (
@@ -1233,7 +1437,10 @@ def grade_submission(
         )
         return _redirect("/teacher/courses")
 
-    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER:
+    sub_course = submission.question.assignment.course
+    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(
+        sub_course
+    ):
         push_flash(
             request,
             choose_text(

@@ -2,7 +2,7 @@ import json
 import secrets
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import is_admin
@@ -39,6 +39,7 @@ from app.runtime_support import default_allowed_code_libraries_text
 
 
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
+OPEN_COMMUNITY_COURSE_CODE = "__OPEN_COMMUNITY__"
 DEFAULT_ALLOWED_CODE_LIBRARIES = default_allowed_code_libraries_text("en")
 DEFAULT_ALLOWED_PYTHON_LIBRARIES = DEFAULT_ALLOWED_CODE_LIBRARIES
 # Keep the legacy name as an alias so older imports and payload builders stay valid.
@@ -68,6 +69,40 @@ def generate_join_code() -> str:
     return secrets.token_hex(3).upper()
 
 
+def is_open_community_course(course: Course | None) -> bool:
+    return bool(course and getattr(course, "is_open_community", False))
+
+
+def sort_courses_for_display(courses: list[Course]) -> list[Course]:
+    """Pin the platform open community course first, then alphabetical by title."""
+    return sorted(
+        courses,
+        key=lambda c: (0 if is_open_community_course(c) else 1, (c.title or "").lower(), c.id),
+    )
+
+
+def ensure_user_in_open_community_course(db: Session, user: User) -> None:
+    """Add active verified users to the platform open community course (student role)."""
+    if not user.is_active or not user.email_verified:
+        return
+    course = db.scalar(select(Course).where(Course.code == OPEN_COMMUNITY_COURSE_CODE))
+    if course is None or not course.is_open_community:
+        return
+    row = db.scalar(select(CourseMember).where(CourseMember.course_id == course.id, CourseMember.user_id == user.id))
+    if row is None:
+        db.add(
+            CourseMember(
+                course_id=course.id,
+                user_id=user.id,
+                role=CourseRole.STUDENT,
+                status=MembershipStatus.ACTIVE,
+            )
+        )
+    else:
+        row.status = MembershipStatus.ACTIVE
+        row.role = CourseRole.STUDENT
+
+
 def list_courses_for_student(db: Session, user_id: int) -> list[Course]:
     statement = (
         select(Course)
@@ -76,7 +111,10 @@ def list_courses_for_student(db: Session, user_id: int) -> list[Course]:
             CourseMember.user_id == user_id,
             CourseMember.status == MembershipStatus.ACTIVE,
         )
-        .order_by(Course.title.asc())
+        .order_by(
+            case((Course.is_open_community.is_(True), 0), else_=1).asc(),
+            Course.title.asc(),
+        )
     )
     return list(db.scalars(statement).unique())
 
@@ -145,7 +183,7 @@ def get_course_for_teacher(db: Session, course_id: int, teacher_user_id: int) ->
         .where(
             Course.id == course_id,
             CourseMember.user_id == teacher_user_id,
-            CourseMember.role == CourseRole.TEACHER,
+            or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -160,11 +198,12 @@ def get_question_for_teacher(db: Session, question_id: int, teacher_user_id: int
             *_question_loader_options(),
         )
         .join(Assignment, Question.assignment_id == Assignment.id)
+        .join(Course, Course.id == Assignment.course_id)
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
         .where(
             Question.id == question_id,
             CourseMember.user_id == teacher_user_id,
-            CourseMember.role == CourseRole.TEACHER,
+            or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -173,62 +212,21 @@ def get_question_for_teacher(db: Session, question_id: int, teacher_user_id: int
 
 def list_courses_for_user(db: Session, user: User) -> list[Course]:
     if is_admin(user):
-        statement = select(Course).order_by(Course.title.asc())
+        statement = select(Course).order_by(
+            case((Course.is_open_community.is_(True), 0), else_=1).asc(),
+            Course.title.asc(),
+        )
     else:
         statement = (
             select(Course)
             .join(CourseMember, CourseMember.course_id == Course.id)
             .where(CourseMember.user_id == user.id, CourseMember.status == MembershipStatus.ACTIVE)
-            .order_by(Course.title.asc())
+            .order_by(
+                case((Course.is_open_community.is_(True), 0), else_=1).asc(),
+                Course.title.asc(),
+            )
         )
     return list(db.scalars(statement).unique())
-
-
-def list_courses_for_student(db: Session, user_id: int) -> list[Course]:
-    statement = (
-        select(Course)
-        .join(CourseMember, CourseMember.course_id == Course.id)
-        .where(
-            CourseMember.user_id == user_id,
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-        .order_by(Course.title.asc())
-    )
-    return list(db.scalars(statement).unique())
-
-
-def get_course_for_student(db: Session, course_id: int, user_id: int) -> Course | None:
-    statement = (
-        select(Course)
-        .options(
-            joinedload(Course.assignments).joinedload(Assignment.questions),
-            joinedload(Course.members).joinedload(CourseMember.user),
-        )
-        .join(CourseMember, CourseMember.course_id == Course.id)
-        .where(
-            Course.id == course_id,
-            CourseMember.user_id == user_id,
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-    )
-    return db.scalar(statement)
-
-
-def get_assignment_for_student(db: Session, assignment_id: int, user_id: int) -> Assignment | None:
-    statement = (
-        select(Assignment)
-        .options(
-            joinedload(Assignment.course),
-            *_assignment_question_loader_options(),
-        )
-        .join(CourseMember, CourseMember.course_id == Assignment.course_id)
-        .where(
-            Assignment.id == assignment_id,
-            CourseMember.user_id == user_id,
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-    )
-    return db.scalar(statement)
 
 
 def get_course_for_staff(db: Session, course_id: int, user_id: int) -> Course | None:
@@ -243,7 +241,7 @@ def get_course_for_staff(db: Session, course_id: int, user_id: int) -> Course | 
         .where(
             Course.id == course_id,
             CourseMember.user_id == user_id,
-            CourseMember.role.in_(STAFF_COURSE_ROLES),
+            or_(CourseMember.role.in_(STAFF_COURSE_ROLES), Course.is_open_community.is_(True)),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -258,29 +256,11 @@ def get_assignment_for_staff(db: Session, assignment_id: int, user_id: int) -> A
             *_assignment_question_loader_options(),
         )
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
+        .join(Course, Course.id == Assignment.course_id)
         .where(
             Assignment.id == assignment_id,
             CourseMember.user_id == user_id,
-            CourseMember.role.in_(STAFF_COURSE_ROLES),
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-    )
-    return db.scalar(statement)
-
-
-def get_course_for_teacher(db: Session, course_id: int, user_id: int) -> Course | None:
-    statement = (
-        select(Course)
-        .options(
-            joinedload(Course.assignments).joinedload(Assignment.questions),
-            joinedload(Course.members).joinedload(CourseMember.user),
-            joinedload(Course.default_llm_config),
-        )
-        .join(CourseMember, CourseMember.course_id == Course.id)
-        .where(
-            Course.id == course_id,
-            CourseMember.user_id == user_id,
-            CourseMember.role == CourseRole.TEACHER,
+            or_(CourseMember.role.in_(STAFF_COURSE_ROLES), Course.is_open_community.is_(True)),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -295,30 +275,12 @@ def get_question_for_staff(db: Session, question_id: int, user_id: int) -> Quest
             *_question_loader_options(),
         )
         .join(Assignment, Assignment.id == Question.assignment_id)
+        .join(Course, Course.id == Assignment.course_id)
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
         .where(
             Question.id == question_id,
             CourseMember.user_id == user_id,
-            CourseMember.role.in_(STAFF_COURSE_ROLES),
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-    )
-    return db.scalar(statement)
-
-
-def get_question_for_teacher(db: Session, question_id: int, user_id: int) -> Question | None:
-    statement = (
-        select(Question)
-        .options(
-            joinedload(Question.assignment).joinedload(Assignment.course),
-            *_question_loader_options(),
-        )
-        .join(Assignment, Assignment.id == Question.assignment_id)
-        .join(CourseMember, CourseMember.course_id == Assignment.course_id)
-        .where(
-            Question.id == question_id,
-            CourseMember.user_id == user_id,
-            CourseMember.role == CourseRole.TEACHER,
+            or_(CourseMember.role.in_(STAFF_COURSE_ROLES), Course.is_open_community.is_(True)),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -354,8 +316,11 @@ def create_course(
     teacher_user_ids: list[int],
     student_user_ids: list[int],
 ) -> Course:
+    normalized_code = code.strip().upper()
+    if normalized_code == OPEN_COMMUNITY_COURSE_CODE:
+        raise ValueError("Reserved course code.")
     course = Course(
-        code=code.strip().upper(),
+        code=normalized_code,
         join_code=generate_join_code(),
         title=title.strip(),
         description=description.strip() or None,
@@ -401,6 +366,8 @@ def join_course_by_code(db: Session, *, user: User, join_code: str) -> Course:
     course = db.scalar(select(Course).where(Course.join_code == normalized))
     if course is None:
         raise ValueError("Course join code is invalid.")
+    if course.is_open_community:
+        raise ValueError("This course does not use a join code.")
 
     membership = db.scalar(
         select(CourseMember).where(

@@ -119,6 +119,7 @@ def migrate_legacy_schema() -> None:
             )
     if "courses" in inspector.get_table_names():
         _ensure_column("courses", "join_code", "VARCHAR(32)")
+        _ensure_column("courses", "is_open_community", "BOOLEAN NOT NULL DEFAULT 0")
         _ensure_column("courses", "use_global_llm_default", "BOOLEAN NOT NULL DEFAULT 1")
         with engine.begin() as connection:
             connection.execute(
@@ -307,6 +308,169 @@ def _ensure_question_version_schema() -> None:
     _ensure_llm_grading_enhancements()
     _ensure_llm_token_policy_tables()
     _bootstrap_file_llm_questions_disable_teacher_confirmation()
+    _ensure_discussion_tables()
+    _ensure_user_avatar_and_course_cover()
+    _ensure_discussion_ai_columns()
+    _ensure_open_community_course()
+
+
+def _ensure_open_community_course() -> None:
+    """Single platform-wide course: all active users are members as students; no designated teacher."""
+    from app.constants import CourseRole, CourseStatus, MembershipStatus
+    from app.models import Course, CourseMember, User
+
+    inspector = inspect(engine)
+    if "courses" not in inspector.get_table_names() or "course_members" not in inspector.get_table_names():
+        return
+    code = "__OPEN_COMMUNITY__"
+    with SessionLocal() as db:
+        course = db.scalar(select(Course).where(Course.code == code))
+        if course is None:
+            course = Course(
+                code=code,
+                join_code=None,
+                title="自由讨论区",
+                description="全员公共交流区：可发布学习资料与习题；无固定任课教师，由平台管理员治理。",
+                status=CourseStatus.ACTIVE,
+                is_open_community=True,
+                created_by=None,
+            )
+            db.add(course)
+            db.commit()
+            db.refresh(course)
+        elif not course.is_open_community:
+            course.is_open_community = True
+            if not (course.title or "").strip():
+                course.title = "自由讨论区"
+            db.commit()
+
+        user_ids = list(db.scalars(select(User.id).where(User.is_active.is_(True))).all())
+        for uid in user_ids:
+            row = db.scalar(
+                select(CourseMember).where(CourseMember.course_id == course.id, CourseMember.user_id == uid)
+            )
+            if row is None:
+                db.add(
+                    CourseMember(
+                        course_id=course.id,
+                        user_id=uid,
+                        role=CourseRole.STUDENT,
+                        status=MembershipStatus.ACTIVE,
+                    )
+                )
+            else:
+                row.status = MembershipStatus.ACTIVE
+                row.role = CourseRole.STUDENT
+        db.commit()
+
+
+def _ensure_discussion_tables() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "course_materials" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE course_materials (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        course_id INTEGER NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        body_markdown TEXT,
+                        external_url VARCHAR(2048),
+                        sort_order INTEGER NOT NULL DEFAULT 0,
+                        created_by INTEGER,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME,
+                        FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE,
+                        FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX ix_course_materials_course_id ON course_materials (course_id)"))
+    if "discussion_topics" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE discussion_topics (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        course_id INTEGER NOT NULL,
+                        kind VARCHAR(32) NOT NULL,
+                        course_material_id INTEGER,
+                        question_id INTEGER,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE,
+                        FOREIGN KEY(course_material_id) REFERENCES course_materials (id) ON DELETE CASCADE,
+                        FOREIGN KEY(question_id) REFERENCES questions (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE UNIQUE INDEX uq_discussion_topics_material ON discussion_topics (course_material_id)"))
+            connection.execute(text("CREATE UNIQUE INDEX uq_discussion_topics_question ON discussion_topics (question_id)"))
+            connection.execute(text("CREATE INDEX ix_discussion_topics_course_kind ON discussion_topics (course_id, kind)"))
+    if "discussion_posts" not in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE discussion_posts (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        topic_id INTEGER NOT NULL,
+                        author_id INTEGER NOT NULL,
+                        parent_post_id INTEGER,
+                        body_text TEXT NOT NULL,
+                        is_anonymous INTEGER NOT NULL DEFAULT 0,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(topic_id) REFERENCES discussion_topics (id) ON DELETE CASCADE,
+                        FOREIGN KEY(author_id) REFERENCES users (id) ON DELETE CASCADE,
+                        FOREIGN KEY(parent_post_id) REFERENCES discussion_posts (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX ix_discussion_posts_topic_id ON discussion_posts (topic_id)"))
+            connection.execute(text("CREATE INDEX ix_discussion_posts_topic_created ON discussion_posts (topic_id, created_at)"))
+    tables = set(inspect(engine).get_table_names())
+    if "discussion_topics" in tables and "questions" in tables:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO discussion_topics (course_id, kind, question_id, course_material_id, created_at)
+                    SELECT a.course_id, 'question', q.id, NULL, datetime('now')
+                    FROM questions q
+                    JOIN assignments a ON a.id = q.assignment_id
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM discussion_topics dt WHERE dt.question_id = q.id
+                    )
+                    """
+                )
+            )
+
+
+def _ensure_discussion_ai_columns() -> None:
+    inspector = inspect(engine)
+    if "discussion_posts" in inspector.get_table_names():
+        _ensure_column("discussion_posts", "is_ai", "BOOLEAN NOT NULL DEFAULT 0")
+    if "courses" in inspector.get_table_names():
+        _ensure_column("courses", "discussion_ai_question_llm_config_id", "INTEGER")
+        _ensure_column("courses", "discussion_ai_material_llm_config_id", "INTEGER")
+    if "platform_llm_token_policy" in inspector.get_table_names():
+        _ensure_column("platform_llm_token_policy", "discussion_ai_default_llm_config_id", "INTEGER")
+        _ensure_column("platform_llm_token_policy", "discussion_ai_question_llm_config_id", "INTEGER")
+        _ensure_column("platform_llm_token_policy", "discussion_ai_material_llm_config_id", "INTEGER")
+
+
+def _ensure_user_avatar_and_course_cover() -> None:
+    inspector = inspect(engine)
+    if "users" in inspector.get_table_names():
+        _ensure_column("users", "avatar_path", "VARCHAR(512)")
+        _ensure_column("users", "avatar_banned", "BOOLEAN NOT NULL DEFAULT 0")
+    if "courses" in inspector.get_table_names():
+        _ensure_column("courses", "cover_image_path", "VARCHAR(512)")
 
 
 def _ensure_code_question_config_table() -> None:

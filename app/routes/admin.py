@@ -33,6 +33,7 @@ from app.services.llm_token_usage import (
     beijing_today_str,
     get_platform_default_daily_limit,
 )
+from app.services.discussion_ai import parse_optional_tested_llm_config_id
 from app.services.email import send_smtp_test_email
 from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
@@ -67,6 +68,45 @@ def admin_users(request: Request, db: Session = Depends(get_db)):
 
     users = list(db.scalars(select(User).order_by(User.created_at.desc())).all())
     return render_template(request, db, "admin_users.html", {"users": users})
+
+
+@router.post("/users/{user_id}/avatar/ban")
+def admin_ban_user_avatar(user_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
+    target.avatar_banned = True
+    target.avatar_path = None
+    target.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Avatar banned for this user.", "已禁止该用户使用头像。"), "success")
+    return _redirect("/admin/users")
+
+
+@router.post("/users/{user_id}/avatar/unban")
+def admin_unban_user_avatar(user_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, t(request, "flash.user_not_found"), "danger")
+        return _redirect("/admin/users")
+    target.avatar_banned = False
+    target.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Avatar ban lifted.", "已解除头像限制。"), "success")
+    return _redirect("/admin/users")
 
 
 @router.post("/users/{user_id}/role")
@@ -189,6 +229,7 @@ def admin_llm_configs(request: Request, db: Session = Depends(get_db)):
 
     configs = list(db.scalars(select(LLMConfig).order_by(LLMConfig.created_at.desc())).all())
     platform_default = get_platform_default_daily_limit(db)
+    policy = db.get(PlatformLlmTokenPolicy, 1)
     return render_template(
         request,
         db,
@@ -199,8 +240,52 @@ def admin_llm_configs(request: Request, db: Session = Depends(get_db)):
             "beijing_usage_date": beijing_today_str(),
             "token_usage_rows": admin_usage_rows(db),
             "total_llm_tokens_recorded": admin_total_usage_all_time(db),
+            "discussion_ai_policy": policy,
         },
     )
+
+
+@router.post("/llm-configs/discussion-ai")
+def admin_discussion_ai_llm_overrides(
+    request: Request,
+    discussion_default_llm_config_id: str = Form(""),
+    discussion_question_llm_config_id: str = Form(""),
+    discussion_material_llm_config_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    row = db.get(PlatformLlmTokenPolicy, 1)
+    if row is None:
+        row = PlatformLlmTokenPolicy(id=1, default_user_daily_llm_tokens=100000)
+        db.add(row)
+        db.flush()
+
+    d0 = parse_optional_tested_llm_config_id(db, discussion_default_llm_config_id)
+    dq = parse_optional_tested_llm_config_id(db, discussion_question_llm_config_id)
+    dm = parse_optional_tested_llm_config_id(db, discussion_material_llm_config_id)
+    if discussion_default_llm_config_id.strip() and d0 is None:
+        push_flash(request, choose_text(request, "Invalid default discussion AI config.", "讨论区 AI 默认模型无效或未通过测试。"), "danger")
+        return _redirect("/admin/llm-configs")
+    if discussion_question_llm_config_id.strip() and dq is None:
+        push_flash(request, choose_text(request, "Invalid question-discussion AI config.", "习题讨论 AI 模型无效或未通过测试。"), "danger")
+        return _redirect("/admin/llm-configs")
+    if discussion_material_llm_config_id.strip() and dm is None:
+        push_flash(request, choose_text(request, "Invalid material-discussion AI config.", "资料讨论 AI 模型无效或未通过测试。"), "danger")
+        return _redirect("/admin/llm-configs")
+
+    row.discussion_ai_default_llm_config_id = d0
+    row.discussion_ai_question_llm_config_id = dq
+    row.discussion_ai_material_llm_config_id = dm
+    row.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Discussion AI defaults were saved.", "讨论区 AI 默认配置已保存。"), "success")
+    return _redirect("/admin/llm-configs")
 
 
 @router.post("/llm-configs/token-policy")
