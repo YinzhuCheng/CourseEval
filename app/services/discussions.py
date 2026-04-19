@@ -213,7 +213,12 @@ def list_posts_for_topic(
 
 
 def attach_avatar_and_role_badges(
-    db: Session, course_id: int, flat_rows: list[dict], viewer: User | None = None
+    db: Session,
+    course_id: int,
+    flat_rows: list[dict],
+    viewer: User | None = None,
+    *,
+    topic_owner_user_id: int | None = None,
 ) -> list[dict]:
     """Add avatar_url, role_badges, body_html for template."""
     from app.services.discussion_markdown import render_discussion_markdown
@@ -233,6 +238,8 @@ def attach_avatar_and_role_badges(
                 badges.append("super_admin")
             elif is_admin(u):
                 badges.append("admin")
+            if topic_owner_user_id is not None and u.id == topic_owner_user_id:
+                badges.append("free_topic_owner")
             cr = roles.get(u.id)
             if cr == CourseRole.TEACHER:
                 badges.append("course_teacher")
@@ -382,6 +389,17 @@ def can_delete_discussion_post(db: Session, user: User, post: DiscussionPost, co
     return can_moderate_discussion(db, course_id, user)
 
 
+def can_moderate_free_topic_as_owner(
+    db: Session, course_id: int, user: User, topic_owner_user_id: int | None
+) -> bool:
+    """Admins, course staff, or the user who created the free-discussion topic card."""
+    if can_moderate_discussion(db, course_id, user):
+        return True
+    if topic_owner_user_id is not None and topic_owner_user_id == user.id:
+        return True
+    return False
+
+
 def build_discussion_view_context(
     db: Session,
     *,
@@ -389,6 +407,7 @@ def build_discussion_view_context(
     course_id: int,
     viewer: User,
     request: object,
+    topic_owner_user_id: int | None = None,
 ) -> dict:
     """Thread rows, pagination dict, moderation flag for discussion partial."""
     from app.services.discussion_ai import discussion_ai_group_options
@@ -413,11 +432,21 @@ def build_discussion_view_context(
                 "post": p,
                 "display_name": label,
                 "staff_hint": hint,
-                "can_delete": can_delete_discussion_post(db, viewer, p, course_id),
+                "can_delete": can_delete_discussion_post(db, viewer, p, course_id)
+                or (topic_owner_user_id is not None and viewer.id == topic_owner_user_id),
             }
         )
-    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated), viewer)
-    staff = can_moderate_discussion(db, course_id, viewer)
+    threaded = attach_avatar_and_role_badges(
+        db,
+        course_id,
+        flat_thread_for_template(posts, decorated),
+        viewer,
+        topic_owner_user_id=topic_owner_user_id,
+    )
+    staff = can_moderate_discussion(db, course_id, viewer) or (
+        topic_owner_user_id is not None
+        and can_moderate_free_topic_as_owner(db, course_id, viewer, topic_owner_user_id)
+    )
     topic = db.get(DiscussionTopic, topic_id)
     exts = ", ".join(sorted(s.replace(".", "").upper() for s in ALLOWED_IMAGE_EXTENSIONS))
     return {
@@ -539,6 +568,8 @@ def create_post(
         parent = db.get(DiscussionPost, parent_post_id)
         if parent is None or parent.topic_id != topic_id or parent.deleted_at is not None:
             raise ValueError("invalid_parent_post")
+        if topic.kind == DiscussionTopicKind.FREE_DISCUSSION_TOPIC and parent.parent_post_id is not None:
+            raise ValueError("nested_reply_not_allowed")
 
     post = DiscussionPost(
         topic_id=topic_id,

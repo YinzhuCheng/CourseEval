@@ -124,6 +124,10 @@ class User(Base):
         back_populates="creator",
         foreign_keys="Course.created_by",
     )
+    created_free_discussion_topics: Mapped[list["FreeDiscussionTopic"]] = relationship(
+        back_populates="creator",
+        foreign_keys="FreeDiscussionTopic.created_by",
+    )
     created_runtime_images: Mapped[list["RuntimeImage"]] = relationship(
         back_populates="creator",
         foreign_keys="RuntimeImage.created_by",
@@ -181,6 +185,7 @@ class Course(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_image_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_open_community: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    is_hidden_from_course_lists: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[CourseStatus] = mapped_column(
         Enum(CourseStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,
@@ -228,6 +233,10 @@ class Course(Base):
         foreign_keys="LLMConfig.course_id",
     )
     materials: Mapped[list["CourseMaterial"]] = relationship(back_populates="course", cascade="all, delete-orphan")
+    free_discussion_topics: Mapped[list["FreeDiscussionTopic"]] = relationship(
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
     discussion_mutes: Mapped[list["CourseDiscussionMute"]] = relationship(
         back_populates="course",
         cascade="all, delete-orphan",
@@ -913,6 +922,30 @@ class CourseMaterial(Base):
     )
 
 
+class FreeDiscussionTopic(Base):
+    """A user-created topic card in the platform open discussion space (not a normal course)."""
+
+    __tablename__ = "free_discussion_topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_image_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    course: Mapped["Course"] = relationship()
+    creator: Mapped["User"] = relationship(foreign_keys=[created_by])
+    discussion_topic: Mapped["DiscussionTopic | None"] = relationship(
+        back_populates="free_discussion_topic",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
 class DiscussionTopic(Base):
     __tablename__ = "discussion_topics"
 
@@ -929,11 +962,20 @@ class DiscussionTopic(Base):
         unique=True,
     )
     question_id: Mapped[int | None] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=True, unique=True)
+    free_discussion_topic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("free_discussion_topics.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+    )
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     course: Mapped[Course] = relationship()
     course_material: Mapped["CourseMaterial | None"] = relationship(back_populates="discussion_topic", foreign_keys=[course_material_id])
     question: Mapped["Question | None"] = relationship(back_populates="discussion_topic", foreign_keys=[question_id])
+    free_discussion_topic: Mapped["FreeDiscussionTopic | None"] = relationship(
+        back_populates="discussion_topic",
+        foreign_keys=[free_discussion_topic_id],
+    )
     posts: Mapped[list["DiscussionPost"]] = relationship(
         back_populates="topic",
         cascade="all, delete-orphan",

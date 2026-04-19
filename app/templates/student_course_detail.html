@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ course.title }} - {{ t("nav.my_courses") }}{% endblock %}
+{% block title %}{{ course.title }} - {{ t("nav.learning") }}{% endblock %}
 
 {% block content %}
 <div class="page-header page-header-soft mb-4">
@@ -14,22 +14,14 @@
     </div>
     <div class="d-flex gap-2 flex-wrap">
       <a class="btn btn-outline-secondary" href="/student/courses">{{ lx("Back to courses", "返回课程列表") }}</a>
-      <a class="btn btn-primary" href="/student/help/python-runtime">{{ lx("Code runtime help", "代码运行环境帮助") }}</a>
+      <a class="btn btn-outline-primary" href="/student/help/python-runtime">{{ lx("Code runtime help", "代码运行环境与提交流程说明") }}</a>
     </div>
   </div>
 </div>
 
-{% if course.is_open_community %}
-<div class="alert alert-info shadow-sm mb-4">
-  {{ lx(
-    "Platform open discussion space: no designated teacher; admins moderate. Verified members may publish materials and exercises from the teacher view.",
-    "平台公共讨论区：无固定任课教师，由管理员治理。已验证成员可在教师端界面发布资料与习题。",
-  ) }}
-</div>
-{% endif %}
-
 <div class="card shadow-sm">
   <div class="card-body">
+    {% if not course.is_open_community %}
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
       <div>
         <h2 class="h5 mb-1">{{ lx("Assignments", "作业列表") }}</h2>
@@ -78,12 +70,18 @@
       </p>
     </div>
     {% endif %}
+    {% else %}
+    <h2 class="h5 mb-2">{{ lx("Assignments", "作业列表") }}</h2>
+    <p class="text-muted mb-0">
+      {{ lx("This course does not use assignments. Use Free discussion in the top bar for open topics.", "本课程为后台载体，不展示作业；请使用顶部「自由讨论区」参与话题。") }}
+    </p>
+    {% endif %}
   </div>
 </div>
 
 <div class="card shadow-sm mt-4">
   <div class="card-body">
-    <h2 class="h5 mb-3">{{ lx("Learning materials", "学习资料") }}</h2>
+    <h2 class="h5 mb-3">{{ lx("Discussion & chapters", "讨论与章节") }}</h2>
     {% if materials %}
     <ul class="list-group list-group-flush">
       {% for m in materials %}
@@ -94,7 +92,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="text-muted mb-0">{{ lx("No materials yet.", "暂无学习资料。") }}</p>
+    <p class="text-muted mb-0">{{ lx("No discussion items yet.", "暂无讨论条目。") }}</p>
     {% endif %}
   </div>
 </div>

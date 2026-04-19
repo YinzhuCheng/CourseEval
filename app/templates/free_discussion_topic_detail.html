@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{{ free_topic.title }} - {{ t("nav.free_discussion") }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+  <div class="d-flex gap-3 flex-grow-1">
+    {% if free_topic_cover_url %}
+    <div class="flex-shrink-0 rounded border overflow-hidden" style="width: 120px; height: 80px;">
+      <img src="{{ free_topic_cover_url }}" alt="" class="w-100 h-100 object-fit-cover" />
+    </div>
+    {% endif %}
+    <div>
+      <div class="eyebrow-text small text-muted">{{ t("nav.free_discussion") }}</div>
+      <h1 class="h3 mb-2">{{ free_topic.title }}</h1>
+      {% if free_topic.description %}
+      <p class="text-muted mb-0">{{ free_topic.description }}</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-secondary" href="/free-discussion">{{ lx("All topics", "全部话题") }}</a>
+    {% if can_manage_free_topic %}
+    <a class="btn btn-outline-primary" href="/free-discussion/topics/{{ free_topic.id }}/edit">{{ lx("Edit topic", "编辑话题") }}</a>
+    <a class="btn btn-primary" href="/free-discussion/topics/{{ free_topic.id }}/chapters/new">{{ lx("New chapter", "新建章节") }}</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if root_body_html %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h2 class="h6 text-muted text-uppercase mb-2" style="font-size: 0.7rem;">{{ lx("Opening post", "话题主帖") }}</h2>
+    <div class="markdown-body">{{ root_body_html | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+      <h2 class="h5 mb-0">{{ lx("Chapters (optional)", "章节（可选）") }}</h2>
+    </div>
+    {% if chapters %}
+    <ul class="list-group list-group-flush">
+      {% for m in chapters %}
+      <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-semibold">{{ m.title }}</span>
+        <a class="btn btn-sm btn-outline-primary" href="/free-discussion/topics/{{ free_topic.id }}/chapters/{{ m.id }}">{{ lx("Open", "查看") }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted mb-0">{{ lx("No chapters yet. Chapters group optional long reads under this topic.", "暂无章节。可将较长的参考资料整理为章节。") }}</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if free_topic_members and (can_manage_free_topic or can_moderate_open_discussion) %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h2 class="h5 mb-3">{{ lx("Members & moderation", "成员与禁言") }}</h2>
+    <ul class="list-group list-group-flush">
+      {% for member in free_topic_members %}
+      <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <strong>{{ member.user.username }}</strong>
+          <span class="badge bg-secondary ms-1">{{ elabel("course_role", member.role) }}</span>
+        </div>
+        {% if member.user_id != current_user.id and (can_manage_free_topic or can_moderate_open_discussion) %}
+          {% if discussion_mute_by_user and discussion_mute_by_user.get(member.user_id) %}
+          <form method="post" action="/free-discussion/topics/{{ free_topic.id }}/unmute-user" class="d-inline">
+            <input type="hidden" name="user_id" value="{{ member.user_id }}" />
+            <input type="hidden" name="redirect_to" value="{{ request.url.path }}" />
+            <button type="submit" class="btn btn-sm btn-outline-secondary">{{ lx("Unmute discussion", "解除讨论禁言") }}</button>
+          </form>
+          {% else %}
+          <form method="post" action="/free-discussion/topics/{{ free_topic.id }}/mute-user" class="d-inline">
+            <input type="hidden" name="user_id" value="{{ member.user_id }}" />
+            <input type="hidden" name="redirect_to" value="{{ request.url.path }}" />
+            <button type="submit" class="btn btn-sm btn-outline-warning">{{ lx("Mute discussion", "禁止讨论发言") }}</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+
+{% include "partials/discussion_board.html" %}
+{% endblock %}

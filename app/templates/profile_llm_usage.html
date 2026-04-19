@@ -1,0 +1,36 @@
+{% extends "profile_layout.html" %}
+
+{% block title %}{{ t("student.llm_usage.title") }} - {{ t("site.title") }}{% endblock %}
+
+{% block profile_body %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h1 class="h4 mb-2">{{ t("student.llm_usage.title") }}</h1>
+    <p class="text-muted mb-4">{{ t("student.llm_usage.subtitle") }}</p>
+    <dl class="row mb-0">
+      <dt class="col-sm-5">{{ t("student.llm_usage.date_label") }}</dt>
+      <dd class="col-sm-7">{{ llm_usage.usage_date }}</dd>
+      <dt class="col-sm-5">{{ t("student.llm_usage.used") }}</dt>
+      <dd class="col-sm-7">
+        {{ llm_usage.consumed_today }}
+        <div class="form-text mt-1 mb-0">{{ t("student.llm_usage.used_help") }}</div>
+      </dd>
+      <dt class="col-sm-5">{{ t("student.llm_usage.limit") }}</dt>
+      <dd class="col-sm-7">{{ llm_usage.daily_limit }}</dd>
+      <dt class="col-sm-5">{{ t("student.llm_usage.remaining") }}</dt>
+      <dd class="col-sm-7">{{ llm_usage.remaining }}</dd>
+      <dt class="col-sm-5">{{ t("student.llm_usage.override") }}</dt>
+      <dd class="col-sm-7">
+        {% if llm_usage.override is not none %}
+        {{ llm_usage.override }}
+        {% else %}
+        {{ t("student.llm_usage.override_none") }}
+        {% endif %}
+      </dd>
+      <dt class="col-sm-5">{{ t("student.llm_usage.platform_default") }}</dt>
+      <dd class="col-sm-7">{{ llm_usage.platform_default }}</dd>
+    </dl>
+    <p class="text-muted small mb-0 mt-3">{{ t("student.llm_usage.footnote") }}</p>
+  </div>
+</div>
+{% endblock %}

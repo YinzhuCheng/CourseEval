@@ -21,6 +21,7 @@ from app.models import (
     DiscussionPost,
     DiscussionPostAttachment,
     DiscussionTopic,
+    FreeDiscussionTopic,
     Question,
     Submission,
     User,
@@ -324,6 +325,12 @@ def describe_asset_for_profile(db: Session, obj: UserStoredObject, viewer_id: in
         label_en = "Profile photo"
         label_zh = "头像"
         link = "/me/profile"
+    elif obj.category == "free_discussion_cover" and obj.ref_id:
+        ft = db.get(FreeDiscussionTopic, obj.ref_id)
+        if ft:
+            label_en = f"Open discussion topic cover ({ft.title})"
+            label_zh = f"自由讨论话题封面（{ft.title}）"
+            link = f"/free-discussion/topics/{ft.id}/edit"
     elif obj.category == "discussion_attachment" and obj.ref_id:
         att = db.get(DiscussionPostAttachment, obj.ref_id)
         if att:
@@ -335,7 +342,7 @@ def describe_asset_for_profile(db: Session, obj: UserStoredObject, viewer_id: in
                     if course and is_open_community_course(course):
                         label_en = "Discussion image (open community)"
                         label_zh = "讨论区图片（自由讨论区）"
-                        link = f"/student/courses/{course.id}"
+                        link = "/free-discussion"
                     elif course:
                         if topic.course_material_id:
                             label_en = f"Discussion image (course: {course.title})"

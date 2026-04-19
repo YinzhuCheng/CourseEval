@@ -134,6 +134,7 @@ class LLMResponseLanguage(str, Enum):
 class DiscussionTopicKind(str, Enum):
     COURSE_MATERIAL = "course_material"
     QUESTION = "question"
+    FREE_DISCUSSION_TOPIC = "free_discussion_topic"
 
 
 class StorageDeletionActor(str, Enum):

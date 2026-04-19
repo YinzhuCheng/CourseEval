@@ -17,16 +17,7 @@
   <a class="btn btn-outline-secondary" href="/teacher/courses">{{ lx("Back to courses", "返回课程列表") }}</a>
 </div>
 
-{% if course.is_open_community %}
-<div class="alert alert-info shadow-sm mb-4">
-  {{ lx(
-    "This is the platform open discussion space: there is no designated course teacher; platform administrators moderate content. Every verified member can post learning materials and create assignments here.",
-    "这是平台公共「自由讨论区」：不设任课教师，由平台管理员治理内容与秩序。每位已验证成员均可发布学习资料与创建作业。",
-  ) }}
-</div>
-{% endif %}
-
-{% if course_staff_overview %}
+{% if course_staff_overview and not course.is_open_community %}
 <div class="card shadow-sm mb-4">
   <div class="card-body py-3">
     <div class="row g-3 small align-items-center">
@@ -62,6 +53,7 @@
   <div class="col-lg-7">
     <div class="card shadow-sm h-100">
       <div class="card-body">
+        {% if not course.is_open_community %}
         <h2 class="h5 mb-3">{{ lx("Assignments", "作业列表") }}</h2>
         {% if assignments %}
         <div class="list-group mb-4">
@@ -217,15 +209,24 @@
           </div>
         </div>
         {% endif %}
+        {% else %}
+        <h2 class="h5 mb-3">{{ lx("Assignments", "作业列表") }}</h2>
+        <p class="text-muted mb-0">
+          {{ lx(
+            "Assignments are not used in the platform open discussion space. Use topic cards from the Free discussion link in the top bar.",
+            "自由讨论区不启用作业功能；请通过顶部导航「自由讨论区」使用话题卡片。",
+          ) }}
+        </p>
+        {% endif %}
       </div>
     </div>
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h2 class="h5 mb-0">{{ lx("Learning materials", "学习资料") }}</h2>
+          <h2 class="h5 mb-0">{{ lx("Discussion & chapters", "讨论与章节") }}</h2>
           {% if can_manage_course %}
-          <a class="btn btn-sm btn-primary" href="/teacher/courses/{{ course.id }}/materials/new">{{ lx("New material", "新建资料") }}</a>
+          <a class="btn btn-sm btn-primary" href="/teacher/courses/{{ course.id }}/materials/new">{{ lx("New discussion item", "新建讨论") }}</a>
           {% endif %}
         </div>
         {% if materials %}
@@ -246,7 +247,7 @@
           {% endfor %}
         </ul>
         {% else %}
-        <p class="text-muted mb-0">{{ lx("No materials yet.", "暂无学习资料。") }}</p>
+        <p class="text-muted mb-0">{{ lx("No discussion items yet.", "暂无讨论条目。") }}</p>
         {% endif %}
       </div>
     </div>
