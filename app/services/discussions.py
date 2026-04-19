@@ -382,6 +382,8 @@ def build_discussion_view_context(
     request: object,
 ) -> dict:
     """Thread rows, pagination dict, moderation flag for discussion partial."""
+    from app.services.discussion_ai import discussion_ai_group_options
+
     page_size = get_discussion_posts_page_size(db)
     page, anchor = parse_discussion_query(request)
     pag = discussion_pagination_state(
@@ -407,10 +409,12 @@ def build_discussion_view_context(
         )
     threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
     staff = can_moderate_discussion(db, course_id, viewer)
+    topic = db.get(DiscussionTopic, topic_id)
     return {
         "discussion_thread": threaded,
         "discussion_pagination": pag,
         "can_moderate_discussion": staff,
+        "discussion_ai_groups": discussion_ai_group_options(db, topic) if topic else [],
     }
 
 

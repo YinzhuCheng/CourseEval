@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import LLMProvider
 from app.db import utcnow
-from app.models import LLMConfig, PlatformLlmTokenPolicy, User, UserLlmTokenDaily
+from app.models import LLMConfig, LLMConfigMember, PlatformLlmTokenPolicy, User, UserLlmTokenDaily
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def extract_total_tokens_from_response(provider: LLMProvider, raw: dict | None) 
 def assert_room_for_llm_call(
     db: Session,
     user_id: int,
-    config: LLMConfig,
+    config: LLMConfig | LLMConfigMember,
     *,
     estimated_budget: int,
 ) -> tuple[int, str, int]:
@@ -142,7 +142,7 @@ def assert_room_for_llm_call(
     return limit, day, consumed
 
 
-def record_llm_usage(db: Session, user_id: int, config: LLMConfig, raw_response: dict | None) -> None:
+def record_llm_usage(db: Session, user_id: int, config: LLMConfig | LLMConfigMember, raw_response: dict | None) -> None:
     tokens = extract_total_tokens_from_response(config.provider_type, raw_response)
     if tokens <= 0:
         return

@@ -8,7 +8,7 @@ import re
 import time
 from collections.abc import Callable
 
-from app.models import LLMConfig
+from app.models import LLMConfig, LLMConfigMember
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ def _is_retryable(message: str) -> bool:
     return True
 
 
-def retry_llm_grading_call(config: LLMConfig, fn: Callable[[], dict], *, label: str = "llm_grading") -> dict:
+def retry_llm_grading_call(config: LLMConfig | LLMConfigMember, fn: Callable[[], dict], *, label: str = "llm_grading") -> dict:
     """Call ``fn`` (must return parsed dict or raise). Retry on failure with binary exponential backoff."""
     max_attempts = max(1, int(config.max_llm_retries or 3))
     initial = max(1, int(config.llm_retry_initial_seconds or 5))

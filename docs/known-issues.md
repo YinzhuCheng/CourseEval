@@ -58,13 +58,13 @@ If you update PDF behavior or wording, inspect:
 
 Avoid reintroducing copy that says scanned/image PDFs are unsupported unless the code changes to enforce that.
 
-### LLM configuration is selected differently by grading and discussion AI
+### LLM group selection is shared but precedence differs by workflow
 
-Grading uses `_resolve_llm_config_for_question` in `app/services/submissions.py` with question, assignment, course, then platform default precedence.
+`LLMConfig` is now the group-level record. Its inline provider settings are priority #1, and additional fallback members live in `LLMConfigMember` rows. A callable group needs at least one enabled member or priority #1 entry with successful connectivity testing.
 
-Discussion AI uses `resolve_discussion_ai_llm_config` in `app/services/discussion_ai.py` with course discussion overrides, platform discussion overrides, then platform default/latest tested config.
+Grading uses `_resolve_llm_config_for_question` in `app/services/submissions.py` with question, assignment, course, then platform default precedence. Discussion AI uses `resolve_discussion_ai_llm_config` in `app/services/discussion_ai.py` with course discussion overrides, platform discussion overrides, then platform default/latest tested group; user `@AI` requests may also pass a selected group.
 
-These paths intentionally share `LLMConfig` rows but not the same precedence rules. When changing LLM selection, quota, or admin UI wording, check both paths and tests.
+Within a selected group, calls start from priority #1 and only try later members when earlier members fail. A later task starts again from #1.
 
 ### Data-path helpers are centralized
 

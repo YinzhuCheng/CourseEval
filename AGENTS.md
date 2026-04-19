@@ -105,10 +105,10 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 - **Owns:** `Feedback` rows, `EvaluationResult` scores, **effective** score resolution, `FinalGradeSnapshot` updates for analytics and reveal.
 - **Source of truth:** `app/services/scoring.py` for effective score and teacher-confirmation rules; `app/services/submissions.py` for `update_final_grade_snapshot`; teacher grading in `app/routes/teacher.py`.
 
-### LLM config / usage / quota
+### LLM groups / usage / quota
 
-- **Owns:** `LLMConfig` records, per-user token limits, billing/usage aggregation (Beijing day), LLM queue names.
-- **Source of truth:** `app/models.py` (`LLMConfig`, usage tables), `app/services/llm_token_usage.py`, `app/services/llm.py`, admin routes in `app/routes/admin.py`, student usage in `app/routes/student.py`.
+- **Owns:** `LLMConfig` group records, `LLMConfigMember` fallback members, per-user token limits, billing/usage aggregation (Beijing day), LLM group queue names.
+- **Source of truth:** `app/models.py` (`LLMConfig`, `LLMConfigMember`, usage tables), `app/services/llm_groups.py`, `app/services/llm_token_usage.py`, `app/services/llm.py`, admin routes in `app/routes/admin.py`, discussion selection in `app/services/discussion_ai.py`.
 - **Tests:** `tests/test_llm_token_usage.py`, `tests/test_llm_retry.py`, etc.
 
 ### Runner / sandbox / artifacts

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
@@ -16,7 +16,6 @@ from app.constants import (
     CourseRole,
     FeedbackSource,
     LLMResponseLanguage,
-    LLMTestStatus,
     MembershipStatus,
     QuestionType,
     ScoringRule,
@@ -80,6 +79,7 @@ from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
 from app.services.redirects import safe_local_redirect
 from app.services.scoring import is_submission_pending_teacher_review
+from app.services.llm_groups import group_has_callable_target
 from app.services.submissions import (
     get_submission_for_teacher,
     read_submission_artifact_text,
@@ -327,14 +327,15 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
     )
     available_llm_configs = list(
         db.query(LLMConfig)
+        .options(selectinload(LLMConfig.members))
         .filter(
             LLMConfig.enabled.is_(True),
             LLMConfig.scope == "platform",
-            LLMConfig.last_test_status == LLMTestStatus.SUCCESS,
         )
         .order_by(LLMConfig.last_tested_at.desc(), LLMConfig.created_at.desc())
         .all()
     )
+    available_llm_configs = [group for group in available_llm_configs if group_has_callable_target(group)]
     course_role = get_course_role(db, course.id, user.id)
     grade_matrix = None
     course_staff_overview = None
@@ -420,7 +421,7 @@ def update_course_llm_config(
         return _redirect(f"/teacher/courses/{course.id}")
 
     config = db.get(LLMConfig, config_id)
-    if config is None or not config.enabled or config.last_test_status != LLMTestStatus.SUCCESS:
+    if config is None or not group_has_callable_target(config):
         push_flash(
             request,
             choose_text(request, "Selected LLM config is unavailable.", "所选 LLM 配置不可用。"),
@@ -436,7 +437,7 @@ def update_course_llm_config(
         choose_text(
             request,
             f"This course now uses LLM config: {config.name}.",
-            f"该课程已切换为使用 LLM 配置：{config.name}。",
+            f"该课程已切换为使用 LLM 组：{config.name}。",
         ),
         "success",
     )
@@ -1028,6 +1029,7 @@ async def teacher_question_discuss(
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    ai_group_id: str = Form(""),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -1044,6 +1046,7 @@ async def teacher_question_discuss(
     topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    selected_group_id = int(ai_group_id) if ai_group_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
     attachment_paths: list[str] = []
     default_dest = f"/teacher/questions/{question_id}"
@@ -1057,6 +1060,7 @@ async def teacher_question_discuss(
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
+            selected_llm_group_id=selected_group_id,
         )
         if _u is not None and image_files:
             try:

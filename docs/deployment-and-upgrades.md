@@ -36,7 +36,7 @@ Minimum production-like values:
 - `DATA_DIR`: persistent directory
 - `REDIS_URL`: Redis reachable from web and worker processes
 - `CODE_QUEUE_NAME`: code-evaluation queue name
-- `LLM_QUEUE_PREFIX`: prefix for per-LLM-config queues
+- `LLM_QUEUE_PREFIX`: prefix for per-LLM-group queues
 - `RUNNER_IMAGE`: default Docker image tag for code evaluation
 - `RUNNER_MEMORY_LIMIT`, `RUNNER_CPUS`, `EXECUTION_TIMEOUT_SECONDS`: sandbox limits
 - `DOCKER_NETWORK_DISABLED=true` unless a reviewed runner image requires network access
@@ -66,11 +66,11 @@ Then rebuild and redeploy the runner image.
 `worker.py` starts:
 
 - one worker for `CODE_QUEUE_NAME`
-- one or more workers per enabled `LLMConfig`, using `LLM_QUEUE_PREFIX-<config_id>`
+- one or more workers per enabled LLM group, using `LLM_QUEUE_PREFIX-<group_id>`
 
-Each enabled LLM config's `queue_concurrency` controls how many worker processes are created for that config.
+Each enabled LLM group's `queue_concurrency` controls how many worker processes are created for that group. Inside a group, the worker tries priority #1 first and only uses later LLM members after earlier members fail; the next task starts from #1 again.
 
-If LLM config rows change while the worker is running, the worker manager periodically reconciles the desired queue layout.
+If LLM group rows change while the worker is running, the worker manager periodically reconciles the desired queue layout.
 
 ## PDF and LLM deployment
 

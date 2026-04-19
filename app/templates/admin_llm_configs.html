@@ -15,11 +15,19 @@
   <div class="col-lg-5">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ t("admin.llm.create") }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Create LLM group", "创建 LLM 组") }}</h2>
         <form method="post" action="/admin/llm-configs" class="row g-3">
           <div class="col-12">
-            <label class="form-label">{{ t("admin.llm.name") }}</label>
+            <label class="form-label">{{ lx("Group name", "组名称") }}</label>
             <input class="form-control" name="name" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Group description", "组说明") }}</label>
+            <textarea class="form-control" name="description" rows="2" placeholder="{{ lx('Optional; if empty, the first model name and URL are used.', '可留空；留空时使用 1 号模型名和 URL。') }}"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Priority #1 provider", "1 号 LLM 供应商") }}</label>
+            <p class="small text-muted mb-1">{{ lx("This first model is tried before other members in the group.", "组内调用时优先尝试这个 1 号模型。") }}</p>
           </div>
           <div class="col-12">
             <label class="form-label">{{ t("admin.llm.provider") }}</label>
@@ -54,7 +62,7 @@
             <input class="form-control" name="temperature" value="0.2" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">{{ t("admin.llm.queue_concurrency") }}</label>
+            <label class="form-label">{{ lx("Group queue concurrency", "组队列并发数") }}</label>
             <input class="form-control" type="number" min="1" name="queue_concurrency" value="1" />
           </div>
           <div class="col-md-4">
@@ -141,13 +149,13 @@
     </div>
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ t("admin.llm.list") }}</h2>
+        <h2 class="h5 mb-3">{{ lx("LLM groups", "LLM 组") }}</h2>
         {% if configs %}
         <div class="table-responsive">
           <table class="table align-middle">
             <thead>
               <tr>
-                <th>{{ t("admin.llm.column.name") }}</th>
+                <th>{{ lx("Group", "组") }}</th>
                 <th>{{ t("admin.llm.column.provider") }}</th>
                 <th>{{ t("admin.llm.column.model") }}</th>
                 <th>{{ t("admin.llm.column.status") }}</th>
@@ -160,7 +168,11 @@
             <tbody>
               {% for config in configs %}
               <tr>
-                <td>{{ config.name }}</td>
+                <td>
+                  <strong>{{ config.name }}</strong>
+                  <div class="small text-muted">{{ config.description or (config.model_name ~ " @ " ~ (config.base_url or "-")) }}</div>
+                  <div class="small text-muted">{{ lx("Priority", "序号") }} #1</div>
+                </td>
                 <td>{{ elabel("llm_provider", config.provider_type) }}</td>
                 <td>{{ config.model_name }}</td>
                 <td>{{ elabel("llm_test_status", config.last_test_status) }}</td>
@@ -176,6 +188,82 @@
               <tr>
                 <td colspan="8" class="small text-muted">
                   {{ config.last_test_message or t("admin.llm.no_test") }}
+                </td>
+              </tr>
+              {% for member in config.members %}
+              <tr>
+                <td>
+                  <div class="small">{{ lx("Member", "成员") }} #{{ member.priority_order }}</div>
+                </td>
+                <td>{{ elabel("llm_provider", member.provider_type) }}</td>
+                <td>{{ member.model_name }}</td>
+                <td>{{ elabel("llm_test_status", member.last_test_status) }}</td>
+                <td class="small text-muted">{{ "••••••••••••" if member.api_key else "-" }}</td>
+                <td class="small text-muted">-</td>
+                <td>{{ format_datetime(member.last_tested_at) if member.last_tested_at else "-" }}</td>
+                <td class="text-end">
+                  <form method="post" action="/admin/llm-config-members/{{ member.id }}/test">
+                    <button class="btn btn-sm btn-outline-primary" type="submit">{{ t("admin.llm.test") }}</button>
+                  </form>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="8" class="small text-muted">
+                  {{ member.last_test_message or t("admin.llm.no_test") }}
+                </td>
+              </tr>
+              {% endfor %}
+              <tr>
+                <td colspan="8">
+                  <details>
+                    <summary class="small text-primary" style="cursor:pointer;">{{ lx("Add fallback LLM to this group", "向该组添加后备 LLM") }}</summary>
+                    <form method="post" action="/admin/llm-configs/{{ config.id }}/members" class="row g-2 mt-2">
+                      <div class="col-md-2">
+                        <label class="form-label small">{{ lx("Priority", "序号") }}</label>
+                        <input class="form-control form-control-sm" type="number" min="2" name="priority_order" value="{{ (config.members|length) + 2 }}" />
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label small">{{ t("admin.llm.provider") }}</label>
+                        <select class="form-select form-select-sm" name="provider_type">
+                          <option value="openai_compatible">OpenAI compatible</option>
+                          <option value="gemini">Gemini</option>
+                          <option value="claude">Claude</option>
+                        </select>
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label small">{{ t("admin.llm.model_name") }}</label>
+                        <input class="form-control form-control-sm" name="model_name" required />
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label small">{{ t("admin.llm.base_url") }}</label>
+                        <input class="form-control form-control-sm" name="base_url" />
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label small">{{ t("admin.llm.api_key") }}</label>
+                        <input class="form-control form-control-sm" name="api_key" type="password" autocomplete="off" />
+                      </div>
+                      <div class="col-md-2">
+                        <label class="form-label small">{{ t("admin.llm.timeout") }}</label>
+                        <input class="form-control form-control-sm" type="number" name="timeout_seconds" value="30" />
+                      </div>
+                      <div class="col-md-2">
+                        <label class="form-label small">{{ t("admin.llm.max_tokens") }}</label>
+                        <input class="form-control form-control-sm" type="number" name="max_tokens" value="512" />
+                      </div>
+                      <div class="col-md-2">
+                        <label class="form-label small">{{ t("admin.llm.temperature") }}</label>
+                        <input class="form-control form-control-sm" name="temperature" value="0.2" />
+                      </div>
+                      <div class="col-md-2">
+                        <label class="form-label small">{{ t("admin.llm.max_retries") }}</label>
+                        <input class="form-control form-control-sm" type="number" min="1" name="max_llm_retries" value="3" />
+                      </div>
+                      <div class="col-md-1 d-grid">
+                        <label class="form-label small">&nbsp;</label>
+                        <button class="btn btn-sm btn-outline-primary" type="submit">{{ lx("Add", "添加") }}</button>
+                      </div>
+                    </form>
+                  </details>
                 </td>
               </tr>
               {% endfor %}

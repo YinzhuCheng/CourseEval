@@ -84,15 +84,15 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 ---
 
-## LLM config, quota, admin token policy
+## LLM groups, quota, admin token policy
 
-**Touch together:** `app/routes/admin.py` + `app/services/llm_token_usage.py` + `app/services/llm.py` / `llm_retry.py` (billing checks before calls) + `app/models.py` (`LLMConfig`, usage rows).
+**Touch together:** `app/routes/admin.py` + `app/services/llm_groups.py` + `app/services/llm_token_usage.py` + `app/services/llm.py` / `llm_retry.py` (billing checks before calls) + `app/models.py` (`LLMConfig`, `LLMConfigMember`, usage rows).
 
 **Why:** Admin UI changes without service-side enforcement (or vice versa) yield wrong limits or uncaught HTTP errors from provider.
 
-**Failure mode:** UI shows new limit but grading still uses old cached config—check where `LLMConfig` is loaded per course vs platform default (`grep` `_resolve_llm_config` patterns in `submissions.py`).
+**Failure mode:** UI shows a new group/member but grading still uses old selection or bypasses fallback—check `_resolve_llm_config_for_question` in `submissions.py` and `call_llm_group` in `llm_groups.py`.
 
-**Also verify:** Discussion AI has separate LLM precedence in `app/services/discussion_ai.py`; do not assume grading and discussion AI choose configs identically.
+**Also verify:** Discussion AI has separate LLM precedence and user-selected `@AI` groups in `app/services/discussion_ai.py`; do not assume grading and discussion AI choose groups identically.
 
 ---
 

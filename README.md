@@ -52,7 +52,7 @@ Please read **AGENTS.md** and the relevant `docs/` pages **before making non-tri
 
 - Manage user roles
 - Manage runtime image records
-- Manage LLM configuration records
+- Manage LLM groups and fallback members
 - Review system overview data
 
 ## Supported code runtime
@@ -153,7 +153,7 @@ Typical flow:
 - `app/routes/auth.py`: registration, login, locale switching
 - `app/routes/student.py`: student pages and submission entrypoints
 - `app/routes/teacher.py`: teacher course, assignment, question, and grading pages
-- `app/routes/admin.py`: admin pages and runtime / LLM configuration pages
+- `app/routes/admin.py`: admin pages and runtime / LLM group pages
 - `app/services/submissions.py`: submission orchestration and background evaluation logic
 - `app/services/scoring.py`: effective score resolution and teacher-confirmation gating
 - `app/services/storage_paths.py`: shared data-directory path safety helpers
@@ -355,7 +355,7 @@ If SMTP is missing or delivery fails, email-based registrations stay pending unt
 The platform now separates evaluation traffic into:
 
 - a dedicated code evaluation queue
-- per-LLM-config queues for LLM review tasks
+- per-LLM-group queues for LLM review tasks
 
 Relevant environment variables:
 
@@ -368,16 +368,18 @@ PDF_REVIEW_MAX_PAGES=8
 ### Worker behavior
 
 - Docker code grading runs on its own queue
-- Each enabled LLM config has its own queue
-- `queue_concurrency` is configured per LLM config record in the admin UI
+- Each enabled LLM group with at least one connectivity-tested member has its own queue
+- `queue_concurrency` is configured per LLM group in the admin UI
+- Within a group, calls start with priority #1 and fall through to later members only when earlier members fail; the next task starts again from #1
 - `worker.py` now works as a lightweight worker manager and starts:
   - 1 code-evaluation worker process
-  - N LLM worker processes per enabled config, where N is that config's concurrency
+  - N LLM worker processes per enabled group, where N is that group's concurrency
 
 ### Global default LLM behavior
 
-- The latest **platform** LLM config that has passed connectivity testing becomes the default for all courses still following the global platform default
-- Teachers can override a specific course to use a chosen enabled LLM config from the course detail page
+- The latest **platform** LLM group with at least one connectivity-tested member becomes the default for all courses still following the global platform default
+- Teachers can override a specific course to use a chosen enabled LLM group from the course detail page
+- Discussion `@AI` requests can select from available LLM groups; leaving the selection empty uses the discussion/course/platform default precedence
 
 ### PDF review behavior
 
@@ -420,6 +422,7 @@ Main teaching-domain tables include:
 - `short_answer_question_configs`
 - `runtime_images`
 - `llm_configs`
+- `llm_config_members`
 - `submissions`
 - `evaluation_tasks`
 - `evaluation_results`

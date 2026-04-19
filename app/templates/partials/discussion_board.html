@@ -19,6 +19,25 @@
       <input class="form-check-input" type="checkbox" name="anonymous" value="on" id="discuss-anon-root" />
       <label class="form-check-label" for="discuss-anon-root">{{ lx("Post anonymously", "匿名发布") }}</label>
     </div>
+    {% if discussion_ai_groups %}
+    <div class="row g-2 align-items-end mb-2">
+      <div class="col-md-7">
+        <label class="form-label small" for="discuss-ai-group-root">{{ lx("AI group for @AI", "@AI 使用的 LLM 组") }}</label>
+        <select class="form-select form-select-sm" name="ai_group_id" id="discuss-ai-group-root">
+          <option value="">{{ lx("Use thread default", "使用讨论串默认组") }}</option>
+          {% for group in discussion_ai_groups %}
+          <option value="{{ group.id }}">{{ group.name }} · {{ group.description }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-5">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="request_ai" value="on" id="discuss-ai-root" />
+          <label class="form-check-label small" for="discuss-ai-root">{{ lx("Ask AI to reply", "请求 AI 回复") }}</label>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     <button class="btn btn-primary" type="submit">{{ lx("Post", "发布") }}</button>
   </form>
   {% else %}
@@ -93,6 +112,25 @@
           <input class="form-check-input" type="checkbox" name="anonymous" value="on" id="anon-{{ node.post.id }}" />
           <label class="form-check-label" for="anon-{{ node.post.id }}">{{ lx("Post anonymously", "匿名发布") }}</label>
         </div>
+        {% if discussion_ai_groups %}
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-md-7">
+            <label class="form-label small" for="ai-group-{{ node.post.id }}">{{ lx("AI group for @AI", "@AI 使用的 LLM 组") }}</label>
+            <select class="form-select form-select-sm" name="ai_group_id" id="ai-group-{{ node.post.id }}">
+              <option value="">{{ lx("Use thread default", "使用讨论串默认组") }}</option>
+              {% for group in discussion_ai_groups %}
+              <option value="{{ group.id }}">{{ group.name }} · {{ group.description }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-5">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="request_ai" value="on" id="ai-reply-{{ node.post.id }}" />
+              <label class="form-check-label" for="ai-reply-{{ node.post.id }}">{{ lx("Ask AI to reply", "请求 AI 回复") }}</label>
+            </div>
+          </div>
+        </div>
+        {% endif %}
         <button class="btn btn-sm btn-outline-primary" type="submit">{{ lx("Post reply", "发表回复") }}</button>
       </form>
     </details>

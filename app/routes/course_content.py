@@ -218,6 +218,7 @@ async def teacher_material_discuss(
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    ai_group_id: str = Form(""),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -237,6 +238,7 @@ async def teacher_material_discuss(
     topic = get_or_create_material_topic(db, material.id, course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    selected_group_id = int(ai_group_id) if ai_group_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
     attachment_paths: list[str] = []
     default_dest = f"/teacher/courses/{course_id}/materials/{material_id}"
@@ -250,6 +252,7 @@ async def teacher_material_discuss(
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
+            selected_llm_group_id=selected_group_id,
         )
         if _u is not None and image_files:
             try:
@@ -342,6 +345,7 @@ async def student_material_discuss(
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    ai_group_id: str = Form(""),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -361,6 +365,7 @@ async def student_material_discuss(
     topic = get_or_create_material_topic(db, material.id, course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    selected_group_id = int(ai_group_id) if ai_group_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
     attachment_paths = []
     default_dest = f"/student/courses/{course_id}/materials/{material_id}"
@@ -374,6 +379,7 @@ async def student_material_discuss(
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
+            selected_llm_group_id=selected_group_id,
         )
         if _u is not None and image_files:
             try:

@@ -62,6 +62,10 @@ def _patch_sqlite_schema(conn) -> None:
             conn.execute(text("ALTER TABLE discussion_posts ADD COLUMN deleted_at DATETIME"))
         if "deleted_by_id" not in cols:
             conn.execute(text("ALTER TABLE discussion_posts ADD COLUMN deleted_by_id INTEGER"))
+    if "llm_configs" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("llm_configs")}
+        if "description" not in cols:
+            conn.execute(text("ALTER TABLE llm_configs ADD COLUMN description TEXT"))
 
 
 def init_database() -> None:

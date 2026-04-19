@@ -131,6 +131,10 @@ class User(Base):
         back_populates="creator",
         foreign_keys="LLMConfig.created_by",
     )
+    created_llm_config_members: Mapped[list["LLMConfigMember"]] = relationship(
+        back_populates="creator",
+        foreign_keys="LLMConfigMember.created_by",
+    )
     created_feedback: Mapped[list["Feedback"]] = relationship(
         back_populates="author",
         foreign_keys="Feedback.created_by",
@@ -353,6 +357,7 @@ class LLMConfig(Base):
     )
     course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_type: Mapped[LLMProvider] = mapped_column(
         Enum(LLMProvider, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,
@@ -391,6 +396,49 @@ class LLMConfig(Base):
     questions_using_as_override: Mapped[list["Question"]] = relationship(
         back_populates="llm_config",
         foreign_keys="Question.llm_config_id",
+    )
+    members: Mapped[list["LLMConfigMember"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+        order_by="LLMConfigMember.priority_order",
+    )
+
+
+class LLMConfigMember(Base):
+    __tablename__ = "llm_config_members"
+    __table_args__ = (Index("ix_llm_config_members_group_priority", "group_id", "priority_order", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("llm_configs.id", ondelete="CASCADE"), nullable=False, index=True)
+    priority_order: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    provider_type: Mapped[LLMProvider] = mapped_column(
+        Enum(LLMProvider, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+    )
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
+    temperature: Mapped[str] = mapped_column(String(16), default="0.2", nullable=False)
+    max_llm_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    llm_retry_initial_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_test_status: Mapped[LLMTestStatus] = mapped_column(
+        Enum(LLMTestStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        default=LLMTestStatus.NEVER,
+        nullable=False,
+    )
+    last_test_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_tested_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    group: Mapped[LLMConfig] = relationship(back_populates="members", foreign_keys=[group_id])
+    creator: Mapped[User | None] = relationship(
+        back_populates="created_llm_config_members",
+        foreign_keys=[created_by],
     )
 
 
