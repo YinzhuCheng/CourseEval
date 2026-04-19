@@ -11,3 +11,5 @@ itsdangerous
 nbformat
 PyPDF2
 pymupdf
+markdown
+bleach

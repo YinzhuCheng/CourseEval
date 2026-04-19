@@ -23,6 +23,7 @@
             <th>{{ t("admin.users.column.email_verified") }}</th>
             <th>{{ t("admin.users.column.role") }}</th>
             <th>{{ t("admin.users.column.created") }}</th>
+            <th>{{ lx("Avatar", "头像") }}</th>
             <th>{{ t("admin.users.column.actions") }}</th>
           </tr>
         </thead>
@@ -35,6 +36,18 @@
             <td>{{ t("admin.users.email_verified_yes") if user.email_verified else t("admin.users.email_verified_no") }}</td>
             <td>{{ t("role." ~ user.effective_role.value) }}</td>
             <td>{{ format_datetime(user.created_at) }}</td>
+            <td>
+              {% if user.avatar_banned %}
+              <span class="badge text-bg-secondary">{{ lx("Banned", "已封禁") }}</span>
+              <form method="post" action="/admin/users/{{ user.id }}/avatar/unban" class="d-inline ms-1">
+                <button class="btn btn-link btn-sm p-0" type="submit">{{ lx("Unban", "解除") }}</button>
+              </form>
+              {% else %}
+              <form method="post" action="/admin/users/{{ user.id }}/avatar/ban" class="d-inline" onsubmit="return confirm('Ban avatar for this user?');">
+                <button class="btn btn-sm btn-outline-warning" type="submit">{{ lx("Ban avatar", "封禁头像") }}</button>
+              </form>
+              {% endif %}
+            </td>
             <td class="text-end">
               {% if user.effective_role.value == "super_admin" %}
               <span class="badge bg-danger">{{ t("admin.users.role_locked") }}</span>

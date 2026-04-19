@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.auth import push_flash
-from app.constants import CodeLanguage, QuestionType
+from app.constants import CodeLanguage, CourseRole, QuestionType
 from app.db import get_db
 from app.i18n import choose_text
 from app.runtime_support import (
@@ -14,6 +14,7 @@ from app.runtime_support import (
     UNSUPPORTED_PACKAGE_NOTE_ZH,
     default_allowed_code_libraries_text,
 )
+from app.services.course_materials import list_materials_for_course
 from app.services.courses import (
     get_assignment_for_student,
     get_course_for_student,
@@ -21,8 +22,19 @@ from app.services.courses import (
     join_course_by_code,
     list_courses_for_student,
 )
-from app.services.permissions import RedirectRequired, require_student_access, require_user
+from app.services.permissions import RedirectRequired, get_course_role, require_student_access, require_user
 from app.services.llm_token_usage import usage_summary_for_user
+from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
+from app.services.discussions import (
+    assignment_past_close_for_discussion,
+    attach_avatar_and_role_badges,
+    can_post_on_question_topic,
+    display_label_for_post,
+    get_or_create_question_topic,
+    list_posts_for_topic,
+    flat_thread_for_template,
+)
+from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.submissions import (
     build_student_result_view,
     create_file_submission,
@@ -122,7 +134,8 @@ def student_course_detail(course_id: int, request: Request, db: Session = Depend
         push_flash(request, choose_text(request, "Course not found.", "未找到课程。"), "danger")
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    return render_template(request, db, "student_course_detail.html", {"course": course})
+    materials = list_materials_for_course(db, course_id)
+    return render_template(request, db, "student_course_detail.html", {"course": course, "materials": materials})
 
 
 @router.get("/assignments/{assignment_id}")
@@ -153,12 +166,87 @@ def student_question_detail(question_id: int, request: Request, db: Session = De
         return RedirectResponse(url="/student/courses", status_code=303)
 
     submissions = list_submissions_for_question(db, question.id, user.id)
+    topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
+    db.commit()
+    posts = list_posts_for_topic(db, topic.id)
+    decorated = []
+    for p in posts:
+        label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
+        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
+    threaded = attach_avatar_and_role_badges(
+        db, question.assignment.course_id, flat_thread_for_template(posts, decorated)
+    )
+    reveal = reveal_bundle_for_question(db, question)
+    can_discuss = can_post_on_question_topic(db, question, user)
+    role = get_course_role(db, question.assignment.course_id, user.id)
+    disc_notice = ""
+    if role == CourseRole.STUDENT and not assignment_past_close_for_discussion(question.assignment):
+        disc_notice = choose_text(
+            request,
+            "Discussion opens after the assignment close time.",
+            "讨论将在作业「关闭时间」到达后对本课程学生开放；教师与助教可随时参与。",
+        )
     return render_template(
         request,
         db,
         "student_question_detail.html",
-        {"question": question, "submissions": submissions},
+        {
+            "question": question,
+            "submissions": submissions,
+            "topic_id": topic.id,
+            "discussion_thread": threaded,
+            "can_post_discussion": can_discuss,
+            "reveal": reveal,
+            "discussion_post_url": f"/student/questions/{question_id}/discuss",
+            "discussion_notice": disc_notice,
+        },
     )
+
+
+@router.post("/questions/{question_id}/discuss")
+def student_question_discuss(
+    question_id: int,
+    request: Request,
+    body: str = Form(""),
+    parent_post_id: str = Form(""),
+    anonymous: str = Form(""),
+    request_ai: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+
+    question = get_question_for_student(db, question_id, user.id)
+    if question is None:
+        push_flash(request, choose_text(request, "Question not found.", "未找到题目。"), "danger")
+        return RedirectResponse(url="/student/courses", status_code=303)
+    if not can_post_on_question_topic(db, question, user):
+        push_flash(request, choose_text(request, "Discussion is not open yet.", "讨论尚未开放。"), "danger")
+        return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+    topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
+    db.commit()
+    pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    try:
+        _post, ai_err = create_user_post_and_maybe_ai_reply(
+            db,
+            topic=topic,
+            user=user,
+            body=body,
+            parent_post_id=pid,
+            is_anonymous=(anonymous == "on" or anonymous == "true"),
+            request_ai=(request_ai == "on" or request_ai == "true"),
+        )
+        db.commit()
+    except ValueError:
+        db.rollback()
+        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
+        return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+    push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
+    if ai_err:
+        push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
+    return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
 
 
 @router.post("/questions/{question_id}/submit-notebook")

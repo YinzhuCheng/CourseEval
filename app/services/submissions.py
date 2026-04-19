@@ -40,6 +40,7 @@ from app.services.llm import (
     generate_short_answer_evaluation,
 )
 from app.services.llm_retry import retry_llm_grading_call
+from app.services.notebook_multimodal import notebook_placeholder_alignment_block, sanitize_notebook_for_llm
 from app.models import (
     Assignment,
     CourseMember,
@@ -2265,7 +2266,10 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
         db.commit()
 
         nb_path = absolute_data_path(submission.notebook.stored_path)
-        student_text = _render_notebook_as_text(nb_path, require_outputs=False)
+        nb_mm = sanitize_notebook_for_llm(nb_path, require_outputs=False)
+        student_text = nb_mm.text
+        notebook_images = nb_mm.images
+        notebook_mm_instructions = notebook_placeholder_alignment_block(nb_mm.registry, len(notebook_images))
         latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
         summary_payload = _parsed_summary_json(latest_result)
         summary_json = json.dumps(summary_payload, ensure_ascii=True, indent=2) if summary_payload else "{}"
@@ -2312,6 +2316,8 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
                 course_llm_response_language=_course_llm_response_language(submission.question),
                 bill_user_id=submission.user_id,
                 bill_db=db,
+                notebook_images=notebook_images or None,
+                notebook_multimodal_instructions=notebook_mm_instructions,
             )
 
         result = retry_llm_grading_call(llm_config, _run_nb, label="notebook_llm")
