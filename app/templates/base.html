@@ -48,11 +48,11 @@
             <span class="small">
               {{ t("nav.signed_in_as", username=current_user.username) | safe }}
               {% if current_user_role == "super_admin" %}
-              <span class="badge bg-danger ms-1">super_admin</span>
+              <span class="badge bg-danger ms-1">{{ t("role.super_admin") }}</span>
               {% elif current_user_role == "admin" %}
-              <span class="badge bg-warning text-dark ms-1">admin</span>
+              <span class="badge bg-warning text-dark ms-1">{{ t("role.admin") }}</span>
               {% elif current_user_role == "teacher" %}
-              <span class="badge bg-info text-dark ms-1">teacher</span>
+              <span class="badge bg-info text-dark ms-1">{{ t("role.teacher") }}</span>
               {% endif %}
             </span>
             <form method="post" action="/logout" class="m-0">

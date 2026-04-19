@@ -181,6 +181,7 @@ def run_test_case(language: str, work_dir: Path, test_case: dict, timeout: int) 
             "score": 0,
             "points": score,
             "message": f"Timed out after {timeout} seconds.",
+            "message_zh": f"运行超过 {timeout} 秒，已超时。",
             "stdout": "",
             "stderr": f"Timed out after {timeout} seconds.\n",
             "returncode": 124,
@@ -193,10 +194,13 @@ def run_test_case(language: str, work_dir: Path, test_case: dict, timeout: int) 
     passed = completed.returncode == 0 and normalize_output(actual_output) == normalize_output(expected_output)
     if completed.returncode != 0:
         message = f"Program exited with code {completed.returncode}."
+        message_zh = f"程序退出码为 {completed.returncode}。"
     elif passed:
         message = "Output matched expected result."
+        message_zh = "输出与期望结果一致。"
     else:
         message = "Output did not match expected result."
+        message_zh = "输出与期望结果不一致。"
 
     return {
         "name": test_case.get("name") or "test",
@@ -204,6 +208,7 @@ def run_test_case(language: str, work_dir: Path, test_case: dict, timeout: int) 
         "score": score if passed else 0,
         "points": score,
         "message": message,
+        "message_zh": message_zh,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "returncode": completed.returncode,
@@ -238,6 +243,11 @@ def write_failure(stdout_path: Path, stderr_path: Path, summary_path: Path, mess
         "hidden_score": 0,
         "auto_score": 0,
         "message": message,
+        "message_zh": {
+            "compile_error": "编译失败。",
+            "system_error": "系统未能完成评测。",
+            "answer_timeout": "程序运行超时。",
+        }.get(failure_type, message),
         "failure_type": failure_type,
     }
     summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
@@ -306,6 +316,8 @@ def main() -> int:
     visible_passed = all(result["passed"] for result in visible_results) if visible_results else True
     hidden_passed = all(result["passed"] for result in hidden_results) if hidden_results else True
 
+    visible_pass_count = sum(1 for item in visible_results if item["passed"])
+    hidden_pass_count = sum(1 for item in hidden_results if item["passed"])
     summary = {
         "language": args.language,
         "submission_mode": args.submission_mode,
@@ -314,9 +326,12 @@ def main() -> int:
         "visible_score": visible_score,
         "hidden_score": hidden_score,
         "auto_score": auto_score,
-        "visible_message": f"{sum(1 for item in visible_results if item['passed'])}/{len(visible_results)} visible tests passed." if visible_results else "No visible tests configured.",
-        "hidden_message": f"{sum(1 for item in hidden_results if item['passed'])}/{len(hidden_results)} hidden tests passed." if hidden_results else "No hidden tests configured.",
+        "visible_message": f"{visible_pass_count}/{len(visible_results)} visible tests passed." if visible_results else "No visible tests configured.",
+        "visible_message_zh": f"{visible_pass_count}/{len(visible_results)} 个可见测试通过。" if visible_results else "没有配置可见测试。",
+        "hidden_message": f"{hidden_pass_count}/{len(hidden_results)} hidden tests passed." if hidden_results else "No hidden tests configured.",
+        "hidden_message_zh": f"{hidden_pass_count}/{len(hidden_results)} 个隐藏测试通过。" if hidden_results else "没有配置隐藏测试。",
         "message": "Code evaluation completed." if run_success and visible_passed and hidden_passed else "Code evaluation found failing tests.",
+        "message_zh": "代码评测已完成。" if run_success and visible_passed and hidden_passed else "代码评测发现未通过的测试。",
         "visible_cases": [
             {
                 "name": item["name"],
@@ -326,6 +341,7 @@ def main() -> int:
                 "expected_output": item["expected_output"],
                 "actual_output": item["actual_output"],
                 "message": item["message"],
+                "message_zh": item.get("message_zh", item["message"]),
             }
             for item in visible_results
         ],
@@ -338,6 +354,7 @@ def main() -> int:
                 "expected_output": item["expected_output"],
                 "actual_output": item["actual_output"],
                 "message": item["message"],
+                "message_zh": item.get("message_zh", item["message"]),
             }
             for item in hidden_results
         ],

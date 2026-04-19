@@ -150,8 +150,8 @@
             <div class="alert alert-warning mb-0">
               {% if question.question_type.value == "pdf_llm" or (question.question_type.value == "file_llm" and question.file_question_config and '.pdf' in question.file_question_config.accepted_extensions.lower()) %}
               {{ lx(
-                "Please upload a text-based PDF. Scanned image PDFs are not supported in the current workflow.",
-                "请上传可提取文本的 PDF。当前流程暂不支持纯扫描图片型 PDF。"
+                "Please upload a clear PDF. The system renders PDF pages for LLM review, so diagrams and formulas should be readable.",
+                "请上传清晰的 PDF。系统会将 PDF 页面渲染后交给 LLM 评阅，因此图表和公式需要保持可读。"
               ) }}
               {% else %}
               {{ lx("Supported formats", "支持的格式") }}: {{ question.file_question_config.accepted_extensions }}.

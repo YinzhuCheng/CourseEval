@@ -135,6 +135,23 @@ def _parsed_summary_json(evaluation_result: EvaluationResult | None) -> dict:
         return {}
 
 
+_SUMMARY_ZH_FALLBACKS = {
+    "Code evaluation completed.": "代码评测已完成。",
+    "Code evaluation found failing tests.": "代码评测发现未通过的测试。",
+    "No visible tests configured.": "没有配置可见测试。",
+    "No hidden tests configured.": "没有配置隐藏测试。",
+    "No tests configured.": "没有配置测试。",
+}
+
+
+def _summary_text(summary: dict, key: str, zh_key: str) -> tuple[str | None, str | None]:
+    text = summary.get(key)
+    if text is None:
+        return None, None
+    text = str(text)
+    return text, str(summary.get(zh_key) or _SUMMARY_ZH_FALLBACKS.get(text, text))
+
+
 def _file_question_config(question: Question | None) -> FileQuestionConfig | None:
     return question.file_question_config if question is not None else None
 
@@ -235,6 +252,8 @@ def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, Fe
 def build_student_result_view(submission: Submission) -> dict:
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
     summary = _parsed_summary_json(latest_result)
+    message, message_zh = _summary_text(summary, "message", "message_zh")
+    visible_message, visible_message_zh = _summary_text(summary, "visible_message", "visible_message_zh")
     score_value, score_source = resolve_submission_score(submission)
     hidden_message = summary.get("hidden_message")
     hidden_checks_applied = bool(
@@ -251,8 +270,10 @@ def build_student_result_view(submission: Submission) -> dict:
         "run_success": latest_result.run_success if latest_result is not None else None,
         "visible_score": latest_result.visible_score if latest_result is not None else None,
         "auto_score": latest_result.auto_score if latest_result is not None else None,
-        "message": summary.get("message"),
-        "visible_message": summary.get("visible_message"),
+        "message": message,
+        "message_zh": message_zh,
+        "visible_message": visible_message,
+        "visible_message_zh": visible_message_zh,
         "failure_type": summary.get("failure_type"),
         "hidden_checks_applied": hidden_checks_applied,
     }
@@ -360,7 +381,11 @@ def relative_to_data(path: Path) -> str:
 
 
 def absolute_data_path(relative_path: str) -> Path:
-    return (settings.data_dir / relative_path).resolve()
+    data_dir = settings.data_dir.resolve()
+    path = (data_dir / relative_path).resolve()
+    if not path.is_relative_to(data_dir):
+        raise ValueError("Stored artifact path escapes the data directory.")
+    return path
 
 
 def ensure_parent_dir(path: Path) -> None:
@@ -928,6 +953,22 @@ def _submission_window_open(question: Question) -> tuple[bool, str | None]:
     return True, None
 
 
+def _runner_failed_for_system_reason(result: RunnerResult) -> bool:
+    summary = result.summary_json or {}
+    if summary.get("failure_type") == "system_error":
+        return True
+    message = result.error_message or summary.get("message") or ""
+    return any(
+        marker in str(message)
+        for marker in (
+            "Docker is not installed",
+            "Runner helper script is missing",
+            "Runner finished without producing",
+            "Docker runner exited",
+        )
+    )
+
+
 def _count_attempts(db: Session, user_id: int, question_id: int, start_of_day: datetime | None = None) -> int:
     filters = [
         Submission.user_id == user_id,
@@ -1268,7 +1309,7 @@ def create_file_submission(
     }
     if use_pdf_pipeline:
         pdf_page_paths = _render_pdf_pages_to_images(stored_path)
-        extracted_text = f"PDF rendered into {len(pdf_page_paths)} page image(s) for multimodal LLM review."
+        extracted_text = f"PDF rendered into {len(pdf_page_paths)} page image(s) for LLM review."
     else:
         extracted_text = _extract_formatted_text(
             stored_path,
@@ -1338,20 +1379,42 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
         target_func = process_submission_evaluation
         timeout_seconds = settings.execution_timeout_seconds + 120
 
-    rq_job = get_queue(get_python_queue_name()).enqueue(
-        target_func,
-        submission_id,
-        task.id,
-        job_timeout=timeout_seconds,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+    try:
+        rq_job = get_queue(get_python_queue_name()).enqueue(
+            target_func,
+            submission_id,
+            task.id,
+            job_timeout=timeout_seconds,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise
     submission.status = SubmissionStatus.QUEUED
     submission.queued_at = utcnow()
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
     return rq_job.id
+
+
+def _mark_submission_enqueue_failed(
+    db: Session,
+    submission: Submission,
+    task: EvaluationTask,
+    exc: Exception,
+) -> None:
+    message = f"Evaluation could not be queued: {exc}"
+    submission.status = SubmissionStatus.FAILED_SYSTEM
+    submission.completed_at = utcnow()
+    submission.counts_toward_limit = False
+    submission.is_effective_submission = False
+    submission.failure_reason_code = "queue_error"
+    task.status = EvaluationTaskStatus.FAILED
+    task.finished_at = utcnow()
+    task.error_message = message
+    db.commit()
 
 
 def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
@@ -1372,15 +1435,21 @@ def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
 
     llm_config = _resolve_llm_config_for_question(submission.question, db)
     if llm_config is None:
-        raise ValueError("No enabled LLM config available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
-        process_short_answer_llm_evaluation,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+        exc = ValueError("No enabled LLM config available.")
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise exc
+    try:
+        rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+            process_short_answer_llm_evaluation,
+            submission_id,
+            task.id,
+            job_timeout=120,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
@@ -1405,15 +1474,21 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
 
     llm_config = _resolve_llm_config_for_question(submission.question, db)
     if llm_config is None:
-        raise ValueError("No enabled LLM config available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
-        process_file_llm_evaluation,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+        exc = ValueError("No enabled LLM config available.")
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise exc
+    try:
+        rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+            process_file_llm_evaluation,
+            submission_id,
+            task.id,
+            job_timeout=120,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
@@ -1438,15 +1513,21 @@ def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
 
     llm_config = _resolve_llm_config_for_question(submission.question, db)
     if llm_config is None:
-        raise ValueError("No enabled LLM config available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
-        process_notebook_llm_feedback,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+        exc = ValueError("No enabled LLM config available.")
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise exc
+    try:
+        rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+            process_notebook_llm_feedback,
+            submission_id,
+            task.id,
+            job_timeout=120,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_enqueue_failed(db, submission, task, exc)
+        raise
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
@@ -1634,12 +1715,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
             task.status = EvaluationTaskStatus.FAILED
             task.error_message = result.error_message
             submission.completed_at = utcnow()
-            if result.error_message and (
-                "Docker is not installed" in result.error_message
-                or "Runner finished without producing" in result.error_message
-                or "Docker runner exited" in result.error_message
-                or "system_error" == (result.summary_json or {}).get("failure_type")
-            ):
+            if _runner_failed_for_system_reason(result):
                 submission.status = SubmissionStatus.FAILED_SYSTEM
                 submission.counts_toward_limit = False
                 submission.is_effective_submission = False
@@ -1774,7 +1850,7 @@ def process_code_evaluation(submission_id: int, task_id: int) -> None:
         else:
             task.status = EvaluationTaskStatus.FAILED
             task.error_message = result.error_message
-            if result.error_message and "Docker is not installed" in result.error_message:
+            if _runner_failed_for_system_reason(result):
                 submission.status = SubmissionStatus.FAILED_SYSTEM
                 submission.counts_toward_limit = False
                 submission.is_effective_submission = False
@@ -1976,7 +2052,11 @@ def run_code_in_docker(
 
     if completed.returncode != 0:
         message = summary_json.get("message") or "Code runner exited with a non-zero status."
-        summary_json.setdefault("failure_type", "answer_error")
+        if not summary_json:
+            summary_json["failure_type"] = "system_error"
+            summary_json["message"] = message
+        else:
+            summary_json.setdefault("failure_type", "answer_error")
         summary_json.setdefault("auto_score", 0)
         return RunnerResult(exit_code=completed.returncode, error_message=message, summary_json=summary_json)
 

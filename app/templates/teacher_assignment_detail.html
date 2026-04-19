@@ -168,6 +168,12 @@
           </div>
           <div class="col-12 code-only">
             <h3 class="h6 mb-2">{{ lx("5 test cases (20 points each)", "5 个测试点（默认每个 20 分）") }}</h3>
+            <div class="form-text mb-2">
+              {{ lx(
+                "Code questions currently use exactly 3 visible tests and 2 hidden tests. The score is normalized to 100 points.",
+                "当前代码题固定使用 3 个可见测试和 2 个隐藏测试，满分会统一按 100 分处理。"
+              ) }}
+            </div>
           </div>
           <div class="col-md-6 code-only">
             <label class="form-label">{{ lx("Visible test 1 input", "可见测试 1 输入") }}</label>
@@ -271,11 +277,17 @@
             </div>
           </div>
           <div class="col-md-6 llm-graded-only d-none">
-            <label class="form-label">{{ lx("Teacher confirmation required", "教师确认后生效") }}</label>
+            <label class="form-label">{{ lx("Require teacher confirmation before counting the LLM score", "LLM 分数需教师确认后才计入成绩") }}</label>
             <select class="form-select" name="require_teacher_confirmation">
               <option value="false">{{ lx("No", "否") }}</option>
               <option value="true">{{ lx("Yes", "是") }}</option>
             </select>
+            <div class="form-text">
+              {{ lx(
+                "If enabled, students may see the review suggestion, but the score will not count until staff confirms it.",
+                "开启后，学生可以看到评阅建议，但分数需教师确认后才会计入当前成绩。"
+              ) }}
+            </div>
           </div>
 
           <div class="col-12 d-grid">
