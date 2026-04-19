@@ -98,7 +98,7 @@ def _submission_preview_text(submission: Submission) -> str:
             p = absolute_data_path(submission.stored_file_path)
             if p.exists():
                 return p.read_text(encoding="utf-8", errors="replace")[:12000]
-        except OSError:
+        except (OSError, ValueError):
             return ""
     if submission.answer_text:
         return (submission.answer_text or "")[:12000]

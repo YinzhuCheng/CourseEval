@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -53,7 +53,6 @@ from app.services.courses import (
     get_course_for_teacher,
     get_question_for_staff,
     get_question_for_teacher,
-    is_open_community_course,
     summarize_course_grade_matrix,
 )
 from app.services.permissions import (
@@ -103,6 +102,61 @@ def _redirect(location: str) -> RedirectResponse:
     return RedirectResponse(url=location, status_code=303)
 
 
+def _parse_decimal_input(raw: str, field_label: str) -> Decimal:
+    try:
+        return Decimal((raw or "").strip())
+    except Exception as exc:
+        raise ValueError(f"{field_label} must be a valid number.") from exc
+
+
+def _parse_int_input(
+    raw: str,
+    field_label: str,
+    *,
+    default: int | None = None,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    text = (raw or "").strip()
+    if not text and default is not None:
+        value = default
+    else:
+        try:
+            value = int(text)
+        except ValueError as exc:
+            raise ValueError(f"{field_label} must be a whole number.") from exc
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{field_label} is below the allowed minimum.")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{field_label} is above the allowed maximum.")
+    return value
+
+
+def _normalize_cpu_limit(raw: str, *, default: str = "1") -> str:
+    text = (raw or "").strip() or default
+    try:
+        value = Decimal(text)
+    except Exception as exc:
+        raise ValueError("CPU limit must be a valid number.") from exc
+    if value <= 0 or value > Decimal("4"):
+        raise ValueError("CPU limit must be greater than 0 and no more than 4.")
+    return text
+
+
+def _parse_code_runner_limits(time_limit_seconds: str, memory_limit_mb: str, cpu_limit: str) -> tuple[int, int, str]:
+    return (
+        _parse_int_input(time_limit_seconds, "Time limit", default=300, minimum=1, maximum=600),
+        _parse_int_input(memory_limit_mb, "Memory limit", default=1024, minimum=128, maximum=4096),
+        _normalize_cpu_limit(cpu_limit),
+    )
+
+
+def _parse_optional_length(raw: str, field_label: str) -> int | None:
+    if not (raw or "").strip():
+        return None
+    return _parse_int_input(raw, field_label, minimum=0, maximum=200000)
+
+
 @router.get("/courses")
 def teacher_courses(request: Request, db: Session = Depends(get_db)):
     try:
@@ -117,10 +171,7 @@ def teacher_courses(request: Request, db: Session = Depends(get_db)):
         .join(Course)
         .filter(
             CourseMember.user_id == user.id,
-            or_(
-                CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
-                Course.is_open_community.is_(True),
-            ),
+            CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
         .order_by(
@@ -516,7 +567,19 @@ def create_assignment(
         )
         return _redirect(f"/teacher/courses/{course.id}")
 
-    limit_value = int(submission_limit_value) if submission_limit_value.strip() else None
+    try:
+        limit_value = (
+            _parse_int_input(submission_limit_value, "Submission limit", minimum=1, maximum=1000)
+            if submission_limit_value.strip()
+            else None
+        )
+    except ValueError:
+        push_flash(
+            request,
+            choose_text(request, "Submission limit must be a positive whole number.", "提交次数限制必须是正整数。"),
+            "danger",
+        )
+        return _redirect(f"/teacher/courses/{course.id}")
     if limit_value is None:
         limit_mode = SubmissionLimitMode.UNLIMITED
     elif limit_mode == SubmissionLimitMode.UNLIMITED:
@@ -659,7 +722,7 @@ async def create_question(
             .filter(
                 Assignment.id == assignment_id,
                 CourseMember.user_id == user.id,
-                or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
+                CourseMember.role == CourseRole.TEACHER,
                 CourseMember.status == MembershipStatus.ACTIVE,
             )
             .first()
@@ -678,7 +741,13 @@ async def create_question(
         push_flash(request, choose_text(request, "Invalid question type.", "题目类型无效。"), "danger")
         return _redirect(f"/teacher/assignments/{assignment.id}")
 
-    max_score_decimal = Decimal(max_score)
+    try:
+        max_score_decimal = _parse_decimal_input(max_score, "Max score")
+        if max_score_decimal <= 0:
+            raise ValueError
+    except ValueError:
+        push_flash(request, choose_text(request, "Max score must be a positive number.", "题目满分必须是正数。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
     order_index = len(assignment.questions) + 1
     teacher_confirmation_required = require_teacher_confirmation == "true"
     question = Question(
@@ -718,7 +787,12 @@ async def create_question(
             )
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
-        n_weight = Decimal(notebook_llm_score_weight or "0")
+        try:
+            n_weight = _parse_decimal_input(notebook_llm_score_weight or "0", "LLM score weight")
+        except ValueError:
+            push_flash(request, choose_text(request, "Invalid LLM score weight.", "LLM 分数权重无效。"), "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
         if n_weight <= 0 or notebook_llm_feedback_enabled != "true":
             push_flash(
                 request,
@@ -769,11 +843,22 @@ async def create_question(
             )
         )
     elif q_type == QuestionType.SHORT_ANSWER:
+        try:
+            parsed_min_length = _parse_optional_length(min_length, "Minimum length")
+            parsed_max_length = _parse_optional_length(max_length, "Maximum length")
+        except ValueError:
+            push_flash(request, choose_text(request, "Length limits must be whole numbers.", "字数限制必须是整数。"), "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
+        if parsed_min_length is not None and parsed_max_length is not None and parsed_min_length > parsed_max_length:
+            push_flash(request, choose_text(request, "Minimum length cannot exceed maximum length.", "最小长度不能大于最大长度。"), "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
         db.add(
             ShortAnswerQuestionConfig(
                 question_id=question.id,
-                min_length=int(min_length) if min_length.strip() else None,
-                max_length=int(max_length) if max_length.strip() else None,
+                min_length=parsed_min_length,
+                max_length=parsed_max_length,
                 rubric_text=rubric_text.strip() or None,
                 llm_suggestion_enabled=True,
                 teacher_confirmation_required=teacher_confirmation_required,
@@ -834,6 +919,16 @@ async def create_question(
                 "warning",
             )
             question.max_score = Decimal("100")
+        try:
+            parsed_time_limit, parsed_memory_limit, parsed_cpu_limit = _parse_code_runner_limits(
+                time_limit_seconds,
+                memory_limit_mb,
+                cpu_limit,
+            )
+        except ValueError as exc:
+            push_flash(request, choose_text(request, str(exc), "运行资源限制无效，请检查时间、内存和 CPU。"), "danger")
+            db.rollback()
+            return _redirect(f"/teacher/assignments/{assignment.id}")
         db.add(
             CodeQuestionConfig(
                 question_id=question.id,
@@ -847,10 +942,10 @@ async def create_question(
                 reference_solution_python=reference_solution_python.strip(),
                 reference_solution_c=reference_solution_c.strip(),
                 reference_solution_cpp=reference_solution_cpp.strip(),
-                time_limit_seconds=int(time_limit_seconds or 300),
-                memory_limit_mb=int(memory_limit_mb or 1024),
-                cpu_limit=cpu_limit or "1",
-                allow_network=allow_network == "true",
+                time_limit_seconds=parsed_time_limit,
+                memory_limit_mb=parsed_memory_limit,
+                cpu_limit=parsed_cpu_limit,
+                allow_network=False,
             )
         )
     elif q_type == QuestionType.FILE_LLM:
@@ -1244,10 +1339,19 @@ async def update_question(
         push_flash(request, choose_text(request, "Question not found.", "题目不存在。"), "danger")
         return _redirect("/teacher/courses")
 
+    try:
+        max_score_decimal = _parse_decimal_input(max_score, "Max score")
+        if max_score_decimal <= 0:
+            raise ValueError
+        scoring_rule_value = ScoringRule(scoring_rule_override) if scoring_rule_override.strip() else None
+    except ValueError:
+        push_flash(request, choose_text(request, "Question settings are invalid.", "题目配置无效，请检查后重试。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+
     question.title = title.strip()
     question.description = description.strip() or None
-    question.max_score = Decimal(max_score)
-    question.scoring_rule_override = ScoringRule(scoring_rule_override) if scoring_rule_override.strip() else None
+    question.max_score = max_score_decimal
+    question.scoring_rule_override = scoring_rule_value
     question.updated_at = utcnow()
     teacher_confirmation_required = require_teacher_confirmation == "true"
 
@@ -1269,8 +1373,15 @@ async def update_question(
 
     if question.question_type == QuestionType.SHORT_ANSWER and question.short_answer_config:
         cfg = question.short_answer_config
-        cfg.min_length = int(min_length) if min_length.strip() else None
-        cfg.max_length = int(max_length) if max_length.strip() else None
+        try:
+            cfg.min_length = _parse_optional_length(min_length, "Minimum length")
+            cfg.max_length = _parse_optional_length(max_length, "Maximum length")
+        except ValueError:
+            push_flash(request, choose_text(request, "Length limits must be whole numbers.", "字数限制必须是整数。"), "danger")
+            return _redirect(f"/teacher/questions/{question.id}")
+        if cfg.min_length is not None and cfg.max_length is not None and cfg.min_length > cfg.max_length:
+            push_flash(request, choose_text(request, "Minimum length cannot exceed maximum length.", "最小长度不能大于最大长度。"), "danger")
+            return _redirect(f"/teacher/questions/{question.id}")
         cfg.rubric_text = rubric_text.strip() or None
         cfg.teacher_confirmation_required = teacher_confirmation_required
         cfg.updated_at = utcnow()
@@ -1304,15 +1415,25 @@ async def update_question(
         cfg.reference_solution_python = reference_solution_python.strip()
         cfg.reference_solution_c = reference_solution_c.strip()
         cfg.reference_solution_cpp = reference_solution_cpp.strip()
-        cfg.time_limit_seconds = int(time_limit_seconds or 300)
-        cfg.memory_limit_mb = int(memory_limit_mb or 1024)
-        cfg.cpu_limit = cpu_limit or "1"
-        cfg.allow_network = allow_network == "true"
+        try:
+            cfg.time_limit_seconds, cfg.memory_limit_mb, cfg.cpu_limit = _parse_code_runner_limits(
+                time_limit_seconds,
+                memory_limit_mb,
+                cpu_limit,
+            )
+        except ValueError as exc:
+            push_flash(request, choose_text(request, str(exc), "运行资源限制无效，请检查时间、内存和 CPU。"), "danger")
+            return _redirect(f"/teacher/questions/{question.id}")
+        cfg.allow_network = False
         cfg.updated_at = utcnow()
     elif question.question_type == QuestionType.NOTEBOOK and question.notebook_config:
         cfg = question.notebook_config
         if notebook_llm_score_weight.strip():
-            nw = Decimal(notebook_llm_score_weight.strip())
+            try:
+                nw = _parse_decimal_input(notebook_llm_score_weight, "LLM score weight")
+            except ValueError:
+                push_flash(request, choose_text(request, "Invalid LLM score weight.", "LLM 分数权重无效。"), "danger")
+                return _redirect(f"/teacher/questions/{question.id}")
             if nw <= 0 or nw > question.max_score:
                 push_flash(
                     request,
@@ -1437,10 +1558,7 @@ def grade_submission(
         )
         return _redirect("/teacher/courses")
 
-    sub_course = submission.question.assignment.course
-    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER and not is_open_community_course(
-        sub_course
-    ):
+    if get_course_role(db, submission.course_id, user.id) != CourseRole.TEACHER:
         push_flash(
             request,
             choose_text(
@@ -1452,7 +1570,11 @@ def grade_submission(
         )
         return _redirect(f"/teacher/submissions/{submission.id}")
 
-    score_value = Decimal(score) if score.strip() else None
+    try:
+        score_value = _parse_decimal_input(score, "Score") if score.strip() else None
+    except ValueError:
+        push_flash(request, choose_text(request, "Score must be a valid number.", "分数必须是有效数字。"), "danger")
+        return _redirect(f"/teacher/submissions/{submission.id}")
     requires_teacher_score = submission.submission_type == QuestionType.SHORT_ANSWER
     if requires_teacher_score and score_value is None:
         push_flash(

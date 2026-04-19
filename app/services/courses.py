@@ -2,7 +2,7 @@ import json
 import secrets
 from decimal import Decimal
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import is_admin
@@ -183,7 +183,7 @@ def get_course_for_teacher(db: Session, course_id: int, teacher_user_id: int) ->
         .where(
             Course.id == course_id,
             CourseMember.user_id == teacher_user_id,
-            or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
+            CourseMember.role == CourseRole.TEACHER,
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -203,7 +203,7 @@ def get_question_for_teacher(db: Session, question_id: int, teacher_user_id: int
         .where(
             Question.id == question_id,
             CourseMember.user_id == teacher_user_id,
-            or_(CourseMember.role == CourseRole.TEACHER, Course.is_open_community.is_(True)),
+            CourseMember.role == CourseRole.TEACHER,
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -241,7 +241,7 @@ def get_course_for_staff(db: Session, course_id: int, user_id: int) -> Course | 
         .where(
             Course.id == course_id,
             CourseMember.user_id == user_id,
-            or_(CourseMember.role.in_(STAFF_COURSE_ROLES), Course.is_open_community.is_(True)),
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -260,7 +260,7 @@ def get_assignment_for_staff(db: Session, assignment_id: int, user_id: int) -> A
         .where(
             Assignment.id == assignment_id,
             CourseMember.user_id == user_id,
-            or_(CourseMember.role.in_(STAFF_COURSE_ROLES), Course.is_open_community.is_(True)),
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -280,7 +280,7 @@ def get_question_for_staff(db: Session, question_id: int, user_id: int) -> Quest
         .where(
             Question.id == question_id,
             CourseMember.user_id == user_id,
-            or_(CourseMember.role.in_(STAFF_COURSE_ROLES), Course.is_open_community.is_(True)),
+            CourseMember.role.in_(STAFF_COURSE_ROLES),
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )

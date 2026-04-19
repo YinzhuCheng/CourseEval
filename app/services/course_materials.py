@@ -17,17 +17,22 @@ settings = get_settings()
 
 
 def relative_to_data(path: Path) -> str:
+    data_dir = settings.data_dir.resolve()
+    resolved = path.resolve()
     try:
-        return path.relative_to(settings.data_dir).as_posix()
+        return resolved.relative_to(data_dir).as_posix()
     except ValueError:
-        return path.as_posix()
+        raise ValueError("Path is outside the data directory.")
 
 
 def absolute_data_path(relative_path: str) -> Path:
     p = Path(relative_path)
-    if p.is_absolute():
-        return p
-    return settings.data_dir / relative_path
+    candidate = p if p.is_absolute() else settings.data_dir / p
+    data_dir = settings.data_dir.resolve()
+    resolved = candidate.resolve()
+    if data_dir not in resolved.parents and resolved != data_dir:
+        raise ValueError("Path is outside the data directory.")
+    return resolved
 
 
 def list_materials_for_course(db: Session, course_id: int) -> list[CourseMaterial]:

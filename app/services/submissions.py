@@ -13,7 +13,7 @@ import fitz
 import nbformat
 from redis import Redis
 from rq import Queue
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
@@ -357,12 +357,56 @@ def active_llm_worker_specs(db: Session) -> list[tuple[str, int]]:
     return [(llm_queue_name_for_config(config), max(int(config.queue_concurrency or 1), 1)) for config in configs]
 
 
+def _existing_backend_job_id(task: EvaluationTask) -> str | None:
+    if task.status in {EvaluationTaskStatus.QUEUED, EvaluationTaskStatus.RUNNING} and task.backend_job_id:
+        return task.backend_job_id
+    return None
+
+
+def _task_can_start(task: EvaluationTask) -> bool:
+    return task.status == EvaluationTaskStatus.QUEUED
+
+
+def _mark_submission_system_failed(
+    db: Session,
+    submission: Submission | None,
+    task: EvaluationTask | None,
+    message: str,
+) -> None:
+    finished_at = utcnow()
+    if task is not None:
+        task.status = EvaluationTaskStatus.FAILED
+        task.finished_at = finished_at
+        task.error_message = message
+    if submission is not None and submission.status not in {
+        SubmissionStatus.COMPLETED,
+        SubmissionStatus.FAILED_ANSWER,
+    }:
+        submission.status = SubmissionStatus.FAILED_SYSTEM
+        submission.completed_at = finished_at
+        submission.counts_toward_limit = False
+        submission.is_effective_submission = False
+        submission.failure_reason_code = "system_error"
+    db.commit()
+
+
 def relative_to_data(path: Path) -> str:
-    return path.relative_to(settings.data_dir).as_posix()
+    data_dir = settings.data_dir.resolve()
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(data_dir).as_posix()
+    except ValueError:
+        raise ValueError("Path is outside the data directory.")
 
 
 def absolute_data_path(relative_path: str) -> Path:
-    return (settings.data_dir / relative_path).resolve()
+    p = Path(relative_path)
+    candidate = p if p.is_absolute() else settings.data_dir / p
+    data_dir = settings.data_dir.resolve()
+    resolved = candidate.resolve()
+    if data_dir not in resolved.parents and resolved != data_dir:
+        raise ValueError("Path is outside the data directory.")
+    return resolved
 
 
 def ensure_parent_dir(path: Path) -> None:
@@ -840,10 +884,7 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
             and_(
                 CourseMember.course_id == Assignment.course_id,
                 CourseMember.user_id == teacher_id,
-                or_(
-                    CourseMember.role.in_(["teacher", "ta"]),
-                    Course.is_open_community.is_(True),
-                ),
+                CourseMember.role.in_(["teacher", "ta"]),
             ),
         )
         .where(Submission.id == submission_id, CourseMember.status == MembershipStatus.ACTIVE)
@@ -1336,6 +1377,9 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
     task = db.scalars(statement).first()
     if task is None:
         raise ValueError("Evaluation task not found.")
+    existing_job_id = _existing_backend_job_id(task)
+    if existing_job_id:
+        return existing_job_id
 
     if task.task_type == EvaluationTaskType.CODE_EVALUATION:
         target_func = process_code_evaluation
@@ -1375,6 +1419,9 @@ def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
     )
     if task is None:
         raise ValueError("Short-answer LLM task not found.")
+    existing_job_id = _existing_backend_job_id(task)
+    if existing_job_id:
+        return existing_job_id
 
     llm_config = _resolve_llm_config_for_question(submission.question, db)
     if llm_config is None:
@@ -1408,6 +1455,9 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
     )
     if task is None:
         raise ValueError("File LLM task not found.")
+    existing_job_id = _existing_backend_job_id(task)
+    if existing_job_id:
+        return existing_job_id
 
     llm_config = _resolve_llm_config_for_question(submission.question, db)
     if llm_config is None:
@@ -1441,6 +1491,9 @@ def enqueue_notebook_llm_feedback(db: Session, submission_id: int) -> str:
     )
     if task is None:
         raise ValueError("Notebook LLM task not found.")
+    existing_job_id = _existing_backend_job_id(task)
+    if existing_job_id:
+        return existing_job_id
 
     llm_config = _resolve_llm_config_for_question(submission.question, db)
     if llm_config is None:
@@ -1563,6 +1616,9 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
         if submission is None or task is None or submission.notebook is None:
             logger.error("Submission %s or task %s could not be loaded for evaluation.", submission_id, task_id)
             return
+        if not _task_can_start(task):
+            logger.info("Skipping submission task %s because it is already %s.", task_id, task.status.value)
+            return
 
         question = submission.question
         notebook_config = question.notebook_config
@@ -1572,7 +1628,7 @@ def process_submission_evaluation(submission_id: int, task_id: int) -> None:
             f"{notebook_config.memory_limit_mb}m" if notebook_config else settings.runner_memory_limit
         )
         cpus = notebook_config.cpu_limit if notebook_config else settings.runner_cpus
-        network_disabled = not (notebook_config.allow_network if notebook_config else False)
+        network_disabled = True
 
         submission.status = SubmissionStatus.RUNNING
         submission.started_at = utcnow()
@@ -1714,6 +1770,9 @@ def process_code_evaluation(submission_id: int, task_id: int) -> None:
         if submission is None or task is None or not submission.stored_file_path:
             logger.error("Code submission %s or task %s could not be loaded.", submission_id, task_id)
             return
+        if not _task_can_start(task):
+            logger.info("Skipping code task %s because it is already %s.", task_id, task.status.value)
+            return
 
         question = submission.question
         config = _code_config(question)
@@ -1749,7 +1808,7 @@ def process_code_evaluation(submission_id: int, task_id: int) -> None:
             timeout_seconds=config.time_limit_seconds,
             memory_limit=f"{config.memory_limit_mb}m",
             cpus=config.cpu_limit,
-            network_disabled=not config.allow_network,
+            network_disabled=True,
             visible_tests_json=json.dumps(config.visible_tests(), ensure_ascii=True),
             hidden_tests_json=json.dumps(config.hidden_tests(), ensure_ascii=True),
         )
@@ -2016,13 +2075,13 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         task = db.get(EvaluationTask, task_id)
         if submission is None or task is None:
             return
+        if not _task_can_start(task):
+            logger.info("Skipping short-answer LLM task %s because it is already %s.", task_id, task.status.value)
+            return
 
         llm_config = _resolve_llm_config_for_question(submission.question, db)
         if llm_config is None or not llm_config.enabled:
-            task.status = EvaluationTaskStatus.FAILED
-            task.error_message = "No enabled LLM config available."
-            task.finished_at = utcnow()
-            db.commit()
+            _mark_submission_system_failed(db, submission, task, "No enabled LLM config available.")
             return
 
         task.status = EvaluationTaskStatus.RUNNING
@@ -2086,12 +2145,9 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Short-answer LLM evaluation failed for submission %s", submission_id)
+        submission = db.get(Submission, submission_id)
         task = db.get(EvaluationTask, task_id)
-        if task is not None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.finished_at = utcnow()
-            task.error_message = str(exc)
-            db.commit()
+        _mark_submission_system_failed(db, submission, task, str(exc))
         raise
     finally:
         db.close()
@@ -2111,14 +2167,14 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         task = db.get(EvaluationTask, task_id)
         if submission is None or task is None:
             return
+        if not _task_can_start(task):
+            logger.info("Skipping file LLM task %s because it is already %s.", task_id, task.status.value)
+            return
 
         llm_config = _resolve_llm_config_for_question(submission.question, db)
         question_config = _file_question_config(submission.question)
         if llm_config is None or not llm_config.enabled or question_config is None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.error_message = "No enabled LLM config or file question config available."
-            task.finished_at = utcnow()
-            db.commit()
+            _mark_submission_system_failed(db, submission, task, "No enabled LLM config or file question config available.")
             return
 
         task.status = EvaluationTaskStatus.RUNNING
@@ -2221,12 +2277,9 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("File LLM evaluation failed for submission %s", submission_id)
+        submission = db.get(Submission, submission_id)
         task = db.get(EvaluationTask, task_id)
-        if task is not None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.finished_at = utcnow()
-            task.error_message = str(exc)
-            db.commit()
+        _mark_submission_system_failed(db, submission, task, str(exc))
         raise
     finally:
         db.close()
@@ -2249,21 +2302,18 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
         task = db.get(EvaluationTask, task_id)
         if submission is None or task is None:
             return
+        if not _task_can_start(task):
+            logger.info("Skipping notebook LLM task %s because it is already %s.", task_id, task.status.value)
+            return
 
         llm_config = _resolve_llm_config_for_question(submission.question, db)
         ncfg = submission.question.notebook_config if submission.question else None
         if llm_config is None or not llm_config.enabled or ncfg is None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.error_message = "No enabled LLM config or notebook question config."
-            task.finished_at = utcnow()
-            db.commit()
+            _mark_submission_system_failed(db, submission, task, "No enabled LLM config or notebook question config.")
             return
 
         if submission.notebook is None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.error_message = "Notebook file is missing for this submission."
-            task.finished_at = utcnow()
-            db.commit()
+            _mark_submission_system_failed(db, submission, task, "Notebook file is missing for this submission.")
             return
 
         task.status = EvaluationTaskStatus.RUNNING
@@ -2354,12 +2404,9 @@ def process_notebook_llm_feedback(submission_id: int, task_id: int) -> None:
         refresh_final_grade_snapshot(db, submission.question_id, submission.user_id)
     except Exception as exc:
         logger.exception("Notebook LLM feedback failed for submission %s", submission_id)
+        submission = db.get(Submission, submission_id)
         task = db.get(EvaluationTask, task_id)
-        if task is not None:
-            task.status = EvaluationTaskStatus.FAILED
-            task.finished_at = utcnow()
-            task.error_message = str(exc)
-            db.commit()
+        _mark_submission_system_failed(db, submission, task, str(exc))
         raise
     finally:
         db.close()

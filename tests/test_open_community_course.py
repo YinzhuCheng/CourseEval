@@ -1,4 +1,4 @@
-"""Open community course: flag, ordering, and staff access for student members."""
+"""Open community course: flag, ordering, and staff access boundaries."""
 
 import secrets
 
@@ -15,7 +15,7 @@ from app.services.courses import (
 )
 
 
-def test_open_community_course_exists_and_student_sees_staff_views():
+def test_open_community_course_exists_and_student_does_not_get_staff_views():
     init_database()
     with SessionLocal() as db:
         oc = db.scalar(select(Course).where(Course.code == OPEN_COMMUNITY_COURSE_CODE))
@@ -41,8 +41,8 @@ def test_open_community_course_exists_and_student_sees_staff_views():
         )
         db.commit()
 
-        assert get_course_for_teacher(db, oc.id, user.id) is not None
-        assert get_course_for_staff(db, oc.id, user.id) is not None
+        assert get_course_for_teacher(db, oc.id, user.id) is None
+        assert get_course_for_staff(db, oc.id, user.id) is None
 
         other = Course(
                 code=f"ZZZ_{suffix}",

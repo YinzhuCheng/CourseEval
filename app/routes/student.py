@@ -540,6 +540,14 @@ def student_submission_artifact(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    if artifact_name not in {"html", "executed_notebook"}:
+        push_flash(
+            request,
+            choose_text(request, "The requested artifact is not available.", "所请求的产物不可查看。"),
+            "warning",
+        )
+        return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
+
     try:
         artifact_path = resolve_submission_artifact_path(latest_result, artifact_name)
     except FileNotFoundError:

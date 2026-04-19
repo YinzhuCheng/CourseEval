@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import is_admin, is_super_admin
@@ -55,7 +56,19 @@ def get_or_create_material_topic(db: Session, material_id: int, course_id: int) 
         question_id=None,
     )
     db.add(topic)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(
+            select(DiscussionTopic).where(
+                DiscussionTopic.course_material_id == material_id,
+                DiscussionTopic.kind == DiscussionTopicKind.COURSE_MATERIAL,
+            )
+        )
+        if existing:
+            return existing
+        raise
     return topic
 
 
@@ -75,7 +88,19 @@ def get_or_create_question_topic(db: Session, question_id: int, course_id: int) 
         question_id=question_id,
     )
     db.add(topic)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(
+            select(DiscussionTopic).where(
+                DiscussionTopic.question_id == question_id,
+                DiscussionTopic.kind == DiscussionTopicKind.QUESTION,
+            )
+        )
+        if existing:
+            return existing
+        raise
     return topic
 
 
@@ -153,14 +178,18 @@ def flat_thread_for_template(posts: list[DiscussionPost], decorated: list[dict])
     """Ordered flat list with reply depth for simple template rendering."""
     by_id = {d["post"].id: d for d in decorated}
 
-    def depth_of(post_id: int) -> int:
+    def depth_of(post_id: int, seen: set[int] | None = None) -> int:
+        seen = set() if seen is None else seen
+        if post_id in seen:
+            return 0
+        seen.add(post_id)
         p = by_id.get(post_id)
         if not p:
             return 0
         parent_id = p["post"].parent_post_id
         if not parent_id:
             return 0
-        return 1 + depth_of(parent_id)
+        return 1 + depth_of(parent_id, seen)
 
     out: list[dict] = []
     for d in decorated:
@@ -205,6 +234,10 @@ def create_post(
     body = (body or "").strip()
     if not body:
         raise ValueError("empty_body")
+    if parent_post_id is not None:
+        parent = db.get(DiscussionPost, parent_post_id)
+        if parent is None or parent.topic_id != topic_id:
+            raise ValueError("invalid_parent_post")
     post = DiscussionPost(
         topic_id=topic_id,
         author_id=author.id,

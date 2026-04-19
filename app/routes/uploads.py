@@ -30,13 +30,13 @@ def serve_data_file(relative_path: str, request: Request, db: Session = Depends(
         return _redirect(redirect.location)
 
     raw = unquote(relative_path).lstrip("/")
-    path = absolute_data_path(raw)
     try:
+        path = absolute_data_path(raw)
         path = path.resolve()
         base = get_settings().data_dir.resolve()
         if base not in path.parents and path != base:
             return _redirect("/student/courses")
-    except OSError:
+    except (OSError, ValueError):
         return _redirect("/student/courses")
 
     if not path.exists() or not path.is_file():

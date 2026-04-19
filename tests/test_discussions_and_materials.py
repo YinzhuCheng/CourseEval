@@ -18,7 +18,7 @@ from app.constants import (
 )
 from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Question, User
-from app.services.discussions import assignment_past_close_for_discussion, flat_thread_for_template
+from app.services.discussions import assignment_past_close_for_discussion, create_post, flat_thread_for_template
 from app.services.post_close_reveal import reveal_bundle_for_question
 
 
@@ -126,6 +126,65 @@ class DiscussionsAndMaterialsTests(unittest.TestCase):
         flat = flat_thread_for_template(posts, decorated)
         self.assertEqual(flat[0]["depth"], 0)
         self.assertEqual(flat[1]["depth"], 1)
+
+    def test_flat_thread_cycle_does_not_recurse_forever(self) -> None:
+        from app.constants import DiscussionTopicKind
+        from app.models import DiscussionPost, DiscussionTopic
+
+        topic = DiscussionTopic(
+            course_id=self.course.id,
+            kind=DiscussionTopicKind.QUESTION,
+            question_id=self.q.id,
+            course_material_id=None,
+        )
+        self.db.add(topic)
+        self.db.flush()
+        p1 = DiscussionPost(topic_id=topic.id, author_id=self.student.id, body_text="one", is_anonymous=False)
+        p2 = DiscussionPost(topic_id=topic.id, author_id=self.teacher.id, body_text="two", is_anonymous=False)
+        self.db.add_all([p1, p2])
+        self.db.flush()
+        p1.parent_post_id = p2.id
+        p2.parent_post_id = p1.id
+        self.db.commit()
+
+        rows = [
+            {"post": p1, "display_name": "s1", "staff_hint": None},
+            {"post": p2, "display_name": "t1", "staff_hint": None},
+        ]
+        flat = flat_thread_for_template([p1, p2], rows)
+        self.assertEqual(len(flat), 2)
+
+    def test_create_post_rejects_parent_from_other_topic(self) -> None:
+        from app.constants import DiscussionTopicKind
+        from app.models import DiscussionPost, DiscussionTopic
+
+        topic1 = DiscussionTopic(
+            course_id=self.course.id,
+            kind=DiscussionTopicKind.QUESTION,
+            question_id=self.q.id,
+            course_material_id=None,
+        )
+        topic2 = DiscussionTopic(
+            course_id=self.course.id,
+            kind=DiscussionTopicKind.COURSE_MATERIAL,
+            question_id=None,
+            course_material_id=None,
+        )
+        self.db.add_all([topic1, topic2])
+        self.db.flush()
+        parent = DiscussionPost(topic_id=topic1.id, author_id=self.student.id, body_text="root", is_anonymous=False)
+        self.db.add(parent)
+        self.db.flush()
+
+        with self.assertRaises(ValueError):
+            create_post(
+                self.db,
+                topic_id=topic2.id,
+                author=self.teacher,
+                body="wrong thread",
+                parent_post_id=parent.id,
+                is_anonymous=False,
+            )
 
 
 if __name__ == "__main__":
