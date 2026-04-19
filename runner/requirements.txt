@@ -1,3 +1,6 @@
+# Layer 3 — Python packages baked into the default code runner Docker image (student execution).
+# Keep versions aligned with app/runtime_support.py when changing the default image.
+# The host CourseEval process does not need these packages in its own venv.
 numpy==2.4.4
 pandas==3.0.2
 matplotlib==3.10.8

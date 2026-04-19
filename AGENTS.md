@@ -193,6 +193,19 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 
 ## 8. Validation commands
 
+### Python dependency layers (do not conflate)
+
+| Layer | File(s) | Meaning |
+|-------|---------|---------|
+| **1 — Application runtime** | `requirements.txt` | Packages needed for **CourseEval itself** (FastAPI web app, `worker.py`, RQ, DB, templates, PDF rasterization in the worker path, LLM-related parsing on the host). Production installs should satisfy this file. |
+| **2 — Application dev / test** | `requirements-dev.txt` | Everything in Layer 1 **plus** tools used only to develop and test the app (today: `pytest`). Always `pip install -r requirements-dev.txt` before running `bash scripts/verify.sh`. |
+| **3 — Student code sandbox** | `runner/requirements.txt` + `runner/Dockerfile` | Packages installed **inside the default runner Docker image** for **user-submitted code** (e.g. numpy/pandas). The host app venv does **not** need Layer 3 packages to run CourseEval. |
+
+Implications for agents and humans:
+
+- **`bash scripts/verify.sh`** exercises **Layer 1 + 2** (compile + pytest). It does **not** prove the runner image or student Python stack is correct.
+- After changing **runner** dependencies or `execute_code.py`, rebuild the runner image and run runner-focused checks (e.g. `docker build … runner`, `tests/test_code_runner.py` against the built image if you rely on it); do not assume pytest alone covers the sandbox.
+
 From repository root, prefer the shared verification script:
 
 ```bash
@@ -212,6 +225,7 @@ Agent-friendly validation convention:
 
 - After code changes, run `bash scripts/verify.sh` first.
 - For documentation-only changes, run at least `python3 -m compileall app runner -q`, or explicitly state why pytest was not run.
+- When editing **runner** behavior or `runner/requirements.txt`, treat **Layer 3** separately: verify the Docker build and code-runner tests, not only main-app pytest.
 - Do not modify unrelated files while chasing validation failures unless the task explicitly asks for cleanup.
 
 There is **no dedicated lint script** in-repo; rely on the verification script unless the host environment adds ruff/mypy.
