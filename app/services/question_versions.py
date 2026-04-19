@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.constants import QuestionType, ScoringRule
 from app.db import utcnow
 from app.models import Question, QuestionVersion
 
@@ -94,68 +92,3 @@ def append_question_version_after_edit(db: Session, question: Question) -> Quest
     question.current_question_version_id = row.id
     return row
 
-
-def restore_question_from_version_payload(db: Session, question: Question, payload: dict[str, Any]) -> None:
-    question.title = str(payload.get("title") or question.title)
-    question.description = payload.get("description")
-    if payload.get("question_type"):
-        question.question_type = QuestionType(payload["question_type"])
-    if payload.get("max_score") is not None:
-        question.max_score = Decimal(str(payload["max_score"]))
-    override = payload.get("scoring_rule_override")
-    question.scoring_rule_override = ScoringRule(override) if override else None
-
-    py = payload.get("code_config") or payload.get("python_code_config")
-    if py and question.code_config:
-        cfg = question.code_config
-        cfg.input_spec = py.get("input_spec")
-        cfg.output_spec = py.get("output_spec")
-        cfg.visible_tests_json = py.get("visible_tests_json") or "[]"
-        cfg.hidden_tests_json = py.get("hidden_tests_json") or "[]"
-        cfg.allowed_libraries_note = py.get("allowed_libraries_note")
-        cfg.allowed_languages_json = py.get("allowed_languages_json") or '["python"]'
-        cfg.reference_solution_python = py.get("reference_solution_python") or ""
-        cfg.reference_solution_c = py.get("reference_solution_c") or ""
-        cfg.reference_solution_cpp = py.get("reference_solution_cpp") or ""
-        if py.get("time_limit_seconds") is not None:
-            cfg.time_limit_seconds = int(py["time_limit_seconds"])
-        if py.get("memory_limit_mb") is not None:
-            cfg.memory_limit_mb = int(py["memory_limit_mb"])
-        if py.get("cpu_limit") is not None:
-            cfg.cpu_limit = str(py["cpu_limit"])
-        if py.get("allow_network") is not None:
-            cfg.allow_network = bool(py["allow_network"])
-
-    sa = payload.get("short_answer_config")
-    if sa and question.short_answer_config:
-        cfg = question.short_answer_config
-        cfg.min_length = sa.get("min_length")
-        cfg.max_length = sa.get("max_length")
-        cfg.rubric_text = sa.get("rubric_text")
-        if sa.get("llm_suggestion_enabled") is not None:
-            cfg.llm_suggestion_enabled = bool(sa["llm_suggestion_enabled"])
-        if sa.get("teacher_confirmation_required") is not None:
-            cfg.teacher_confirmation_required = bool(sa["teacher_confirmation_required"])
-
-    fq = payload.get("file_question_config")
-    if fq and question.file_question_config:
-        cfg = question.file_question_config
-        if fq.get("accepted_extensions"):
-            cfg.accepted_extensions = str(fq["accepted_extensions"])
-        if fq.get("reference_answer_text") is not None:
-            cfg.reference_answer_text = str(fq["reference_answer_text"])
-        if "reference_answer_file_path" in fq:
-            cfg.reference_answer_file_path = fq.get("reference_answer_file_path")
-        if fq.get("rubric_text") is not None:
-            cfg.rubric_text = str(fq["rubric_text"])
-        if fq.get("llm_suggestion_enabled") is not None:
-            cfg.llm_suggestion_enabled = bool(fq["llm_suggestion_enabled"])
-        if fq.get("teacher_confirmation_required") is not None:
-            cfg.teacher_confirmation_required = bool(fq["teacher_confirmation_required"])
-        if fq.get("notebook_outputs_required") is not None:
-            cfg.notebook_outputs_required = bool(fq["notebook_outputs_required"])
-
-def ensure_question_has_current_version(db: Session, question: Question) -> None:
-    if question.current_question_version_id is not None:
-        return
-    create_initial_question_version(db, question)

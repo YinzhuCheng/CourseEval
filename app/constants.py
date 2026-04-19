@@ -10,8 +10,6 @@ class PlatformRole(str, Enum):
 class AccountRole(str, Enum):
     STUDENT = "student"
     TEACHER = "teacher"
-    # Legacy value kept for smooth migrations from the shared-registration-code flow.
-    ADMINISTRATOR = "administrator"
 
 
 class UserRole(str, Enum):

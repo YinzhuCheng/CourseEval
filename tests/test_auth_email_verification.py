@@ -1,6 +1,7 @@
 import unittest
 
-from fastapi.testclient import TestClient
+import anyio
+import httpx
 from sqlalchemy import create_engine, select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
@@ -11,6 +12,23 @@ from app.db import Base, utcnow
 from app.main import app
 from app.models import EmailDeliveryLog, User
 from app.routes.auth import get_db
+
+
+class AsyncAsgiClient:
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    def get(self, url: str, **kwargs) -> httpx.Response:
+        return anyio.run(self._request, "GET", url, kwargs)
+
+    def post(self, url: str, **kwargs) -> httpx.Response:
+        return anyio.run(self._request, "POST", url, kwargs)
+
+    async def _request(self, method: str, url: str, kwargs: dict) -> httpx.Response:
+        kwargs.setdefault("follow_redirects", True)
+        transport = httpx.ASGITransport(app=self.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, url, **kwargs)
 
 
 class AuthEmailVerificationTests(unittest.TestCase):
@@ -28,7 +46,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
             expire_on_commit=False,
         )
 
-        def override_get_db():
+        async def override_get_db():
             db = self.session_factory()
             try:
                 yield db
@@ -36,7 +54,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
                 db.close()
 
         app.dependency_overrides[get_db] = override_get_db
-        self.client = TestClient(app)
+        self.client = AsyncAsgiClient(app)
         self.settings = get_settings()
         self.original_base_url = self.settings.app_base_url
         self.original_registration_invite_code = self.settings.registration_invite_code

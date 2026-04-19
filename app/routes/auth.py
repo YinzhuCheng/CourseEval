@@ -99,21 +99,21 @@ def _render_register_pending_page(
 
 
 @router.get("/register")
-def register_page(request: Request, db: Session = Depends(get_db)):
+async def register_page(request: Request, db: Session = Depends(get_db)):
     if get_current_user(request, db):
         return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
     return _render_register_form(request, db)
 
 
 @router.get("/locale/{locale}")
-def change_locale(locale: str, request: Request):
+async def change_locale(locale: str, request: Request):
     set_locale(request, locale)
     redirect_to = request.headers.get("referer") or "/"
     return RedirectResponse(url=redirect_to, status_code=303)
 
 
 @router.get("/register/pending")
-def register_pending_page(
+async def register_pending_page(
     request: Request,
     email: str = Query(default=""),
     db: Session = Depends(get_db),
@@ -124,14 +124,14 @@ def register_pending_page(
 
 
 @router.get("/forgot-password")
-def forgot_password_page(request: Request, db: Session = Depends(get_db)):
+async def forgot_password_page(request: Request, db: Session = Depends(get_db)):
     if get_current_user(request, db):
         return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
     return render_template(request, db, "forgot_password.html", {})
 
 
 @router.post("/forgot-password")
-def forgot_password(
+async def forgot_password(
     request: Request,
     email: str = Form(...),
     db: Session = Depends(get_db),
@@ -155,7 +155,7 @@ def forgot_password(
 
 
 @router.get("/reset-password")
-def reset_password_page(
+async def reset_password_page(
     request: Request,
     token: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
@@ -172,7 +172,7 @@ def reset_password_page(
 
 
 @router.post("/reset-password")
-def reset_password(
+async def reset_password(
     request: Request,
     token: str = Form(...),
     password: str = Form(...),
@@ -204,7 +204,7 @@ def reset_password(
 
 
 @router.post("/register")
-def register_user(
+async def register_user(
     request: Request,
     username: str = Form(...),
     email: str = Form(""),
@@ -318,7 +318,7 @@ def register_user(
 
 
 @router.get("/login")
-def login_page(request: Request, db: Session = Depends(get_db)):
+async def login_page(request: Request, db: Session = Depends(get_db)):
     if get_current_user(request, db):
         return RedirectResponse(url=landing_path_for_user(get_current_user(request, db)), status_code=303)
     email = request.query_params.get("email", "").strip()
@@ -334,7 +334,7 @@ def login_page(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login(
+async def login(
     request: Request,
     login: str = Form(...),
     password: str = Form(...),
@@ -356,7 +356,7 @@ def login(
 
 
 @router.get("/verify-email")
-def verify_email(
+async def verify_email(
     request: Request,
     token: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
@@ -394,7 +394,7 @@ def verify_email(
 
 
 @router.post("/verify-email/resend")
-def resend_verification_email(
+async def resend_verification_email(
     request: Request,
     email: str = Form(...),
     db: Session = Depends(get_db),
@@ -430,13 +430,13 @@ def resend_verification_email(
 
 
 @router.post("/logout")
-def logout(request: Request):
+async def logout(request: Request):
     logout_user(request)
     return RedirectResponse(url="/login", status_code=303)
 
 
 @router.get("/me/profile")
-def profile_page(request: Request, db: Session = Depends(get_db)):
+async def profile_page(request: Request, db: Session = Depends(get_db)):
     try:
         user = require_user(request, db)
     except RedirectRequired as redirect:
@@ -469,7 +469,7 @@ async def profile_upload_avatar(request: Request, file: UploadFile = File(...), 
 
 
 @router.post("/me/profile/avatar/remove")
-def profile_remove_avatar(request: Request, db: Session = Depends(get_db)):
+async def profile_remove_avatar(request: Request, db: Session = Depends(get_db)):
     try:
         user = require_user(request, db)
     except RedirectRequired as redirect:

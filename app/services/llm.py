@@ -13,10 +13,6 @@ from app.services.llm_grading_prompts import language_and_quality_block, truncat
 from app.services.llm_retry import strip_json_fence
 
 
-class LLMConnectionTestError(Exception):
-    """Raised when a configured LLM provider cannot be reached successfully."""
-
-
 @dataclass
 class LLMTestResult:
     success: bool
@@ -35,12 +31,6 @@ class ImageInput:
     data: bytes
 
 
-def mask_api_key(api_key: str | None) -> str:
-    if not api_key:
-        return ""
-    return "•" * 12
-
-
 def test_llm_connectivity(config: LLMConfig) -> LLMTestResult:
     if not config.enabled:
         return LLMTestResult(False, "Configuration is disabled.")
@@ -54,13 +44,6 @@ def test_llm_connectivity(config: LLMConfig) -> LLMTestResult:
     except Exception as exc:
         return LLMTestResult(False, str(exc))
     return LLMTestResult(True, "Provider connectivity test succeeded.")
-
-
-def test_llm_config_connection(config: LLMConfig) -> str:
-    result = test_llm_connectivity(config)
-    if not result.success:
-        raise LLMConnectionTestError(result.message)
-    return result.message
 
 
 def generate_text(

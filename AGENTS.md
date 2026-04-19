@@ -181,7 +181,7 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 
 ## 7. Common traps (do-not-assume)
 
-- **Do not** reintroduce retired compatibility paths unless a migration plan explicitly calls for them.
+- **Do not** reintroduce removed workflows or compatibility paths unless a migration plan explicitly calls for them.
 - **Do not** assume a FastAPI route owns all business rules—large pieces live in `app/services/submissions.py`.
 - **Do not** change a template’s variables without checking the route in `app/routes/*` and `app/web.py` context.
 - **Do not** assume renaming an enum value in `constants.py` is safe without DB migration / existing row values.
@@ -224,7 +224,7 @@ There is **no dedicated lint script** in-repo; rely on the verification script u
 |----------|-----------|
 | `docs/file-map.md` | You need “which file owns X?” grouped by responsibility |
 | `docs/change-guide.md` | You are modifying behavior and need coupling / failure-mode hints |
-| `docs/known-issues.md` | You are reviewing technical debt, historical compatibility traps, or doc/code inconsistencies |
+| `docs/known-issues.md` | You are reviewing technical debt, maintenance traps, or doc/code inconsistencies |
 | `docs/deployment-and-upgrades.md` | You need deployment, persistence, queue, or migration/upgrade expectations |
 | `docs/architecture/submission-lifecycle.md` | Submission + task + worker state flow |
 | `docs/architecture/scoring-pipeline.md` | Scores, feedback, snapshots, teacher confirmation |

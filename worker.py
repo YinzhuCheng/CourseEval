@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import LLMConfig
-from app.services.submissions import cleanup_stale_running_items, get_python_queue_name, llm_queue_name_for_config, redis_connection
+from app.services.submissions import cleanup_stale_running_items, get_code_queue_name, llm_queue_name_for_config, redis_connection
 
 
 settings = get_settings()
@@ -26,7 +26,7 @@ def _run_worker(queue_name: str) -> None:
 
 
 def _desired_worker_layout() -> dict[str, int]:
-    layout: dict[str, int] = {get_python_queue_name(): 1}
+    layout: dict[str, int] = {get_code_queue_name(): 1}
     with SessionLocal() as db:
         configs = list(
             db.scalars(

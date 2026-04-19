@@ -30,7 +30,7 @@ from app.constants import (
 from app.db import Base, utcnow
 
 
-def _normalize_python_test_case(item: dict, index: int) -> dict:
+def _normalize_code_test_case(item: dict, index: int) -> dict:
     expected_output = item.get("expected_output")
     if expected_output is None:
         expected_output = item.get("output", "")
@@ -45,8 +45,6 @@ def _normalize_python_test_case(item: dict, index: int) -> dict:
         "name": item.get("name") or f"Test {index}",
         "input": item.get("input", ""),
         "expected_output": expected_output,
-        # Preserve the legacy key so templates and older call sites keep working.
-        "output": expected_output,
         "points": points,
     }
 
@@ -523,11 +521,6 @@ class Question(Base):
         uselist=False,
     )
 
-    @property
-    def python_code_config(self) -> "CodeQuestionConfig | None":
-        return self.code_config
-
-
 Index("ix_questions_assignment_order", Question.assignment_id, Question.order_index)
 
 
@@ -594,7 +587,7 @@ class CodeQuestionConfig(Base):
             return []
         if not isinstance(payload, list):
             return []
-        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
+        return [_normalize_code_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
     def hidden_tests(self) -> list[dict]:
         try:
@@ -603,12 +596,7 @@ class CodeQuestionConfig(Base):
             return []
         if not isinstance(payload, list):
             return []
-        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
-
-
-# Backward-compatible import alias while the codebase migrates away from Python-only naming.
-PythonCodeQuestionConfig = CodeQuestionConfig
-
+        return [_normalize_code_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
 class ShortAnswerQuestionConfig(Base):
     __tablename__ = "short_answer_question_configs"

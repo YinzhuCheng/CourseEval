@@ -65,7 +65,7 @@ from app.services.permissions import (
     require_teacher_account,
 )
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
-from app.services.discussion_attachments import attach_discussion_images_to_post
+from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
 from app.services.discussion_forms import extract_discussion_images
 from app.services.discussions import (
     build_discussion_view_context,
@@ -78,6 +78,7 @@ from app.services.discussions import (
 )
 from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
+from app.services.redirects import safe_local_redirect
 from app.services.scoring import is_submission_pending_teacher_review
 from app.services.submissions import (
     get_submission_for_teacher,
@@ -1044,6 +1045,8 @@ async def teacher_question_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
+    attachment_paths: list[str] = []
+    default_dest = f"/teacher/questions/{question_id}"
     try:
         _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -1057,7 +1060,9 @@ async def teacher_question_discuss(
         )
         if _u is not None and image_files:
             try:
-                attach_discussion_images_to_post(db, _u, question.assignment.course_id, image_files)
+                attachment_paths = attach_discussion_images_to_post(
+                    db, _u, question.assignment.course_id, image_files
+                )
             except ValueError as att_err:
                 if str(att_err) == "too_many_images":
                     raise ValueError("too_many_images") from att_err
@@ -1065,6 +1070,7 @@ async def teacher_question_discuss(
         db.commit()
     except ValueError as exc:
         db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
         key = str(exc) if exc else ""
         if key == "user_muted":
             msg = choose_text(
@@ -1084,13 +1090,17 @@ async def teacher_question_discuss(
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
         else:
             msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
-        dest = redirect_to.strip() or f"/teacher/questions/{question_id}"
+        dest = safe_local_redirect(redirect_to, default_dest)
         push_flash(request, msg, "danger")
         return _redirect(dest)
+    except Exception:
+        db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
+        raise
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    dest = redirect_to.strip() or f"/teacher/questions/{question_id}"
+    dest = safe_local_redirect(redirect_to, default_dest)
     return _redirect(dest)
 
 

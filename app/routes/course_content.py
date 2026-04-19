@@ -19,7 +19,7 @@ from app.services.course_materials import (
 )
 from app.services.courses import get_course_for_staff, get_course_for_student
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
-from app.services.discussion_attachments import attach_discussion_images_to_post
+from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
 from app.services.discussion_forms import extract_discussion_images
 from app.services.discussions import (
     build_discussion_view_context,
@@ -27,6 +27,7 @@ from app.services.discussions import (
     get_or_create_material_topic,
 )
 from app.services.permissions import RedirectRequired, get_course_role, require_teacher_account, require_user
+from app.services.redirects import safe_local_redirect
 from app.web import render_template
 
 router = APIRouter(tags=["course_content"])
@@ -237,6 +238,8 @@ async def teacher_material_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
+    attachment_paths: list[str] = []
+    default_dest = f"/teacher/courses/{course_id}/materials/{material_id}"
     try:
         _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -250,7 +253,7 @@ async def teacher_material_discuss(
         )
         if _u is not None and image_files:
             try:
-                attach_discussion_images_to_post(db, _u, course_id, image_files)
+                attachment_paths = attach_discussion_images_to_post(db, _u, course_id, image_files)
             except ValueError as att_err:
                 if str(att_err) == "too_many_images":
                     raise ValueError("too_many_images") from att_err
@@ -258,6 +261,7 @@ async def teacher_material_discuss(
         db.commit()
     except ValueError as exc:
         db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
         key = str(exc) if exc else ""
         if key == "user_muted":
             msg = choose_text(
@@ -278,12 +282,16 @@ async def teacher_material_discuss(
         else:
             msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
         push_flash(request, msg, "danger")
-        dest = redirect_to.strip() or f"/teacher/courses/{course_id}/materials/{material_id}"
+        dest = safe_local_redirect(redirect_to, default_dest)
         return _redirect(dest)
+    except Exception:
+        db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
+        raise
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    dest = redirect_to.strip() or f"/teacher/courses/{course_id}/materials/{material_id}"
+    dest = safe_local_redirect(redirect_to, default_dest)
     return _redirect(dest)
 
 
@@ -354,6 +362,8 @@ async def student_material_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
+    attachment_paths = []
+    default_dest = f"/student/courses/{course_id}/materials/{material_id}"
     try:
         _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -367,7 +377,7 @@ async def student_material_discuss(
         )
         if _u is not None and image_files:
             try:
-                attach_discussion_images_to_post(db, _u, course_id, image_files)
+                attachment_paths = attach_discussion_images_to_post(db, _u, course_id, image_files)
             except ValueError as att_err:
                 if str(att_err) == "too_many_images":
                     raise ValueError("too_many_images") from att_err
@@ -375,6 +385,7 @@ async def student_material_discuss(
         db.commit()
     except ValueError as exc:
         db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
         key = str(exc) if exc else ""
         if key == "user_muted":
             msg = choose_text(
@@ -395,11 +406,14 @@ async def student_material_discuss(
         else:
             msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
         push_flash(request, msg, "danger")
-        dest = redirect_to.strip() or f"/student/courses/{course_id}/materials/{material_id}"
+        dest = safe_local_redirect(redirect_to, default_dest)
         return _redirect(dest)
+    except Exception:
+        db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
+        raise
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    dest = redirect_to.strip() or f"/student/courses/{course_id}/materials/{material_id}"
+    dest = safe_local_redirect(redirect_to, default_dest)
     return _redirect(dest)
-

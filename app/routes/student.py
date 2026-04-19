@@ -23,10 +23,9 @@ from app.services.courses import (
     join_course_by_code,
     list_courses_for_student,
 )
-from app.services.permissions import RedirectRequired, get_course_role, require_student_access, require_user
 from app.services.llm_token_usage import usage_summary_for_user
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
-from app.services.discussion_attachments import attach_discussion_images_to_post
+from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
 from app.services.discussion_forms import extract_discussion_images
 from app.services.discussions import (
     assignment_past_close_for_discussion,
@@ -34,7 +33,9 @@ from app.services.discussions import (
     can_post_on_question_topic,
     get_or_create_question_topic,
 )
+from app.services.permissions import RedirectRequired, get_course_role, require_student_access, require_user
 from app.services.post_close_reveal import reveal_bundle_for_question
+from app.services.redirects import safe_local_redirect
 from app.services.scoring import is_submission_pending_teacher_review
 from app.services.submissions import (
     build_student_result_view,
@@ -232,6 +233,8 @@ async def student_question_discuss(
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
     image_files = await extract_discussion_images(request)
+    attachment_paths: list[str] = []
+    default_dest = f"/student/questions/{question_id}"
     try:
         _post, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -245,7 +248,9 @@ async def student_question_discuss(
         )
         if _post is not None and image_files:
             try:
-                attach_discussion_images_to_post(db, _post, question.assignment.course_id, image_files)
+                attachment_paths = attach_discussion_images_to_post(
+                    db, _post, question.assignment.course_id, image_files
+                )
             except ValueError as att_err:
                 if str(att_err) == "too_many_images":
                     raise ValueError("too_many_images") from att_err
@@ -253,6 +258,7 @@ async def student_question_discuss(
         db.commit()
     except ValueError as exc:
         db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
         key = str(exc) if exc else ""
         if key == "user_muted":
             msg = choose_text(
@@ -273,12 +279,16 @@ async def student_question_discuss(
         else:
             msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
         push_flash(request, msg, "danger")
-        dest = redirect_to.strip() or f"/student/questions/{question_id}"
+        dest = safe_local_redirect(redirect_to, default_dest)
         return RedirectResponse(url=dest, status_code=303)
+    except Exception:
+        db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
+        raise
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    dest = redirect_to.strip() or f"/student/questions/{question_id}"
+    dest = safe_local_redirect(redirect_to, default_dest)
     return RedirectResponse(url=dest, status_code=303)
 
 

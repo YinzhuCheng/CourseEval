@@ -180,7 +180,7 @@ Changing copy: often **both** `i18n.py` and `enum_labels.py` (for enum-backed la
 
 | Need | Document |
 |------|----------|
-| Known technical debt / compatibility traps | `docs/known-issues.md` |
+| Known technical debt / maintenance traps | `docs/known-issues.md` |
 | Deployment and upgrade checklist | `docs/deployment-and-upgrades.md` |
 
 ---

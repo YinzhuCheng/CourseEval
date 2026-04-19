@@ -18,7 +18,7 @@ This repository includes **layered documentation for AI coding agents** (and for
 - **[AGENTS.md](AGENTS.md)** is the top-level map for agents: stack, subsystems, workflows, traps, validation commands.
 - **[docs/file-map.md](docs/file-map.md)** groups important files by responsibility (where to look first).
 - **[docs/change-guide.md](docs/change-guide.md)** explains common change couplings and failure modes.
-- **[docs/known-issues.md](docs/known-issues.md)** records confirmed technical debt, historical compatibility traps, and review notes.
+- **[docs/known-issues.md](docs/known-issues.md)** records confirmed technical debt and review notes.
 - **[docs/deployment-and-upgrades.md](docs/deployment-and-upgrades.md)** summarizes deployment, persistence, queue, and migration/upgrade expectations.
 - **[docs/architecture/](docs/architecture/)** holds deeper, retrieval-friendly notes on submission flow, scoring, permissions, and the code runner.
 
@@ -360,7 +360,7 @@ The platform now separates evaluation traffic into:
 Relevant environment variables:
 
 ```bash
-PYTHON_QUEUE_NAME=python-evaluations
+CODE_QUEUE_NAME=code-evaluations
 LLM_QUEUE_PREFIX=llm-evaluations
 PDF_REVIEW_MAX_PAGES=8
 ```
@@ -371,7 +371,7 @@ PDF_REVIEW_MAX_PAGES=8
 - Each enabled LLM config has its own queue
 - `queue_concurrency` is configured per LLM config record in the admin UI
 - `worker.py` now works as a lightweight worker manager and starts:
-  - 1 Python worker process
+  - 1 code-evaluation worker process
   - N LLM worker processes per enabled config, where N is that config's concurrency
 
 ### Global default LLM behavior
@@ -395,7 +395,7 @@ High-level deployment requirements:
 
 - Persist `DATA_DIR` and the database; default SQLite lives under `DATA_DIR/app.db`
 - Run web, Redis, worker, Docker, and the runner image together
-- Set `SECRET_KEY`, `APP_BASE_URL`, `DATABASE_URL`, `REDIS_URL`, `PYTHON_QUEUE_NAME`, `LLM_QUEUE_PREFIX`, and runner limits explicitly for production
+- Set `SECRET_KEY`, `APP_BASE_URL`, `DATABASE_URL`, `REDIS_URL`, `CODE_QUEUE_NAME`, `LLM_QUEUE_PREFIX`, and runner limits explicitly for production
 - Configure SMTP if email verification or password reset should work
 - Back up the database and `DATA_DIR` before upgrades
 
@@ -437,8 +437,8 @@ Depending on question type, artifacts may include:
 - `stdout.txt`
 - `stderr.txt`
 - `summary.json`
-- `executed.ipynb`
-- `executed.html`
+
+Code-question artifacts come from the Docker runner. File / LLM-reviewed questions may also create derived files under `DATA_DIR`, such as rendered PDF page images used for multimodal grading.
 
 ## Language behavior
 
@@ -488,7 +488,7 @@ Check:
 
 ## Upgrade and migration policy
 
-CourseEval is currently treated as a clean v0 baseline. Startup creates the current schema with SQLAlchemy metadata and seeds the open community course. It does not preserve retired notebook/job tables or legacy question enum values.
+CourseEval is currently treated as a clean v0 baseline. Startup creates the current schema with SQLAlchemy metadata and seeds the open community course. It does not preserve removed workflow tables, removed compatibility aliases, or old enum values.
 
 For future schema changes:
 

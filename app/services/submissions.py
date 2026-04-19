@@ -70,7 +70,7 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-PYTHON_EVALUATION_QUEUE = "python-evaluation"
+CODE_EVALUATION_QUEUE = "code-evaluations"
 LLM_EVALUATION_QUEUE_PREFIX = "llm-evaluation"
 
 
@@ -133,10 +133,6 @@ def _file_question_config(question: Question | None) -> FileQuestionConfig | Non
 
 def _code_config(question: Question | None) -> CodeQuestionConfig | None:
     return question.code_config if question is not None else None
-
-
-def _python_code_config(question: Question | None) -> CodeQuestionConfig | None:
-    return _code_config(question)
 
 
 def _resolve_runtime_image_for_question(question: Question) -> RuntimeImage | None:
@@ -232,34 +228,12 @@ def get_queue(queue_name: str) -> Queue:
     return Queue(queue_name, connection=redis_connection())
 
 
-def get_python_queue_name() -> str:
-    return settings.python_queue_name or PYTHON_EVALUATION_QUEUE
+def get_code_queue_name() -> str:
+    return settings.code_queue_name or CODE_EVALUATION_QUEUE
 
 
 def llm_queue_name_for_config(config: LLMConfig) -> str:
     return f"{settings.llm_queue_prefix or LLM_EVALUATION_QUEUE_PREFIX}-{config.id}"
-
-
-def active_llm_queue_names(db: Session) -> list[str]:
-    configs = list(
-        db.scalars(
-            select(LLMConfig)
-            .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
-            .order_by(LLMConfig.id.asc())
-        ).all()
-    )
-    return [llm_queue_name_for_config(config) for config in configs]
-
-
-def active_llm_worker_specs(db: Session) -> list[tuple[str, int]]:
-    configs = list(
-        db.scalars(
-            select(LLMConfig)
-            .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
-            .order_by(LLMConfig.id.asc())
-        ).all()
-    )
-    return [(llm_queue_name_for_config(config), max(int(config.queue_concurrency or 1), 1)) for config in configs]
 
 
 def _existing_backend_job_id(task: EvaluationTask) -> str | None:
@@ -518,28 +492,6 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
     return normalized
 
 
-def list_student_courses(db: Session, user_id: int) -> list:
-    statement = (
-        select(CourseMember)
-        .options(joinedload(CourseMember.course))
-        .where(
-            CourseMember.user_id == user_id,
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-        .order_by(CourseMember.joined_at.desc())
-    )
-    return list(db.scalars(statement).unique())
-
-
-def list_course_assignments_for_student(db: Session, course_id: int) -> list[Assignment]:
-    statement = (
-        select(Assignment)
-        .where(Assignment.course_id == course_id)
-        .order_by(Assignment.created_at.desc())
-    )
-    return list(db.scalars(statement))
-
-
 def get_question_for_student(db: Session, question_id: int, user_id: int) -> Question | None:
     statement = (
         select(Question)
@@ -615,10 +567,6 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
         .where(Submission.id == submission_id, CourseMember.status == MembershipStatus.ACTIVE)
     )
     return db.scalar(statement)
-
-
-def list_submissions_for_student_question(db: Session, user_id: int, question_id: int) -> list[Submission]:
-    return list_submissions_for_question(db, question_id, user_id)
 
 
 def read_submission_artifact_text(
@@ -787,24 +735,6 @@ def create_short_answer_submission(
     if config and config.llm_suggestion_enabled:
         enqueue_short_answer_llm(db, submission.id)
     return submission
-
-
-def create_python_code_submission(
-    db: Session,
-    *,
-    user_id: int,
-    question: Question,
-    original_filename: str,
-    submission_bytes: bytes,
-) -> Submission:
-    return create_code_submission(
-        db,
-        user_id=user_id,
-        question=question,
-        original_filename=original_filename,
-        submission_bytes=submission_bytes,
-        language=CodeLanguage.PYTHON,
-    )
 
 
 def _code_language_from_value(value: str | CodeLanguage) -> CodeLanguage:
@@ -1011,11 +941,11 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
         return existing_job_id
 
     if task.task_type != EvaluationTaskType.CODE_EVALUATION:
-        raise ValueError("Only code evaluation tasks use the Python runner queue.")
+        raise ValueError("Only code evaluation tasks use the code runner queue.")
     target_func = process_code_evaluation
     timeout_seconds = settings.execution_timeout_seconds + 60
 
-    rq_job = get_queue(get_python_queue_name()).enqueue(
+    rq_job = get_queue(get_code_queue_name()).enqueue(
         target_func,
         submission_id,
         task.id,
@@ -1394,12 +1324,6 @@ def run_code_in_docker(
         return RunnerResult(exit_code=1, error_message=message, summary_json=summary_json)
 
     return RunnerResult(exit_code=0, summary_json=summary_json)
-
-
-def run_python_code_in_docker(**kwargs) -> RunnerResult:
-    kwargs.setdefault("language", CodeLanguage.PYTHON.value)
-    kwargs.setdefault("submission_mode", CodeSubmissionMode.SINGLE_FILE.value)
-    return run_code_in_docker(**kwargs)
 
 
 def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> None:

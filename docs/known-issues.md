@@ -16,7 +16,7 @@ If a note here disagrees with code, trust the code and update this page in the s
 
 There is no Alembic migration tree in the repository. Startup calls `init_database()` from `app/main.py`, which runs `Base.metadata.create_all()` and seeds the open community course.
 
-This v0 baseline intentionally does not keep legacy notebook/job tables or old file-question enum shims. Before a schema-changing deployment with real data, add a documented migration script or explicit idempotent upgrade step and test it against a database copy.
+This v0 baseline intentionally does not keep removed notebook/job tables, old compatibility aliases, or old file-question enum shims. Before a schema-changing deployment with real data, add a documented migration script or explicit idempotent upgrade step and test it against a database copy.
 
 ### Permission tests are scattered
 
@@ -26,7 +26,7 @@ When reviewing permission changes, grep for `require_`, `can_`, route handlers, 
 
 ### Notebook wording means file/LLM notebook uploads
 
-Standalone notebook execution UI and job models are gone. Remaining notebook wording refers to `.ipynb` files handled by `file_llm` and `app/services/notebook_multimodal.py`.
+Standalone notebook execution UI and job models are not part of v0. Remaining notebook wording refers to `.ipynb` files handled by `file_llm` and `app/services/notebook_multimodal.py`.
 
 Do not reintroduce a notebook question type unless the product is explicitly adding a new active workflow with tests and migration notes.
 
@@ -76,9 +76,9 @@ If path security, upload layout, or data-directory behavior changes, update the 
 
 Current enqueue/worker code uses:
 
-- `PYTHON_QUEUE_NAME`
+- `CODE_QUEUE_NAME`
 - `LLM_QUEUE_PREFIX`
-- `get_python_queue_name`
+- `get_code_queue_name`
 - `llm_queue_name_for_config`
 
 Do not add a generic queue setting unless a new worker topology requires it.
@@ -87,4 +87,4 @@ Do not add a generic queue setting unless a new worker topology requires it.
 
 `QuestionVersion` stores serialized question/config snapshots and is used to associate submissions with the question version at submission time. It is not a full event-sourced history of every teacher action.
 
-When changing question config fields, update `app/services/question_versions.py` serialization/restoration and any schema/backfill code. Otherwise restored versions, gradebook rows, and newly edited questions can diverge.
+When changing question config fields, update `app/services/question_versions.py` serialization and any schema/backfill code. Otherwise gradebook rows and newly edited questions can diverge.

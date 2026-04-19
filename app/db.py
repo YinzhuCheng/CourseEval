@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, event, inspect, select, text
@@ -36,7 +36,7 @@ def set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ign
         cursor.close()
 
 
-def get_db() -> Generator[Session, None, None]:
+async def get_db() -> AsyncGenerator[Session, None]:
     db = SessionLocal()
     try:
         yield db

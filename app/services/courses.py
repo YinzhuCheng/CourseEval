@@ -38,9 +38,6 @@ from app.runtime_support import default_allowed_code_libraries_text
 STAFF_COURSE_ROLES = (CourseRole.TEACHER, CourseRole.TA)
 OPEN_COMMUNITY_COURSE_CODE = "__OPEN_COMMUNITY__"
 DEFAULT_ALLOWED_CODE_LIBRARIES = default_allowed_code_libraries_text("en")
-DEFAULT_ALLOWED_PYTHON_LIBRARIES = DEFAULT_ALLOWED_CODE_LIBRARIES
-# Keep the legacy name as an alias so older imports and payload builders stay valid.
-DEFAULT_ALLOWED_LIBRARIES = DEFAULT_ALLOWED_PYTHON_LIBRARIES
 
 
 def _question_loader_options():
@@ -66,14 +63,6 @@ def generate_join_code() -> str:
 
 def is_open_community_course(course: Course | None) -> bool:
     return bool(course and getattr(course, "is_open_community", False))
-
-
-def sort_courses_for_display(courses: list[Course]) -> list[Course]:
-    """Pin the platform open community course first, then alphabetical by title."""
-    return sorted(
-        courses,
-        key=lambda c: (0 if is_open_community_course(c) else 1, (c.title or "").lower(), c.id),
-    )
 
 
 def ensure_user_in_open_community_course(db: Session, user: User) -> None:
@@ -280,11 +269,6 @@ def get_question_for_staff(db: Session, question_id: int, user_id: int) -> Quest
         )
     )
     return db.scalar(statement)
-
-
-def list_all_courses(db: Session) -> list[Course]:
-    statement = select(Course).order_by(Course.created_at.desc())
-    return list(db.scalars(statement).unique())
 
 
 def get_course(db: Session, course_id: int) -> Course | None:
@@ -696,36 +680,6 @@ def summarize_course_grade_matrix(db: Session, course_id: int) -> dict:
             )
         matrix_rows.append({"student": st, "cells": row_cells})
     return {"assignments": assignments, "rows": matrix_rows}
-
-
-def summarize_course_grades(db: Session, assignment_id: int) -> list[dict]:
-    assignment = get_assignment(db, assignment_id)
-    if assignment is None:
-        return []
-
-    statement = (
-        select(
-            User.id,
-            User.username,
-            func.coalesce(func.sum(FinalGradeSnapshot.score), 0),
-        )
-        .select_from(CourseMember)
-        .join(User, User.id == CourseMember.user_id)
-        .outerjoin(
-            FinalGradeSnapshot,
-            (FinalGradeSnapshot.student_id == User.id)
-            & (FinalGradeSnapshot.assignment_id == assignment_id),
-        )
-        .where(
-            CourseMember.course_id == assignment.course_id,
-            CourseMember.role == CourseRole.STUDENT,
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-        .group_by(User.id, User.username)
-        .order_by(User.username.asc())
-    )
-    rows = db.execute(statement).all()
-    return [{"student_id": row[0], "username": row[1], "score": row[2]} for row in rows]
 
 
 def bootstrap_sample_data(db: Session, user: User) -> None:
