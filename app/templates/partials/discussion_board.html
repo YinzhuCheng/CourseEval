@@ -1,4 +1,11 @@
 <div class="discussion-board p-4 mt-4">
+  {% if discussion_topic_post_count is defined %}
+  {% set _topic_nposts = discussion_topic_post_count|int %}
+  {% elif discussion_pagination is defined %}
+  {% set _topic_nposts = discussion_pagination.total|default(0)|int %}
+  {% else %}
+  {% set _topic_nposts = 0 %}
+  {% endif %}
   <h2 class="h5 mb-3">{{ lx("Discussion", "讨论") }}</h2>
   {% if discussion_notice %}
   <div class="alert alert-info small mb-3">{{ discussion_notice }}</div>
@@ -38,6 +45,20 @@
           <input class="form-check-input" type="checkbox" name="request_ai" value="on" id="discuss-ai-root" />
           <label class="form-check-label small" for="discuss-ai-root">{{ lx("Ask AI to reply", "请求 AI 回复") }}</label>
         </div>
+      </div>
+    </div>
+    <div class="row g-2 mb-2">
+      <div class="col-md-6">
+        <label class="form-label small" for="ai-ctx-mode-root">{{ lx("@AI context", "@AI 上下文") }}</label>
+        <select class="form-select form-select-sm" name="ai_context_mode" id="ai-ctx-mode-root">
+          <option value="recent_k">{{ lx("Main post + last k replies (k below)", "主帖 + 最近 k 条回复（见下方 k）") }}</option>
+          <option value="full">{{ lx("Entire thread (this topic)", "本话题全部帖子") }}</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small" for="ai-ctx-k-root">k</label>
+        <input class="form-control form-control-sm" type="number" name="ai_context_k" id="ai-ctx-k-root" value="1" min="1" max="{{ _topic_nposts if _topic_nposts > 0 else 1 }}" />
+        <div class="form-text small text-muted">{{ lx("Max", "上限") }} {{ _topic_nposts }} ({{ lx("posts in this topic", "本话题帖子数") }})</div>
       </div>
     </div>
     {% endif %}
@@ -132,6 +153,20 @@
               <input class="form-check-input" type="checkbox" name="request_ai" value="on" id="ai-reply-{{ node.post.id }}" />
               <label class="form-check-label" for="ai-reply-{{ node.post.id }}">{{ lx("Ask AI to reply", "请求 AI 回复") }}</label>
             </div>
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label small" for="ai-ctx-mode-{{ node.post.id }}">{{ lx("@AI context", "@AI 上下文") }}</label>
+            <select class="form-select form-select-sm" name="ai_context_mode" id="ai-ctx-mode-{{ node.post.id }}">
+              <option value="recent_k">{{ lx("Main post + last k replies (k below)", "主帖 + 最近 k 条回复（见下方 k）") }}</option>
+              <option value="full">{{ lx("Entire thread (this topic)", "本话题全部帖子") }}</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small" for="ai-ctx-k-{{ node.post.id }}">k</label>
+            <input class="form-control form-control-sm" type="number" name="ai_context_k" id="ai-ctx-k-{{ node.post.id }}" value="1" min="1" max="{{ _topic_nposts if _topic_nposts > 0 else 1 }}" />
+            <div class="form-text small text-muted">{{ lx("Max", "上限") }} {{ _topic_nposts }}</div>
           </div>
         </div>
         {% endif %}

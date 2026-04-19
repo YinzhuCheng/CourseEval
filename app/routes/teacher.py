@@ -300,6 +300,34 @@ def remove_course_cover(course_id: int, request: Request, db: Session = Depends(
     return _redirect(f"/teacher/courses/{course_id}")
 
 
+@router.post("/courses/{course_id}/profile")
+def update_course_profile(
+    course_id: int,
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect("/teacher/courses")
+    new_title = (title or "").strip()
+    if not new_title:
+        push_flash(request, choose_text(request, "Course name is required.", "课程名称不能为空。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    course.title = new_title
+    course.description = description.strip() or None
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Course profile updated.", "课程信息已更新。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
+
+
 @router.get("/courses/{course_id}")
 def teacher_course_detail(course_id: int, request: Request, db: Session = Depends(get_db)):
     try:
@@ -1050,6 +1078,8 @@ async def teacher_question_discuss(
     anonymous: str = Form(""),
     request_ai: str = Form(""),
     ai_group_id: str = Form(""),
+    ai_context_mode: str = Form("recent_k"),
+    ai_context_k: str = Form("1"),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -1081,6 +1111,8 @@ async def teacher_question_discuss(
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
             selected_llm_group_id=selected_group_id,
+            ai_context_mode=ai_context_mode,
+            ai_context_k=ai_context_k,
         )
         if _u is not None and image_files:
             try:

@@ -198,6 +198,20 @@ def count_posts_for_topic(db: Session, topic_id: int) -> int:
     )
 
 
+def get_root_post_for_topic(db: Session, topic_id: int) -> DiscussionPost | None:
+    """Earliest top-level post in the topic (the 'first floor' / main thread opener)."""
+    return db.scalar(
+        select(DiscussionPost)
+        .where(
+            DiscussionPost.topic_id == topic_id,
+            DiscussionPost.parent_post_id.is_(None),
+            DiscussionPost.deleted_at.is_(None),
+        )
+        .order_by(DiscussionPost.created_at.asc())
+        .limit(1)
+    )
+
+
 def list_posts_for_topic(
     db: Session, topic_id: int, *, offset: int = 0, limit: int | None = None
 ) -> list[DiscussionPost]:
@@ -449,11 +463,13 @@ def build_discussion_view_context(
     )
     topic = db.get(DiscussionTopic, topic_id)
     exts = ", ".join(sorted(s.replace(".", "").upper() for s in ALLOWED_IMAGE_EXTENSIONS))
+    topic_total_posts = count_posts_for_topic(db, topic_id)
     return {
         "discussion_thread": threaded,
         "discussion_pagination": pag,
         "can_moderate_discussion": staff,
         "discussion_ai_groups": discussion_ai_group_options(db, topic) if topic else [],
+        "discussion_topic_post_count": topic_total_posts,
         "discussion_image_rules_en": (
             f"Images: {exts}; max {human_upload_max_bytes()} per file after processing; "
             f"up to {DISCUSSION_MAX_IMAGES_PER_POST} images per post. No remote hotlinks."

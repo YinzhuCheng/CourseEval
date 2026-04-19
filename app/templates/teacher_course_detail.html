@@ -278,7 +278,24 @@
     {% if can_manage_course %}
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ lx("Course card image", "课程卡片图片") }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Course card", "课程卡片") }}</h2>
+        <p class="small text-muted mb-3">
+          {{ lx("Name and description appear on course lists and are included as text context for @AI in discussions.", "名称与简介会显示在课程列表，并作为讨论区 @AI 的文本上下文（不含封面图）。") }}
+        </p>
+        <form method="post" action="/teacher/courses/{{ course.id }}/profile" class="row g-3 mb-4">
+          <div class="col-12">
+            <label class="form-label">{{ lx("Course name", "课程名称") }}</label>
+            <input class="form-control" name="title" required value="{{ course.title }}" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Course description (optional)", "课程简介（可选）") }}</label>
+            <textarea class="form-control" name="description" rows="4">{{ course.description or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-sm btn-primary" type="submit">{{ lx("Save name & description", "保存名称与简介") }}</button>
+          </div>
+        </form>
+        <h3 class="h6 mb-2">{{ lx("Cover image", "封面图") }}</h3>
         <p class="small text-muted mb-3">
           {{ lx("Shown on the course list for students and teachers.", "显示在师生课程列表的卡片顶部。") }}
           {{ lx(course_cover_image_rules_en, course_cover_image_rules_zh) }}

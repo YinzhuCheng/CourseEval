@@ -215,6 +215,8 @@ async def student_question_discuss(
     anonymous: str = Form(""),
     request_ai: str = Form(""),
     ai_group_id: str = Form(""),
+    ai_context_mode: str = Form("recent_k"),
+    ai_context_k: str = Form("1"),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -248,6 +250,8 @@ async def student_question_discuss(
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
             selected_llm_group_id=selected_group_id,
+            ai_context_mode=ai_context_mode,
+            ai_context_k=ai_context_k,
         )
         if _post is not None and image_files:
             try:
