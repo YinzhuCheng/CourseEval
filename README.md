@@ -1,261 +1,198 @@
-# CourseEval / Course Evaluation Platform Skeleton
+# CourseEval
 
-This repository started as a minimal notebook execution validation system and has been incrementally expanded into a lightweight course-assignment evaluation platform skeleton.
+CourseEval is a lightweight course-assignment evaluation platform for teaching teams.
 
-It now supports two layers simultaneously:
+The current product direction is:
 
-1. **Legacy notebook runner flow**  
-   `register/login -> upload .ipynb -> enqueue async job -> run notebook inside Docker -> inspect status and results`
+- **Code evaluation** for executable Python, C, and C++ programming questions
+- **File / LLM-reviewed evaluation** for `.pdf`, `.txt`, `.tex`, and `.ipynb` submissions
+- **Teacher-confirmed grading** for workflows where automatic suggestions should not directly become final grades
 
-2. **Course assignment workflow foundation**  
-   `course -> assignment -> question -> per-question submission -> async evaluation -> score/feedback snapshot`
+The old standalone Notebook execution workflow has been retired. Existing `/dashboard` and `/jobs/*` links now redirect users to the in-product code runtime help page so they can move to the supported flows.
 
-The project still keeps the original notebook runner chain alive so that existing deployments are not broken while the system evolves toward a fuller teaching platform.
+## What the system supports
 
-## Current scope
+### Student workflows
 
-Included in the current version:
+- Register and sign in
+- Join a course with a join code
+- View courses, assignments, questions, and submission history
+- Submit:
+  - `.py`, `.c`, `.cpp`, `.cc`, `.cxx`, or `.zip` files for code questions
+  - `.pdf` files for PDF / LLM-reviewed questions
+  - `.txt`, `.tex`, or `.ipynb` files for formatted-text / LLM-reviewed questions
+- View evaluation progress, feedback, and downloadable artifacts
+- Read built-in code runtime help inside the product UI
 
-- User registration
-- User login/logout with session cookie
-- Legacy notebook upload and execution pages
-- Persist notebooks and jobs in SQLite
-- Queue jobs in Redis with RQ
-- Execute each notebook in an ephemeral Docker container
-- Track legacy job states: `queued`, `running`, `success`, `failed`
-- View stdout/stderr
-- Download executed notebook and HTML export
-- Restrict users to only their own legacy jobs and artifacts
-- Course model
-- Course membership model
-- Assignment model
-- Question model for:
-  - notebook programming questions
-  - short-answer questions
-- Per-question submission model
-- Evaluation task / evaluation result model
-- Teacher feedback model
-- Final grade snapshot model
-- Student pages:
-  - my courses
-  - assignment detail
-  - question detail
-  - submission detail
-- Teacher pages:
-  - course management
-  - assignment management
-  - question detail
-  - submission grading
-- Admin pages:
-  - user role management
-  - runtime image records
-  - LLM config records
-  - system overview
+### Teacher workflows
 
-Out of scope for this MVP:
+- Create and manage courses
+- Share course join codes with students
+- Create assignments
+- Create question types for:
+  - Python, C, and C++ code evaluation
+  - PDF file / LLM-reviewed evaluation
+  - formatted text or `.ipynb` / LLM-reviewed evaluation
+- Configure code test cases, allowed language sets, reference solutions, scoring rules, and submission limits
+- Review submissions and confirm final grades
 
-- Online notebook editing
-- Object storage
-- PostgreSQL
-- Kubernetes
-- Multi-machine scheduling
-- OAuth / SMS / email verification
-- Advanced LLM workflow controls such as retries, moderation review, and cost accounting
-- Batch grading workflows
-- TA-specific UI refinement
-- Rich hidden-test authoring interface
+### Admin workflows
 
-## Tech stack
+- Manage user roles
+- Manage runtime image records
+- Manage LLM configuration records
+- Review system overview data
 
-- FastAPI
-- Jinja2 server-rendered pages
-- SQLAlchemy ORM
-- SQLite
-- Redis
-- RQ
-- Docker
-- nbclient / nbconvert / jupyter kernel inside runner image
-- Bootstrap 5
+## Supported code runtime
+
+The default code evaluation runtime currently provides:
+
+- **Python** `3.12`
+- **C** `C11` through `gcc`
+- **C++** `C++17` through `g++`
+
+### Preinstalled Python packages
+
+| Package | Version |
+| --- | --- |
+| `numpy` | `2.4.4` |
+| `pandas` | `3.0.2` |
+| `matplotlib` | `3.10.8` |
+| `scipy` | `1.17.1` |
+| `scikit-learn` | `1.8.0` |
+
+Notes:
+
+- Python standard library imports are supported
+- C submissions may use the C11 standard library
+- C++ submissions may use the C++17 standard library
+- Third-party C/C++ libraries, Makefile, CMake, and custom build commands are not supported by the default runner
+- The default runtime image does **not** preinstall deep-learning frameworks such as `torch`, `tensorflow`, `jax`, `paddle`, `mxnet`, or `transformers`
+- Students can also view the same information inside the product at `/student/help/python-runtime`
+- The UI package support matrix is defined in `app/runtime_support.py`
+- The runner Docker image installs Python packages from `runner/requirements.txt`; update both files and rebuild the runner image when expanding the preinstalled Python package set
+
+## Submission model
+
+### 1. Code questions
+
+Use this when students should submit executable Python, C, or C++ code and receive test-based automatic evaluation.
+
+Typical flow:
+
+1. Teacher creates a **code** question
+2. Teacher chooses the allowed language set: Python, C, C++, or any combination
+3. Teacher configures visible and hidden test cases
+4. Teacher may provide reference solutions for Python, C, and C++
+5. Student chooses one allowed language and uploads a source file or zip archive
+6. The worker runs the code in an isolated Docker container
+7. The system stores structured evaluation results and feedback
+8. The final grade snapshot is updated
+
+Submission rules:
+
+- Single-file Python submissions use `.py`
+- Single-file C submissions use `.c`
+- Single-file C++ submissions use `.cpp`, `.cc`, or `.cxx`
+- Multi-file submissions use `.zip`
+- Zip submissions must contain `main.py`, `main.c`, or `main.cpp` as the entry file
+- Programs read from standard input and write answers to standard output
+
+### 2. File / LLM-reviewed questions
+
+Use this when students should submit a report, analysis, explanation, or notebook-style artifact.
+
+Supported submission file types:
+
+- `.pdf`
+- `.txt`
+- `.tex`
+- `.ipynb`
+
+For `.ipynb`:
+
+- `.ipynb` is supported through the **file / LLM-reviewed** route
+- The old standalone Notebook execution page is **not** part of the active workflow anymore
+- Teachers can require notebooks to already contain executed outputs before upload
+
+Typical flow:
+
+1. Teacher creates a **PDF** or **formatted text / ipynb** question
+2. Teacher provides rubric text and reference answer guidance
+3. Student uploads a supported file
+4. The system extracts readable content
+5. The worker produces an LLM review suggestion
+6. Teacher confirms or adjusts the final result
+7. The final grade snapshot is updated
+
+## Architecture overview
+
+- **FastAPI** application
+- **Jinja2** server-rendered UI
+- **SQLAlchemy** ORM
+- **SQLite** as the default database
+- **Redis + RQ** for background tasks
+- **Docker** for isolated execution of code questions
+- **Bootstrap 5** for the UI
+
+## Important modules
+
+- `app/main.py`: FastAPI entrypoint
+- `app/routes/auth.py`: registration, login, locale switching
+- `app/routes/student.py`: student pages and submission entrypoints
+- `app/routes/teacher.py`: teacher course, assignment, question, and grading pages
+- `app/routes/admin.py`: admin pages and runtime / LLM configuration pages
+- `app/routes/jobs.py`: compatibility redirects for the retired notebook runner routes
+- `app/services/submissions.py`: submission orchestration and background evaluation logic
+- `app/services/courses.py`: course, assignment, and question helpers
+- `app/runtime_support.py`: canonical language and package support matrix used by the help UI
+- `runner/requirements.txt`: Python packages installed into the default runner image
+- `runner/execute_code.py`: helper script used inside the code runner container
+- `runner/Dockerfile`: default runtime image definition
+- `worker.py`: background worker process
 
 ## Project structure
 
 ```text
 .
 ├── app/
-│   ├── auth.py
-│   ├── config.py
 │   ├── constants.py
 │   ├── db.py
-│   ├── env.py
 │   ├── main.py
 │   ├── models.py
+│   ├── runtime_support.py
 │   ├── routes/
+│   │   ├── admin.py
 │   │   ├── auth.py
-│   │   └── jobs.py
+│   │   ├── jobs.py
+│   │   ├── student.py
+│   │   └── teacher.py
 │   ├── services/
-│   │   └── jobs.py
+│   │   ├── courses.py
+│   │   ├── llm.py
+│   │   ├── permissions.py
+│   │   └── submissions.py
 │   ├── static/
 │   │   └── style.css
-│   ├── templates/
-│   │   ├── base.html
-│   │   ├── dashboard.html
-│   │   ├── job_detail.html
-│   │   ├── login.html
-│   │   ├── new_job.html
-│   │   └── register.html
-│   └── __init__.py
+│   └── templates/
 ├── data/
-│   ├── outputs/
-│   └── uploads/
 ├── runner/
 │   ├── Dockerfile
-│   └── execute_notebook.py
-├── samples/
-│   └── minimal_demo.ipynb
+│   ├── execute_code.py
+│   └── requirements.txt
 ├── scripts/
-│   └── init_db.py
+├── tests/
 ├── worker.py
 ├── requirements.txt
-├── .env.example
 └── README.md
 ```
 
-## Key modules
+## Local development
 
-- `app/main.py`: FastAPI app entrypoint, middleware, startup initialization
-- `app/models.py`: legacy runner tables plus expanded course/submission/evaluation tables
-- `app/routes/auth.py`: register/login/logout pages and handlers
-- `app/routes/jobs.py`: legacy dashboard, upload form, job detail, artifact download
-- `app/routes/student.py`: student course / assignment / question / submission pages
-- `app/routes/teacher.py`: teacher management and grading pages
-- `app/routes/admin.py`: admin records and role pages
-- `app/services/jobs.py`: backward-compatible legacy job service wrapper
-- `app/services/submissions.py`: new submission/evaluation orchestration
-- `app/services/courses.py`: course/assignment/question management helpers
-- `app/services/permissions.py`: platform + course role checks
-- `worker.py`: RQ worker process
-- `runner/execute_notebook.py`: code that runs inside the container to execute/export notebook and write structured summary
-
-## Data model
-
-The repository now contains both legacy and expanded domain tables.
-
-### Legacy runner tables
-
-- `users`
-- `notebooks`
-- `jobs`
-- `job_outputs`
-
-These are kept so existing deployments and existing `/dashboard` + `/jobs/*` flows still work.
-
-### Expanded course evaluation tables
-
-- `courses`
-- `course_members`
-- `assignments`
-- `questions`
-- `notebook_question_configs`
-- `short_answer_question_configs`
-- `runtime_images`
-- `llm_configs`
-- `submissions`
-- `evaluation_tasks`
-- `evaluation_results`
-- `feedback`
-- `final_grade_snapshots`
-
-Important semantics:
-
-- `Submission` is the business submission record
-- `EvaluationTask` is the background execution task record
-- `EvaluationResult` stores structured automatic evaluation output
-- `FinalGradeSnapshot` stores the currently effective grade for a student/question pair
-- `failed_system` submissions do **not** count toward limits
-- `failed_answer` submissions **do** count toward limits and are considered effective submissions
-
-### `users`
-
-- `id`
-- `username` (unique)
-- `email` (unique)
-- `password_hash`
-- `created_at`
-
-### `notebooks`
-
-- `id`
-- `user_id`
-- `original_filename`
-- `stored_path`
-- `uploaded_at`
-
-### `jobs`
-
-- `id`
-- `user_id`
-- `notebook_id`
-- `status`
-- `created_at`
-- `started_at`
-- `finished_at`
-- `exit_code`
-- `error_message`
-
-### `job_outputs`
-
-- `id`
-- `job_id`
-- `executed_notebook_path`
-- `html_path`
-- `stdout_path`
-- `stderr_path`
-
-Indexes and foreign keys are included for the main lookup paths.
-
-## Runtime constraints
-
-Default runtime settings target a small single machine:
-
-- Worker concurrency: 1 process
-- Notebook timeout: 300 seconds by default
-- Docker memory limit: 1G
-- Docker CPU limit: 1 core
-- Docker network: disabled by default
-- Upload size limit: 5 MB
-- Intended machine profile: single Ubuntu 22.04 ECS, 2 vCPU / 4 GiB
-
-Note: this version does not implement a strict database-level guard that blocks a user from ever having more than one `running` job if multiple workers are started manually. The intended deployment is a single worker with concurrency 1.
-
-## Environment variables
-
-Copy `.env.example` to `.env` and adjust values if needed.
-
-Important variables:
-
-- `SECRET_KEY`: session signing key, change in production
-- `DEFAULT_LOCALE`: default UI language (`en` or `zh`)
-- `DATABASE_URL`: SQLite URL
-- `REDIS_URL`: Redis connection string
-- `RUNNER_IMAGE`: Docker image tag used for notebook execution
-- `UPLOAD_MAX_BYTES`: upload size limit
-- `EXECUTION_TIMEOUT_SECONDS`: notebook execution timeout
-
-User registration notes:
-
-- all public self-service registrations create student accounts
-- the first successful registration bootstraps the initial `super_admin`
-- `teacher` and `admin` roles are granted later from inside the system by a `super_admin`
-- `scripts/init_super_admin.py` is available as a maintenance tool if you want to seed a dedicated super admin explicitly
-
-## Local startup
-
-### 1. Create Python environment
+### 1. Install dependencies
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
 ### 2. Prepare environment file
@@ -264,19 +201,17 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `SECRET_KEY` before real deployment.
+Update `SECRET_KEY` before real deployment.
 
-### 3. Initialize database
+### 3. Initialize the database
 
 ```bash
 python scripts/init_db.py
 ```
 
-This creates `data/app.db` plus upload/output directories.
-
 ### 4. Start Redis
 
-If Redis is already installed on Ubuntu:
+If Redis is already installed:
 
 ```bash
 redis-server --save "" --appendonly no
@@ -288,285 +223,185 @@ Or with Docker:
 docker run --rm -p 6379:6379 redis:7-alpine
 ```
 
-### 5. Build the runner image
+### 5. Build the default runner image
 
 ```bash
 docker build -t notebook-runner-mvp:latest runner
 ```
 
-This image contains the minimal notebook execution stack used by each job container.
+This image contains the default Docker-isolated code runtime used for Python, C, and C++ evaluation. To add Python packages to the default runtime, update both `app/runtime_support.py` and `runner/requirements.txt`, then rebuild this image.
 
 ### 6. Start the web service
 
 ```bash
-source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ### 7. Start the worker
 
-Open another shell:
+In another shell:
 
 ```bash
-source .venv/bin/activate
 python worker.py
 ```
 
-## Startup order
+## Runtime and operational defaults
 
-Recommended startup order:
+- Worker concurrency: 1 process
+- Python execution timeout: 300 seconds by default
+- Docker memory limit: 1 GB
+- Docker CPU limit: 1 core
+- Docker network: disabled by default
+- Upload size limit: 5 MB
+- Intended deployment profile: small single-machine Ubuntu setup
 
-1. Redis
-2. Build runner image
-3. Initialize database
-4. Web service
-5. Worker
+## Registration deployment notes
 
-## Creating the first user
+Public registration now supports two paths:
 
-Open the site in a browser:
+1. **Email verification registration**
+   - The user submits the registration form with an email address
+   - The system creates a pending account with `email_verified = false`
+   - The system sends a verification email containing `/verify-email?token=...`
+   - The user clicks the email link
+   - The account becomes active and can sign in
+2. **Invitation-code registration**
+   - The user selects invitation-code registration
+   - The server validates the configured invitation code
+   - The account becomes active immediately
+   - If the user leaves the email blank, the system generates an internal placeholder email and the user can still sign in with the username
 
-- `http://127.0.0.1:8000/register`
+### Required environment variables
 
-Then fill:
+Set these values in `.env` for production:
 
-- username
-- email
-- password
-- confirm password
+```bash
+APP_BASE_URL=https://your-domain.example.com
+REGISTRATION_INVITE_CODE=your-server-side-invite-code
+INTERNAL_EMAIL_DOMAIN=invite.local
+EMAIL_VERIFICATION_EXPIRE_HOURS=24
 
-Registration logs you in immediately.
-The first successful registration becomes the bootstrap `super_admin`; all later
-registrations are regular student accounts unless a super admin promotes them
-inside the platform.
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your-smtp-user
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM_ADDRESS=no-reply@your-domain.example.com
+SMTP_FROM_NAME=CourseEval
+SMTP_STARTTLS=true
+SMTP_USE_SSL=false
+```
 
-The UI language can be switched from the top-right navigation bar between English and Chinese.
+### Deployment checklist
 
-## Legacy notebook runner flow
+- `APP_BASE_URL` must be the externally accessible HTTPS origin used by end users, otherwise verification links may point to an internal address
+- Configure a working SMTP account if you want email-verification registration to work in production
+- Set `REGISTRATION_INVITE_CODE` if you want to allow the faster invitation-code registration path
+- Keep the invitation code only on the server side; do not expose it in client-side assets or public docs
+- `INTERNAL_EMAIL_DOMAIN` should use a reserved internal-only domain because it is used for auto-generated placeholder emails when invite registrations skip the email field
+- Use HTTPS in front of the FastAPI app so email verification links and session cookies travel securely
+- Make sure the email sender domain and mailbox are allowed by your mail provider
+- If you run multiple app instances, they must share the same database so verification tokens stay valid across nodes
+- Keep `SECRET_KEY` stable across restarts so session handling remains consistent
 
-After login:
+### Behavior when SMTP is not configured
 
-1. Open `/jobs/new`
-2. Upload an `.ipynb` file
-3. Submit
-4. The app creates:
-   - a notebook record
-   - a queued job record
-   - output metadata
-   - an RQ job in Redis
+If SMTP is missing or delivery fails, email-based registrations stay pending until email sending works and the verification email is resent. Invitation-code registrations are not affected as long as `REGISTRATION_INVITE_CODE` is configured.
 
-The dashboard and detail page auto-refresh every 5 seconds while the job is active.
+### Email operations
 
-## Course workflow pages
+- Password reset is available from the login page for verified, active accounts
+- Verification and password reset tokens are stored as server-keyed hashes in the database
+- Verification resend and password reset requests have a short cooldown to reduce email abuse
+- Admins can send a test message from **Admin → System overview → Email tools**
+- Email delivery attempts are recorded in `email_delivery_logs` for audit and troubleshooting
 
-After registration, the system bootstraps a **Demo Course** for the new user to make the expanded flow visible immediately.
+## Queue and LLM deployment notes
 
-### Student pages
+The platform now separates evaluation traffic into:
 
-- `/student/courses`
-- `/student/assignments/{id}`
-- `/student/questions/{id}`
-- `/student/submissions/{id}`
+- a dedicated code evaluation queue
+- per-LLM-config queues for LLM review tasks
 
-Student course page now also supports:
+Relevant environment variables:
 
-- joining a course by join code
-- viewing assignment schedules in the configured UI timezone
-- notebook submission auto-queueing for automatic evaluation
+```bash
+PYTHON_QUEUE_NAME=python-evaluations
+LLM_QUEUE_PREFIX=llm-evaluations
+PDF_REVIEW_MAX_PAGES=8
+```
 
-### Teacher pages
+### Worker behavior
 
-- `/teacher/courses`
-- `/teacher/courses/{id}`
-- `/teacher/assignments/{id}`
-- `/teacher/questions/{id}`
-- `/teacher/submissions/{id}`
+- Docker code grading runs on its own queue
+- Each enabled LLM config has its own queue
+- `queue_concurrency` is configured per LLM config record in the admin UI
+- `worker.py` now works as a lightweight worker manager and starts:
+  - 1 Python worker process
+  - N LLM worker processes per enabled config, where N is that config's concurrency
 
-Teacher workflow currently supports:
+### Global default LLM behavior
 
-- creating courses
-- sharing a generated course join code with students
-- creating assignments
-- creating notebook / short-answer questions
-- configuring visible tests / hidden tests source text
-- configuring scoring rule and basic submission limits
-- reviewing submissions and overriding scores/comments
+- The latest **platform** LLM config that has passed connectivity testing becomes the default for all courses still following the global platform default
+- Teachers can override a specific course to use a chosen enabled LLM config from the course detail page
 
-### Admin pages
+### PDF review behavior
 
-- `/admin/users`
-- `/admin/runtime-images`
-- `/admin/llm-configs`
-- `/admin/system`
+- PDF review no longer relies on OCR or text extraction
+- Uploaded PDFs are rendered page-by-page into images
+- Those page images are sent to the configured multimodal LLM for grading
+- `PDF_REVIEW_MAX_PAGES` limits how many pages are rendered per submission
+- Use a multimodal-capable model for PDF review; text-only models may fail for these tasks
 
-The first registered user becomes platform admin automatically.
+## Data model notes
 
-## Expanded submission flow
+Main teaching-domain tables include:
 
-For notebook questions:
+- `courses`
+- `course_members`
+- `assignments`
+- `questions`
+- `code_question_configs`
+- `file_question_configs`
+- `short_answer_question_configs`
+- `runtime_images`
+- `llm_configs`
+- `submissions`
+- `evaluation_tasks`
+- `evaluation_results`
+- `feedback`
+- `final_grade_snapshots`
 
-1. Student opens a question
-2. Student uploads `.ipynb`
-3. System creates `Submission`
-4. System creates `EvaluationTask`
-5. Worker automatically runs isolated Docker evaluation
-6. System writes `EvaluationResult`
-7. If enabled, worker also enqueues notebook LLM feedback generation
-8. System updates `FinalGradeSnapshot`
+Legacy compatibility tables are still present in the schema:
 
-For short-answer questions:
+- `notebooks`
+- `jobs`
+- `job_outputs`
 
-1. Student submits text
-2. System creates `Submission`
-3. If enabled, worker runs an LLM suggestion task
-4. Teacher reviews and can override the suggested score/comment
-5. Teacher feedback updates `FinalGradeSnapshot`
+Those tables remain only for backward compatibility and route migration. They are no longer the primary product workflow.
 
-## Evaluation result semantics
-
-Submission statuses:
-
-- `submitted`
-- `queued`
-- `running`
-- `completed`
-- `failed_system`
-- `failed_answer`
-
-Evaluation task statuses:
-
-- `queued`
-- `running`
-- `succeeded`
-- `failed`
-
-Score authority:
-
-1. Teacher score
-2. LLM suggestion / automatic score
-3. No score
-
-## Minimal validation flow
-
-Use the included sample notebook:
-
-- `samples/minimal_demo.ipynb`
-
-Validation flow:
-
-1. Register a user
-2. Log in
-3. Upload `samples/minimal_demo.ipynb`
-4. Open the job detail page
-5. Wait for status to move:
-   - `queued`
-   - `running`
-   - `success`
-6. Verify:
-   - stdout is visible
-   - stderr is visible or empty
-   - executed notebook can be downloaded
-   - HTML result opens in a new tab or can be downloaded
-
-## Where files are stored
-
-- Original uploads: `data/uploads/user-<user_id>/`
-- Job outputs: `data/outputs/job-<job_id>/`
-
-Each job output directory stores:
-
-- `executed.ipynb`
-- `executed.html`
-- `stdout.txt`
-- `stderr.txt`
+## Artifacts
 
 Submission evaluation artifacts are stored under:
 
 - `data/outputs/submissions/submission-<submission_id>/`
 
-Each submission output directory stores:
+Depending on question type, artifacts may include:
 
-- `executed.ipynb`
-- `executed.html`
 - `stdout.txt`
 - `stderr.txt`
 - `summary.json`
+- `executed.ipynb`
+- `executed.html`
 
-## Timezone and language behavior
+## Language behavior
 
-- UI language can be switched globally between English and Chinese from the navigation bar
-- default language comes from `DEFAULT_LOCALE`
-- template-rendered timestamps are formatted in Asia/Shanghai (Beijing time)
-
-## Redis usage
-
-This project uses Redis only as the RQ backend. No extra result store or cache layer is required.
-
-Queue name default:
-
-- `notebook-jobs`
-
-## Docker runner design
-
-Each notebook job is executed with a one-off `docker run` call from the worker:
-
-- `--rm`
-- `--memory 1g`
-- `--cpus 1`
-- `--pids-limit 256`
-- `--network none` by default
-- mount only:
-  - the input notebook (read-only)
-  - the output directory
-
-The host Python environment never executes user notebook code directly.
-
-The expanded submission flow still uses the same Docker-isolated execution principle; only the surrounding business objects changed from legacy `Job` to `Submission + EvaluationTask + EvaluationResult`.
-
-## Web pages
-
-Implemented pages include:
-
-- `/register`
-- `/login`
-- `/dashboard`
-- `/jobs/new`
-- `/jobs/{id}`
-- `/student/courses`
-- `/student/assignments/{id}`
-- `/student/questions/{id}`
-- `/student/submissions/{id}`
-- `/teacher/courses`
-- `/teacher/courses/{id}`
-- `/teacher/assignments/{id}`
-- `/teacher/questions/{id}`
-- `/teacher/submissions/{id}`
-- `/admin/users`
-- `/admin/runtime-images`
-- `/admin/llm-configs`
-- `/admin/system`
-
-## Error handling covered
-
-The MVP includes readable handling for:
-
-- unauthenticated access
-- invalid login
-- duplicate username/email
-- non-`.ipynb` upload
-- oversized upload
-- queue submission failure
-- Docker missing/unavailable
-- notebook timeout
-- notebook execution failure
-- HTML export failure
-- missing result artifact
-- access to another user’s job/artifacts
-- stale `running` jobs after worker restart
+- The UI supports both **English** and **Chinese**
+- Users can switch language from the top navigation bar
+- Default locale comes from `DEFAULT_LOCALE`
 
 ## Common issues
 
-### 1. Worker never picks up jobs
+### Worker does not process tasks
 
 Check:
 
@@ -574,79 +409,32 @@ Check:
 - `REDIS_URL` is correct
 - `python worker.py` is running
 
-### 2. Job fails immediately with Docker-related error
+### Code evaluation fails immediately with Docker-related errors
 
 Check:
 
 - Docker is installed
-- current user can run `docker`
-- runner image exists:
+- The current user can run `docker`
+- The runner image exists:
 
 ```bash
 docker images | rg notebook-runner-mvp
 ```
 
-### 3. HTML or executed notebook missing
-
-Inspect:
-
-- job detail stderr
-- worker logs
-- `data/outputs/job-<id>/`
-
-### 4. Session login does not persist
+### Session login does not persist
 
 Check:
 
 - `SECRET_KEY` is set
-- browser accepts cookies
+- Browser cookies are enabled
 
-## Single-machine ECS deployment notes
-
-For a 2C4G Ubuntu 22.04 ECS instance, recommended deployment shape:
-
-- 1 FastAPI web process
-- 1 RQ worker process
-- 1 local Redis instance
-- Docker installed on the host
-- SQLite stored on local disk
-
-Suggested production additions:
-
-- run web and worker under `systemd`
-- place Nginx in front as reverse proxy
-- terminate TLS at Nginx
-- restrict inbound security group rules
-- move `data/` onto persistent disk
-- rotate logs with `journald` or logrotate
-
-Example reverse proxy direction:
-
-- Nginx -> `127.0.0.1:8000`
-
-## Known limitations
+## Current limitations
 
 - SQLite is suitable only for small single-node usage
 - No CSRF protection layer yet
-- LLM connectivity test is currently a structural smoke-test, not a live provider call
+- LLM connectivity testing is still a structural smoke test, not a live provider guarantee
 - Runtime image records exist, but per-course runtime enforcement is still basic
 - No per-user storage quota
-- No background cleanup for old artifacts
+- No automatic cleanup for old artifacts
 - No advanced sandbox hardening beyond Docker flags
-- Intended for a single worker process; not tuned for parallel execution
-- HTML output is served as generated and not sanitized beyond access control
-- Teacher and student can currently overlap through course membership simplifications
-- Queue backend is still RQ; migration to Celery is a future evolution step
-
-## Future expansion ideas
-
-Without overhauling the MVP, the current structure can later support:
-
-- PostgreSQL migration
-- richer job logs
-- job retry controls
-- admin inspection page
-- object storage
-- prebuilt runner image pipelines
-- stricter per-user concurrency enforcement
-
+- Intended for a single worker process and small-scale deployments

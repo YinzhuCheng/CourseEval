@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}{{ material.title }} - {{ course.title }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ material.title }}</h1>
+    <p class="text-muted mb-0">{{ course.code }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% if is_teacher_view %}/teacher/courses/{{ course.id }}{% else %}/student/courses/{{ course.id }}{% endif %}">{{ lx("Back to course", "返回课程") }}</a>
+</div>
+
+{% if material.external_url %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-2">{{ lx("Download / link", "下载链接") }}</h2>
+    <a href="{{ material.external_url }}" rel="noopener noreferrer" target="_blank">{{ material.external_url }}</a>
+  </div>
+</div>
+{% endif %}
+
+{% if body_html %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body material-body">
+    <div class="markdown-body">{{ body_html | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+{% include "partials/discussion_board.html" %}
+{% endblock %}

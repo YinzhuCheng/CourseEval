@@ -10,6 +10,9 @@ from app.constants import (
     CourseRole,
     CourseStatus,
     FeedbackSource,
+    LLMProvider,
+    LLMScope,
+    LLMTestStatus,
     MembershipStatus,
     PlatformRole,
     QuestionType,
@@ -19,11 +22,12 @@ from app.constants import (
     UserRole,
 )
 from app.db import Base, utcnow
-from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSnapshot, Question, ShortAnswerQuestionConfig, Submission, User
+from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSnapshot, LLMConfig, Question, ShortAnswerQuestionConfig, Submission, User
 from app.auth import assign_user_role, has_super_admin, resolve_registration_roles
 from app.services.courses import bootstrap_sample_data
 from app.services.permissions import can_manage_course, can_staff_course, is_platform_admin
 from app.services.submissions import (
+    _resolve_llm_config_for_question,
     _strip_hidden_output_sections,
     create_short_answer_submission,
     is_submission_pending_teacher_review,
@@ -153,7 +157,7 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertTrue(is_submission_pending_teacher_review(submission))
         self.assertIsNone(snapshot)
 
-    def test_pending_short_answer_does_not_treat_llm_suggestion_as_effective_score(self) -> None:
+    def test_pending_short_answer_surfaces_llm_suggestion_before_teacher(self) -> None:
         submission = create_short_answer_submission(
             self.db,
             user_id=self.student.id,
@@ -180,11 +184,12 @@ class Phase1AlignmentTests(unittest.TestCase):
         )
         assert pending_submission is not None
 
+        # Default product path: LLM score is effective without teacher confirmation.
+        pending_submission.question.short_answer_config.teacher_confirmation_required = False
         score, source = resolve_submission_score(pending_submission)
-
-        self.assertIsNone(score)
-        self.assertIsNone(source)
-        self.assertTrue(is_submission_pending_teacher_review(pending_submission))
+        self.assertEqual(score, Decimal("18"))
+        self.assertEqual(source, FeedbackSource.LLM)
+        self.assertFalse(is_submission_pending_teacher_review(pending_submission))
 
     def test_teacher_feedback_activates_snapshot(self) -> None:
         submission = create_short_answer_submission(
@@ -284,11 +289,86 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertEqual(
             [question.question_type for question in questions],
             [
-                QuestionType.PYTHON_CODE,
-                QuestionType.PDF_LLM,
-                QuestionType.FORMATTED_TEXT_LLM,
+                QuestionType.CODE,
+                QuestionType.FILE_LLM,
+                QuestionType.FILE_LLM,
             ],
         )
+        pdf_question = questions[1]
+        formatted_question = questions[2]
+        self.assertIsNotNone(pdf_question.file_question_config)
+        self.assertIsNotNone(formatted_question.file_question_config)
+        assert pdf_question.file_question_config is not None
+        assert formatted_question.file_question_config is not None
+        self.assertTrue(pdf_question.file_question_config.llm_suggestion_enabled)
+        self.assertTrue(formatted_question.file_question_config.llm_suggestion_enabled)
+
+    def test_course_can_follow_latest_platform_llm_default(self) -> None:
+        platform_llm = LLMConfig(
+            scope=LLMScope.PLATFORM,
+            name="Platform default",
+            provider_type=LLMProvider.OPENAI_COMPATIBLE,
+            base_url="https://llm.example.com",
+            api_key="secret",
+            model_name="gpt-test",
+            enabled=True,
+            last_test_status=LLMTestStatus.SUCCESS,
+            last_tested_at=utcnow(),
+        )
+        self.db.add(platform_llm)
+        self.db.commit()
+        self.db.refresh(platform_llm)
+
+        self.course.use_global_llm_default = True
+        self.course.default_llm_config_id = None
+        self.db.commit()
+        self.db.refresh(self.course)
+        self.db.refresh(self.assignment)
+        self.db.refresh(self.question)
+
+        resolved = _resolve_llm_config_for_question(self.question, self.db)
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.id, platform_llm.id)
+
+    def test_course_specific_llm_override_beats_global_default(self) -> None:
+        platform_llm = LLMConfig(
+            scope=LLMScope.PLATFORM,
+            name="Platform default",
+            provider_type=LLMProvider.OPENAI_COMPATIBLE,
+            base_url="https://llm.example.com",
+            api_key="secret",
+            model_name="gpt-platform",
+            enabled=True,
+            last_test_status=LLMTestStatus.SUCCESS,
+            last_tested_at=utcnow(),
+        )
+        course_llm = LLMConfig(
+            scope=LLMScope.PLATFORM,
+            name="Course override",
+            provider_type=LLMProvider.OPENAI_COMPATIBLE,
+            base_url="https://llm.example.com",
+            api_key="secret",
+            model_name="gpt-course",
+            enabled=True,
+            last_test_status=LLMTestStatus.SUCCESS,
+            last_tested_at=utcnow(),
+        )
+        self.db.add_all([platform_llm, course_llm])
+        self.db.commit()
+        self.db.refresh(course_llm)
+
+        self.course.use_global_llm_default = False
+        self.course.default_llm_config_id = course_llm.id
+        self.db.commit()
+        self.db.refresh(self.course)
+        self.db.refresh(self.assignment)
+        self.db.refresh(self.question)
+
+        resolved = _resolve_llm_config_for_question(self.question, self.db)
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.id, course_llm.id)
 
     def test_first_registration_becomes_super_admin_once(self) -> None:
         fresh_user = User(
@@ -340,6 +420,7 @@ class Phase1AlignmentTests(unittest.TestCase):
             password_hash="x",
             account_role=AccountRole.ADMINISTRATOR,
             platform_role=PlatformRole.ADMIN,
+            email_verified=True,
             is_active=True,
         )
         self.assertEqual(legacy_admin.effective_role, UserRole.ADMIN)

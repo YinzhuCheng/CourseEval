@@ -1,72 +1,412 @@
 {% extends "base.html" %}
 
-{% block title %}Question - {{ question.title }}{% endblock %}
+{% block title %}{{ question.title }} - {{ t("nav.teacher") }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
   <div>
     <h1 class="h3 mb-1">{{ question.title }}</h1>
     <p class="text-muted mb-0">{{ question.assignment.course.code }} / {{ question.assignment.title }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="/teacher/assignments/{{ question.assignment.id }}">Back to assignment</a>
+  <div class="d-flex flex-wrap gap-2">
+    {% if can_manage_course %}
+    <form method="post" action="/teacher/questions/{{ question.id }}/historical-highest" onsubmit="return confirm('Enable historical highest scoring for all students on this question?');">
+      <button class="btn btn-outline-warning" type="submit">{{ lx("Use historical highest", "按历史最高分计分") }}</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="/teacher/assignments/{{ question.assignment.id }}">
+      {{ lx("Back to assignment", "返回作业") }}
+    </a>
+  </div>
 </div>
 
+{% if question_class_stats %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h2 class="h5 mb-3">{{ lx("Class statistics (gradebook snapshots)", "全班统计（成绩快照）") }}</h2>
+    <p class="small text-muted mb-3">
+      {{ lx("Scores are effective snapshot grades for active students in this course.", "分数为当前课程活跃学生的生效成绩快照。") }}
+    </p>
+    <div class="row g-3 small mb-3">
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Active students", "活跃学生") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Submitted (any)", "已提交人数") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.submitted_any_count }} / {{ question_class_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Missing", "缺交人数") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.missing_count }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="text-muted">{{ lx("Graded count", "有分人数") }}</div>
+        <div class="fw-semibold">{{ question_class_stats.score_stats.count }}</div>
+      </div>
+    </div>
+    {% set st = question_class_stats.score_stats %}
+    {% if st.count %}
+    <div class="row g-3 small mb-3">
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Mean", "均分") }}</div><div>{{ "%.2f"|format(st.mean) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Median", "中位数") }}</div><div>{{ "%.2f"|format(st.median) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Min", "最低") }}</div><div>{{ "%.2f"|format(st.min) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Max", "最高") }}</div><div>{{ "%.2f"|format(st.max) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">P25</div><div>{{ "%.2f"|format(st.p25) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">P75</div><div>{{ "%.2f"|format(st.p75) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Zeros", "零分人数") }}</div><div>{{ st.zero_count }}</div></div>
+    </div>
+    {% endif %}
+    {% if question_class_stats.feedback_source_counts %}
+    <div class="small mb-3">
+      <span class="text-muted me-2">{{ lx("Score sources", "分数来源") }}:</span>
+      {% for src, cnt in question_class_stats.feedback_source_counts.items() %}
+      <span class="badge text-bg-light border me-1">{{ elabel("feedback_source", src) }} × {{ cnt }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if question_class_stats.missing_students %}
+    <details class="small">
+      <summary class="fw-semibold">{{ lx("Missing list (first 200)", "缺交名单（前 200）") }}</summary>
+      <ul class="mb-0 mt-2">
+        {% for u in question_class_stats.missing_students %}
+        <li><a href="/teacher/courses/{{ question.assignment.course_id }}/grades/student/{{ u.id }}">{{ u.username }}</a></li>
+        {% endfor %}
+      </ul>
+      {% if question_class_stats.missing_truncated %}
+      <p class="text-muted mb-0">{{ lx("Additional names omitted.", "其余名单已省略。") }}</p>
+      {% endif %}
+    </details>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <div class="row g-4">
-  <div class="col-lg-4">
+  <div class="col-lg-5">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Question settings</h2>
-        <dl class="row mb-0">
-          <dt class="col-sm-5">Type</dt>
-          <dd class="col-sm-7">{{ question.question_type.value }}</dd>
-          <dt class="col-sm-5">Max score</dt>
+        <h2 class="h5 mb-3">{{ lx("Question summary", "题目概要") }}</h2>
+        <dl class="row mb-0 small">
+          <dt class="col-sm-5">{{ lx("Kind", "类型") }}</dt>
+          <dd class="col-sm-7">{{ elabel("question_type", question.question_type) }}</dd>
+          <dt class="col-sm-5">{{ lx("Max score", "满分") }}</dt>
           <dd class="col-sm-7">{{ question.max_score }}</dd>
-          <dt class="col-sm-5">Rule override</dt>
-          <dd class="col-sm-7">{{ question.scoring_rule_override.value if question.scoring_rule_override else "-" }}</dd>
+          <dt class="col-sm-5">{{ lx("Rule override", "计分规则覆盖") }}</dt>
+          <dd class="col-sm-7">
+            {% if question.scoring_rule_override %}{{ elabel("scoring_rule", question.scoring_rule_override) }}{% else %}-{% endif %}
+          </dd>
+          {% if question.current_question_version_id %}
+          <dt class="col-sm-5">{{ lx("Current version", "当前版本") }}</dt>
+          <dd class="col-sm-7">#{{ question.current_question_version_id }}</dd>
+          {% endif %}
         </dl>
       </div>
     </div>
 
-    <div class="card shadow-sm mt-4">
+    {% if versions %}
+    <div class="card shadow-sm mt-3">
       <div class="card-body">
-        <h2 class="h5 mb-3">Active grade snapshots</h2>
+        <h2 class="h5 mb-2">{{ lx("Version history", "版本记录") }}</h2>
+        <ul class="list-unstyled small mb-0">
+          {% for v in versions %}
+          <li class="mb-1">{{ lx("Version", "版本") }} {{ v.version_number }} — {{ format_datetime(v.created_at) }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mt-3">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Active grade snapshots", "当前生效成绩快照") }}</h2>
         {% if snapshots %}
         <div class="list-group list-group-flush">
           {% for snapshot in snapshots %}
           <div class="list-group-item px-0">
-            <div class="fw-semibold">Student #{{ snapshot.student_id }}</div>
+            <div class="fw-semibold">{{ lx("Student", "学生") }} #{{ snapshot.student_id }}</div>
             <div class="small text-muted">
-              score={{ snapshot.score if snapshot.score is not none else "-" }},
-              rule={{ snapshot.grading_rule_applied.value }},
-              source={{ snapshot.feedback_source.value if snapshot.feedback_source else "-" }}
+              {{ lx("score", "分数") }}={{ snapshot.score if snapshot.score is not none else "-" }},
+              {{ lx("rule", "规则") }}={{ elabel("scoring_rule", snapshot.grading_rule_applied) }},
+              {{ lx("source", "来源") }}={{ elabel("feedback_source", snapshot.feedback_source) if snapshot.feedback_source else "-" }},
+              {% if snapshot.use_historical_highest %}<span class="badge text-bg-warning">{{ lx("Historical highest", "历史最高分") }}</span>{% endif %}
             </div>
           </div>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">No effective grades yet.</p>
+        <p class="text-muted mb-0">{{ lx("No effective grades yet.", "当前还没有生效成绩。") }}</p>
         {% endif %}
       </div>
     </div>
   </div>
 
-  <div class="col-lg-8">
+  <div class="col-lg-7">
+    {% if can_manage_course %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Edit question", "编辑题目") }}</h2>
+        <p class="small text-muted">{{ lx("Saving creates a new immutable version snapshot. Existing submissions keep their version for grading history.", "保存会生成新的题目版本快照；已有提交仍关联其提交时的版本，便于追溯。") }}</p>
+        <form method="post" action="/teacher/questions/{{ question.id }}/update" enctype="multipart/form-data" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">{{ lx("Title", "标题") }}</label>
+            <input class="form-control" name="title" value="{{ question.title }}" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Description", "描述") }}</label>
+            <textarea class="form-control" name="description" rows="3">{{ question.description or '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Max score", "满分") }}</label>
+            <input class="form-control" name="max_score" value="{{ question.max_score }}" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Rule override", "计分规则覆盖") }}</label>
+            <select class="form-select" name="scoring_rule_override">
+              <option value="" {% if not question.scoring_rule_override %}selected{% endif %}>{{ lx("Use assignment default", "使用作业默认规则") }}</option>
+              <option value="latest" {% if question.scoring_rule_override and question.scoring_rule_override.value == 'latest' %}selected{% endif %}>{{ elabel("scoring_rule", "latest") }}</option>
+              <option value="highest" {% if question.scoring_rule_override and question.scoring_rule_override.value == 'highest' %}selected{% endif %}>{{ elabel("scoring_rule", "highest") }}</option>
+            </select>
+          </div>
+
+          {% if question.question_type.value == 'short_answer' and question.short_answer_config %}
+          {% set sac = question.short_answer_config %}
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Min length", "最短字数") }}</label>
+            <input class="form-control" name="min_length" value="{{ sac.min_length or '' }}" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Max length", "最长字数") }}</label>
+            <input class="form-control" name="max_length" value="{{ sac.max_length or '' }}" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>
+            <textarea class="form-control" name="rubric_text" rows="4">{{ sac.rubric_text or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Teacher confirmation required", "教师确认后生效") }}</label>
+            <select class="form-select" name="require_teacher_confirmation">
+              <option value="true" {% if sac.teacher_confirmation_required %}selected{% endif %}>{{ lx("Yes", "是") }}</option>
+              <option value="false" {% if not sac.teacher_confirmation_required %}selected{% endif %}>{{ lx("No", "否") }}</option>
+            </select>
+          </div>
+          {% elif question.question_type.value == 'code' and question.code_config %}
+          {% set pyc = question.code_config %}
+          {% set allowed_values = pyc.allowed_language_values() %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Allowed languages", "允许语言") }}</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="python" id="lang_python_edit" {% if 'python' in allowed_values %}checked{% endif %} />
+                <label class="form-check-label" for="lang_python_edit">Python</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="c" id="lang_c_edit" {% if 'c' in allowed_values %}checked{% endif %} />
+                <label class="form-check-label" for="lang_c_edit">C</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="cpp" id="lang_cpp_edit" {% if 'cpp' in allowed_values %}checked{% endif %} />
+                <label class="form-check-label" for="lang_cpp_edit">C++</label>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Input specification", "输入格式") }}</label>
+            <textarea class="form-control" name="input_spec" rows="3" required>{{ pyc.input_spec or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Output specification", "输出格式") }}</label>
+            <textarea class="form-control" name="output_spec" rows="3" required>{{ pyc.output_spec or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Allowed libraries note", "允许库备注") }}</label>
+            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ pyc.allowed_libraries_note or default_allowed_code_libraries }}</textarea>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">{{ lx("Timeout (seconds)", "超时秒数") }}</label>
+            <input class="form-control" name="time_limit_seconds" value="{{ pyc.time_limit_seconds }}" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">{{ lx("Memory MB", "内存 MB") }}</label>
+            <input class="form-control" name="memory_limit_mb" value="{{ pyc.memory_limit_mb }}" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">{{ lx("CPU", "CPU") }}</label>
+            <input class="form-control" name="cpu_limit" value="{{ pyc.cpu_limit }}" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Allow network", "允许网络") }}</label>
+            <select class="form-select" name="allow_network">
+              <option value="false" {% if not pyc.allow_network %}selected{% endif %}>{{ lx("No", "否") }}</option>
+              <option value="true" {% if pyc.allow_network %}selected{% endif %}>{{ lx("Yes", "是") }}</option>
+            </select>
+          </div>
+          {% set vt = pyc.visible_tests() %}
+          {% set ht = pyc.hidden_tests() %}
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Visible test 1 input", "可见测试 1 输入") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_1_input" rows="3">{{ vt[0].input if vt|length > 0 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Visible test 1 output", "可见测试 1 输出") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_1_output" rows="3">{{ vt[0].expected_output if vt|length > 0 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Visible test 2 input", "可见测试 2 输入") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_2_input" rows="3">{{ vt[1].input if vt|length > 1 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Visible test 2 output", "可见测试 2 输出") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_2_output" rows="3">{{ vt[1].expected_output if vt|length > 1 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Visible test 3 input", "可见测试 3 输入") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_3_input" rows="3">{{ vt[2].input if vt|length > 2 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Visible test 3 output", "可见测试 3 输出") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_3_output" rows="3">{{ vt[2].expected_output if vt|length > 2 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Hidden test 1 input", "隐藏测试 1 输入") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_1_input" rows="3">{{ ht[0].input if ht|length > 0 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Hidden test 1 output", "隐藏测试 1 输出") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_1_output" rows="3">{{ ht[0].expected_output if ht|length > 0 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Hidden test 2 input", "隐藏测试 2 输入") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_2_input" rows="3">{{ ht[1].input if ht|length > 1 else '' }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Hidden test 2 output", "隐藏测试 2 输出") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3">{{ ht[1].expected_output if ht|length > 1 else '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference solution - Python", "参考答案 - Python") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_python" rows="5">{{ pyc.reference_solution_python }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference solution - C", "参考答案 - C") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_c" rows="5">{{ pyc.reference_solution_c }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference solution - C++", "参考答案 - C++") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5">{{ pyc.reference_solution_cpp }}</textarea>
+          </div>
+          {% elif question.question_type.value == 'notebook' and question.notebook_config %}
+          {% set nbc = question.notebook_config %}
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("LLM score weight", "LLM 分数权重") }}</label>
+            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" value="{{ nbc.llm_score_weight }}" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
+            <textarea class="form-control" name="notebook_llm_rubric" rows="5">{{ nbc.llm_scoring_rubric or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
+            <textarea class="form-control" name="reference_answer" rows="4">{{ nbc.reference_answer_text or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            {% if nbc.reference_answer_file_path %}
+            <div class="form-text small">{{ lx("Current file is stored on the server.", "当前已在服务器保存附件。") }}</div>
+            <div class="form-check mt-1">
+              <input class="form-check-input" type="checkbox" name="clear_reference_answer_file" value="true" id="clear_ref_nb" />
+              <label class="form-check-label" for="clear_ref_nb">{{ lx("Remove uploaded reference file", "删除已上传的参考答案附件") }}</label>
+            </div>
+            {% endif %}
+          </div>
+          {% elif question.file_question_config %}
+          {% set fqc = question.file_question_config %}
+          {% set ext_csv = ',' ~ fqc.accepted_extensions.lower().replace(' ', '') ~ ',' %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
+            <textarea class="form-control" name="reference_answer" rows="5" required>{{ fqc.reference_answer_text }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            {% if fqc.reference_answer_file_path %}
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" name="clear_reference_answer_file" value="true" id="clear_ref_fq" />
+              <label class="form-check-label" for="clear_ref_fq">{{ lx("Remove uploaded reference file", "删除已上传的参考答案附件") }}</label>
+            </div>
+            {% endif %}
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>
+            <textarea class="form-control" name="rubric_text" rows="4" required>{{ fqc.rubric_text }}</textarea>
+          </div>
+          {% if question.question_type.value == 'file_llm' %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Allowed submission formats", "允许提交的文件格式") }}</label>
+            <input type="hidden" name="accepted_extensions" id="edit_combined_accepted_extensions" value="{{ fqc.accepted_extensions }}" />
+            <div class="d-flex flex-wrap gap-3">
+              {% for ext, lid in [('.pdf', 'e_pdf'), ('.txt', 'e_txt'), ('.tex', 'e_tex'), ('.ipynb', 'e_ipynb')] %}
+              <div class="form-check">
+                <input class="form-check-input edit-file-format-cb" type="checkbox" value="{{ ext }}" id="{{ lid }}" {% if (',' ~ ext ~ ',') in ext_csv %}checked{% endif %} />
+                <label class="form-check-label" for="{{ lid }}">{{ ext }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Teacher confirmation required", "教师确认后生效") }}</label>
+            <select class="form-select" name="require_teacher_confirmation">
+              <option value="true" {% if fqc.teacher_confirmation_required %}selected{% endif %}>{{ lx("Yes", "是") }}</option>
+              <option value="false" {% if not fqc.teacher_confirmation_required %}selected{% endif %}>{{ lx("No", "否") }}</option>
+            </select>
+          </div>
+          {% else %}
+          <div class="col-12">
+            <p class="text-muted mb-0">{{ lx("Editing is not available for this legacy question type in the web UI.", "该旧版题型暂不支持在此界面编辑。") }}</p>
+          </div>
+          {% endif %}
+
+          {% if question.short_answer_config or question.code_config or question.file_question_config or question.notebook_config %}
+          <div class="col-12 d-grid">
+            <button class="btn btn-primary" type="submit">{{ lx("Save changes", "保存修改") }}</button>
+          </div>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const combined = document.getElementById("edit_combined_accepted_extensions");
+        if (!combined) return;
+        const sync = () => {
+          const parts = Array.from(document.querySelectorAll(".edit-file-format-cb:checked")).map((cb) => cb.value);
+          combined.value = parts.join(",");
+        };
+        document.querySelectorAll(".edit-file-format-cb").forEach((cb) => cb.addEventListener("change", sync));
+        sync();
+      })();
+    </script>
+    {% endif %}
+
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submissions</h2>
+        <h2 class="h5 mb-3">{{ lx("Submissions", "提交记录") }}</h2>
         {% if submissions %}
         <div class="table-responsive">
           <table class="table align-middle">
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Student</th>
-                <th>Status</th>
-                <th>Visible</th>
-                <th>Hidden</th>
-                <th>Auto</th>
-                <th>Final</th>
-                <th>Submitted</th>
+                <th>{{ lx("Student", "学生") }}</th>
+                <th>{{ lx("Status", "状态") }}</th>
+                <th>{{ lx("Visible", "可见测试") }}</th>
+                <th>{{ lx("Hidden", "隐藏测试") }}</th>
+                <th>{{ lx("Auto", "自动得分") }}</th>
+                <th>{{ lx("Final", "最终得分") }}</th>
+                <th>{{ lx("Ver.", "版本") }}</th>
+                <th>{{ lx("Submitted", "提交时间") }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -76,14 +416,17 @@
               <tr>
                 <td>#{{ submission.id }}</td>
                 <td>{{ submission.user.username }}</td>
-                <td><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></td>
+                <td><span class="badge status-badge status-{{ submission.status.value }}">{{ elabel("submission_status", submission.status) }}</span></td>
                 <td>{{ latest_result.visible_score if latest_result and latest_result.visible_score is not none else "-" }}</td>
                 <td>{{ latest_result.hidden_score if latest_result and latest_result.hidden_score is not none else "-" }}</td>
                 <td>{{ latest_result.auto_score if latest_result and latest_result.auto_score is not none else "-" }}</td>
                 <td>{{ latest_result.final_score if latest_result and latest_result.final_score is not none else "-" }}</td>
+                <td class="small text-muted">{{ submission.question_version_id or "—" }}</td>
                 <td>{{ format_datetime(submission.submitted_at) }}</td>
                 <td class="text-end">
-                  <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ submission.id }}">Open</a>
+                  <a class="btn btn-sm btn-outline-primary" href="/teacher/submissions/{{ submission.id }}">
+                    {{ lx("Open", "查看") }}
+                  </a>
                 </td>
               </tr>
               {% endfor %}
@@ -91,10 +434,32 @@
           </table>
         </div>
         {% else %}
-        <p class="text-muted mb-0">No submissions yet.</p>
+        <p class="text-muted mb-0">{{ lx("No submissions yet.", "还没有提交记录。") }}</p>
         {% endif %}
       </div>
     </div>
+
+    {% if reveal and reveal.open %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Student-facing reveal (after close)", "学生端关闭后公布内容") }}</h2>
+        {% if reveal.reference_text %}
+        <h3 class="h6">{{ lx("Reference answer", "参考答案") }}</h3>
+        <pre class="artifact-block mb-3">{{ reveal.reference_text }}</pre>
+        {% endif %}
+        {% if reveal.rubric_text %}
+        <h3 class="h6">{{ lx("Rubric", "评分标准") }}</h3>
+        <div class="border rounded-3 p-3 bg-light-subtle mb-3">{{ reveal.rubric_text }}</div>
+        {% endif %}
+        {% if reveal.sample %}
+        <h3 class="h6">{{ lx("Random full-score sample (anonymous to students)", "随机满分样例（对学生匿名）") }}</h3>
+        <pre class="artifact-block">{{ reveal.sample.preview_text }}</pre>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% include "partials/discussion_board.html" %}
   </div>
 </div>
 {% endblock %}

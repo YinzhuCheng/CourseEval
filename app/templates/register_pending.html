@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("register.pending.title") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+{% set pending_email = pending_email or "" %}
+<div class="row justify-content-center">
+  <div class="col-lg-7 col-xl-6">
+    <div class="card auth-card">
+      <div class="card-body p-4 p-lg-5">
+        <h1 class="h3 mb-3">{{ t("register.pending.title") }}</h1>
+        <p class="text-muted mb-4">{{ t("register.pending.subtitle") }}</p>
+
+        <div class="auth-helper mb-4">
+          <div class="fw-semibold mb-2">{{ t("register.pending.next_step") }}</div>
+          <div class="small text-muted mb-0">
+            {{ t("register.pending.instructions", email=pending_email or t("register.email")) }}
+          </div>
+        </div>
+
+        <form method="post" action="/verify-email/resend" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">{{ t("register.email") }}</label>
+            <input
+              class="form-control"
+              name="email"
+              type="email"
+              required
+              autocomplete="email"
+              value="{{ pending_email }}"
+            />
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-outline-primary" type="submit">{{ t("register.pending.resend") }}</button>
+          </div>
+        </form>
+
+        <p class="mt-4 mb-0 small">
+          <a href="/login">{{ t("register.pending.back_to_login") }}</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

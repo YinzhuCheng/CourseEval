@@ -1,104 +1,252 @@
 {% extends "base.html" %}
 
-{% block title %}{{ course.title }} - Teacher Course{% endblock %}
+{% block title %}{{ course.title }} - {{ t("nav.teacher") }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="page-header d-flex justify-content-between align-items-start gap-3 mb-4">
   <div>
     <h1 class="h3 mb-1">{{ course.title }}</h1>
-    <p class="text-muted mb-0">{{ course.code }}</p>
+    <p class="text-muted mb-2">{{ course.code }}</p>
+    <p class="small text-muted mb-0">
+      {{ lx(
+        "Manage assignments, enrollment, and the student-facing guidance for this course.",
+        "在这里管理本课程的作业、成员与面向学生的说明。"
+      ) }}
+    </p>
   </div>
-  <a class="btn btn-outline-secondary" href="/teacher/courses">Back to courses</a>
+  <a class="btn btn-outline-secondary" href="/teacher/courses">{{ lx("Back to courses", "返回课程列表") }}</a>
 </div>
+
+{% if course.is_open_community %}
+<div class="alert alert-info shadow-sm mb-4">
+  {{ lx(
+    "This is the platform open discussion space: there is no designated course teacher; platform administrators moderate content. Every verified member can post learning materials and create assignments here.",
+    "这是平台公共「自由讨论区」：不设任课教师，由平台管理员治理内容与秩序。每位已验证成员均可发布学习资料与创建作业。",
+  ) }}
+</div>
+{% endif %}
+
+{% if course_staff_overview %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 small align-items-center">
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Active students", "活跃学生") }}</div>
+        <div class="fs-5 fw-semibold">{{ course_staff_overview.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Pending teacher review", "待教师确认") }}</div>
+        <div class="fs-5 fw-semibold {% if course_staff_overview.pending_teacher_review_count %}text-warning{% endif %}">{{ course_staff_overview.pending_teacher_review_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("In evaluation queue", "评测排队/运行中") }}</div>
+        <div class="fs-5 fw-semibold {% if course_staff_overview.stuck_evaluation_count %}text-info{% endif %}">{{ course_staff_overview.stuck_evaluation_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Failed evaluations", "评测失败") }}</div>
+        <div class="fs-5 fw-semibold {% if course_staff_overview.failed_evaluation_count %}text-danger{% endif %}">{{ course_staff_overview.failed_evaluation_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Late submission rows", "迟交记录条数") }}</div>
+        <div class="fs-5 fw-semibold">{{ course_staff_overview.late_submission_row_count }}</div>
+      </div>
+    </div>
+    <p class="text-muted small mb-0 mt-2">
+      {{ lx("Counts are summed across all assignments in this course.", "以上数字为本课程全部作业合计。") }}
+    </p>
+  </div>
+</div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-7">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm h-100">
       <div class="card-body">
-        <h2 class="h5 mb-3">Assignments</h2>
+        <h2 class="h5 mb-3">{{ lx("Assignments", "作业列表") }}</h2>
         {% if assignments %}
         <div class="list-group mb-4">
           {% for assignment in assignments %}
           <a class="list-group-item list-group-item-action" href="/teacher/assignments/{{ assignment.id }}">
-            <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex justify-content-between align-items-center gap-3">
               <div>
                 <strong>{{ assignment.title }}</strong>
-                <div class="small text-muted">{{ assignment.status.value }} · {{ assignment.default_scoring_rule.value }}</div>
+                <div class="small text-muted">
+                  {{ elabel("assignment_status", assignment.status) }} · {{ elabel("scoring_rule", assignment.default_scoring_rule) }}
+                </div>
+                {% if course_staff_overview and course_staff_overview.by_assignment and course_staff_overview.by_assignment.get(assignment.id) %}
+                {% set op = course_staff_overview.by_assignment.get(assignment.id) %}
+                <div class="small mt-1">
+                  {% if op.pending_teacher_review_count %}<span class="badge text-bg-warning me-1">{{ lx("Pending", "待确认") }} {{ op.pending_teacher_review_count }}</span>{% endif %}
+                  {% if op.stuck_evaluation_count %}<span class="badge text-bg-info me-1">{{ lx("Evaluating", "评测中") }} {{ op.stuck_evaluation_count }}</span>{% endif %}
+                  {% if op.failed_evaluation_count %}<span class="badge text-bg-danger me-1">{{ lx("Failed", "失败") }} {{ op.failed_evaluation_count }}</span>{% endif %}
+                  {% if op.late_submission_row_count %}<span class="badge text-bg-secondary me-1">{{ lx("Late rows", "迟交") }} {{ op.late_submission_row_count }}</span>{% endif %}
+                </div>
+                {% endif %}
               </div>
-              <span class="btn btn-sm btn-outline-primary">Manage</span>
+              <span class="btn btn-sm btn-outline-primary">{{ lx("Open", "打开") }}</span>
             </div>
           </a>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted">No assignments yet.</p>
+        <div class="empty-state">
+          <h3 class="h6">{{ lx("No assignments yet", "还没有作业") }}</h3>
+          <p class="text-muted mb-0">
+            {{ lx("Create the first assignment below to make this course visible to students.", "请先在下方创建第一份作业，让学生能看到课程任务。") }}
+          </p>
+        </div>
         {% endif %}
 
         {% if can_manage_course %}
-        <h3 class="h6 mb-3">Create assignment</h3>
+        <div class="section-note mb-3">
+          {{ lx(
+            "Use code questions for executable Python, C, or C++ programming tasks. Use file / LLM-reviewed questions for .pdf, .txt, .tex, or .ipynb submissions.",
+            "需要可执行编程评测时请使用代码题，可支持 Python、C 或 C++；需要提交 .pdf、.txt、.tex 或 .ipynb 时，请使用文件 / LLM 评测题。"
+          ) }}
+        </div>
+        <h3 class="h6 mb-3">{{ lx("Create assignment", "创建作业") }}</h3>
         <form method="post" action="/teacher/courses/{{ course.id }}/assignments" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Title</label>
+            <label class="form-label">{{ lx("Title", "标题") }}</label>
             <input class="form-control" name="title" required />
           </div>
           <div class="col-12">
-            <label class="form-label">Description</label>
+            <label class="form-label">{{ lx("Description", "描述") }}</label>
             <textarea class="form-control" name="description" rows="3"></textarea>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Status</label>
+            <label class="form-label">{{ lx("Status", "状态") }}</label>
             <select class="form-select" name="status">
-              <option value="draft">draft</option>
-              <option value="published">published</option>
-              <option value="closed">closed</option>
+              <option value="draft">{{ elabel("assignment_status", "draft") }}</option>
+              <option value="published">{{ elabel("assignment_status", "published") }}</option>
+              <option value="closed">{{ elabel("assignment_status", "closed") }}</option>
             </select>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Scoring rule</label>
+            <label class="form-label">{{ lx("Scoring rule", "计分规则") }}</label>
             <select class="form-select" name="default_scoring_rule">
-              <option value="latest">latest</option>
-              <option value="highest">highest</option>
+              <option value="latest">{{ elabel("scoring_rule", "latest") }}</option>
+              <option value="highest">{{ elabel("scoring_rule", "highest") }}</option>
             </select>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Limit mode</label>
+            <label class="form-label">{{ lx("Submission limit mode", "提交次数限制模式") }}</label>
             <select class="form-select" name="submission_limit_mode">
-              <option value="unlimited">unlimited</option>
-              <option value="daily">daily</option>
-              <option value="total">total</option>
+              <option value="daily">{{ elabel("submission_limit_mode", "daily") }}</option>
+              <option value="total">{{ elabel("submission_limit_mode", "total") }}</option>
             </select>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Open at</label>
+            <label class="form-label">{{ lx("Open at", "开放时间") }}</label>
             <input class="form-control" name="open_at" type="datetime-local" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">Due at</label>
+            <label class="form-label">{{ lx("Due at", "截止时间") }}</label>
             <input class="form-control" name="due_at" type="datetime-local" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">Close at</label>
+            <label class="form-label">{{ lx("Close at", "关闭时间") }}</label>
             <input class="form-control" name="close_at" type="datetime-local" />
           </div>
           <div class="col-md-4">
-            <label class="form-label">Allow late</label>
+            <label class="form-label">{{ lx("Allow late submissions", "允许迟交") }}</label>
             <select class="form-select" name="allow_late">
-              <option value="false">false</option>
-              <option value="true">true</option>
+              <option value="false">{{ lx("No", "否") }}</option>
+              <option value="true">{{ lx("Yes", "是") }}</option>
             </select>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Submission limit value</label>
+            <label class="form-label">{{ lx("Submission limit value", "提交次数上限") }}</label>
             <input class="form-control" name="submission_limit_value" type="number" min="1" />
+            <div class="form-text">{{ lx("Leave empty for no submission cap.", "留空表示不限制提交次数。") }}</div>
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Create assignment</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Create assignment", "创建作业") }}</button>
           </div>
         </form>
         {% else %}
         <div class="alert alert-secondary mb-0">
-          You are viewing this course as TA staff. Phase 1 keeps assignment creation and member management limited to teachers.
+          {{ lx(
+            "You are viewing this course as TA staff. Assignment creation and member management remain teacher-only.",
+            "你当前以助教身份查看本课程。创建作业和管理成员仍仅对教师开放。"
+          ) }}
         </div>
+        {% endif %}
+
+        {% if can_manage_course and grade_matrix and grade_matrix.rows %}
+        <div class="card shadow-sm mt-4">
+          <div class="card-body">
+            <h2 class="h5 mb-3">{{ lx("Student progress", "学生作业进度") }}</h2>
+            <p class="small text-muted">
+              {{ lx("“Any” means at least one question has a submission. “All” means every question in the assignment has at least one submission.", "“部分”表示至少有一道题有提交；“齐”表示该作业下每一道题都至少有一条提交。") }}
+            </p>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{{ lx("Student", "学生") }}</th>
+                    {% for asn in grade_matrix.assignments %}
+                    <th class="text-center text-nowrap">{{ asn.title }}</th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in grade_matrix.rows %}
+                  <tr>
+                    <td>
+                      <a href="/teacher/courses/{{ course.id }}/grades/student/{{ row.student.id }}">{{ row.student.username }}</a>
+                    </td>
+                    {% for cell in row.cells %}
+                      <td class="text-center small">
+                        {% if cell.fully_complete %}
+                          <span class="text-success">{{ lx("All", "齐") }}</span>
+                        {% elif cell.any_submitted %}
+                          <span class="text-warning">{{ lx("Partial", "部分") }}</span>
+                        {% else %}
+                          <span class="text-muted">{{ lx("None", "无") }}</span>
+                        {% endif %}
+                        <div class="text-muted">{{ cell.questions_submitted }}/{{ cell.question_total }}</div>
+                        <div class="text-muted">{{ cell.total_score }}</div>
+                      </td>
+                    {% endfor %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <h2 class="h5 mb-0">{{ lx("Learning materials", "学习资料") }}</h2>
+          {% if can_manage_course %}
+          <a class="btn btn-sm btn-primary" href="/teacher/courses/{{ course.id }}/materials/new">{{ lx("New material", "新建资料") }}</a>
+          {% endif %}
+        </div>
+        {% if materials %}
+        <ul class="list-group list-group-flush">
+          {% for m in materials %}
+          <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+              <a class="fw-semibold" href="/teacher/courses/{{ course.id }}/materials/{{ m.id }}">{{ m.title }}</a>
+              {% if m.external_url %}<div class="small text-muted text-truncate" style="max-width: 28rem;">{{ m.external_url }}</div>{% endif %}
+            </div>
+            <div class="d-flex gap-2">
+              {% if can_manage_course %}
+              <a class="btn btn-sm btn-outline-secondary" href="/teacher/courses/{{ course.id }}/materials/{{ m.id }}/edit">{{ lx("Edit", "编辑") }}</a>
+              {% endif %}
+              <a class="btn btn-sm btn-outline-primary" href="/teacher/courses/{{ course.id }}/materials/{{ m.id }}">{{ lx("Open", "打开") }}</a>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">{{ lx("No materials yet.", "暂无学习资料。") }}</p>
         {% endif %}
       </div>
     </div>
@@ -107,19 +255,98 @@
   <div class="col-lg-5">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ "Course join code" if current_locale == "en" else "课程加入码" }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Course join code", "课程加入码") }}</h2>
+        {% if course.is_open_community %}
+        <p class="text-muted small mb-0">
+          {{ lx("This space does not use a join code; all verified users are added automatically.", "公共区不使用加入码，所有已验证用户会自动加入。") }}
+        </p>
+        {% else %}
         <div class="input-group">
           <input class="form-control font-monospace" value="{{ course.join_code or '-' }}" readonly />
         </div>
         <p class="small text-muted mt-2 mb-0">
-          {{ "Share this code with students so they can join the course themselves." if current_locale == "en" else "把这个加入码发给学生，学生即可自行加入课程。" }}
+          {{ lx(
+            "Share this code with students so they can join the course themselves.",
+            "把这个加入码发给学生，学生即可自行加入课程。"
+          ) }}
         </p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if can_manage_course %}
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Course card image", "课程卡片图片") }}</h2>
+        <p class="small text-muted mb-3">{{ lx("Shown on the course list for students and teachers. PNG/JPG/WebP/GIF.", "显示在师生课程列表的卡片顶部。") }}</p>
+        {% if course.cover_image_path %}
+        <div class="mb-3 rounded overflow-hidden border" style="max-height: 160px;">
+          <img src="{{ course_cover_url(course) }}" alt="" class="w-100 object-fit-cover" style="max-height:160px;" />
+        </div>
+        {% endif %}
+        <form method="post" action="/teacher/courses/{{ course.id }}/cover" enctype="multipart/form-data" class="row g-2 align-items-end mb-2">
+          <div class="col-12">
+            <input class="form-control form-control-sm" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+          </div>
+          <div class="col-12">
+            <button class="btn btn-sm btn-primary" type="submit">{{ lx("Upload", "上传") }}</button>
+          </div>
+        </form>
+        {% if course.cover_image_path %}
+        <form method="post" action="/teacher/courses/{{ course.id }}/cover/remove" class="m-0">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">{{ lx("Remove image", "移除图片") }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h5 mb-3">{{ lx("Course LLM default", "课程默认 LLM") }}</h2>
+        <p class="small text-muted">
+          {{ lx(
+            "By default, courses follow the latest platform LLM configuration that has passed connectivity testing. You can also pin this course to a specific configuration below.",
+            "默认情况下，课程会跟随平台最新测试成功的 LLM 配置。你也可以在下方将本课程固定到某个指定配置。"
+          ) }}
+        </p>
+        {% if can_manage_course %}
+        <form method="post" action="/teacher/courses/{{ course.id }}/llm-config" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM config", "LLM 配置") }}</label>
+            <select class="form-select" name="llm_config_id">
+              <option value="">{{ lx("Follow latest platform-tested default", "跟随平台最新测试成功默认配置") }}</option>
+              {% for config in available_llm_configs %}
+              <option
+                value="{{ config.id }}"
+                {% if not course.use_global_llm_default and course.default_llm_config_id == config.id %}selected{% endif %}
+              >
+                {{ config.name }} · {{ config.model_name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("LLM response language", "LLM 回复语言") }}</label>
+            <select class="form-select" name="llm_response_language">
+              <option value="auto" {% if (course.llm_response_language or 'auto') == 'auto' %}selected{% endif %}>{{ lx("Auto (match student submission)", "自动（跟随学生作业语言）") }}</option>
+              <option value="zh" {% if course.llm_response_language == 'zh' %}selected{% endif %}>{{ lx("Chinese", "中文") }}</option>
+              <option value="en" {% if course.llm_response_language == 'en' %}selected{% endif %}>{{ lx("English", "English") }}</option>
+            </select>
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-outline-primary" type="submit">{{ lx("Save LLM setting", "保存 LLM 设置") }}</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0">{{ lx("Only teachers can change the course LLM setting.", "只有教师可以修改课程 LLM 设置。") }}</p>
+        {% endif %}
       </div>
     </div>
 
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Course members</h2>
+        <h2 class="h5 mb-3">{{ lx("Course members", "课程成员") }}</h2>
         {% if members %}
         <ul class="list-group mb-4">
           {% for member in members %}
@@ -128,33 +355,35 @@
               <strong>{{ member.user.username }}</strong>
               <div class="small text-muted">{{ member.user.email }}</div>
             </div>
-            <span class="badge bg-secondary">{{ member.role.value }}</span>
+            <span class="badge bg-secondary">{{ elabel("course_role", member.role) }}</span>
           </li>
           {% endfor %}
         </ul>
+        {% else %}
+        <p class="text-muted mb-4">{{ lx("No course members yet.", "当前还没有课程成员。") }}</p>
         {% endif %}
 
         {% if can_manage_course %}
-        <h3 class="h6 mb-3">Add / update member</h3>
+        <h3 class="h6 mb-3">{{ lx("Add or update member", "添加或更新成员") }}</h3>
         <form method="post" action="/teacher/courses/{{ course.id }}/members" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Username</label>
+            <label class="form-label">{{ lx("Username", "用户名") }}</label>
             <input class="form-control" name="username" required />
           </div>
           <div class="col-12">
-            <label class="form-label">Role</label>
+            <label class="form-label">{{ lx("Role", "角色") }}</label>
             <select class="form-select" name="role">
-              <option value="student">student</option>
-              <option value="teacher">teacher</option>
-              <option value="ta">ta</option>
+              <option value="student">{{ elabel("course_role", "student") }}</option>
+              <option value="teacher">{{ elabel("course_role", "teacher") }}</option>
+              <option value="ta">{{ elabel("course_role", "ta") }}</option>
             </select>
           </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-outline-primary" type="submit">Save member</button>
+            <button class="btn btn-outline-primary" type="submit">{{ lx("Save member", "保存成员") }}</button>
           </div>
         </form>
         {% else %}
-        <p class="text-muted mb-0">Only teachers can change course membership in this phase.</p>
+        <p class="text-muted mb-0">{{ lx("Only teachers can change course membership.", "只有教师可以调整课程成员。") }}</p>
         {% endif %}
       </div>
     </div>

@@ -3,36 +3,73 @@
 {% block title %}{{ assignment.title }} - {{ t("nav.teacher") }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="page-header-card mb-4">
   <div>
     <h1 class="h3 mb-1">{{ assignment.title }}</h1>
-    <p class="text-muted mb-0">{{ assignment.course.title }} / {{ assignment.status.value }}</p>
+    <p class="text-muted mb-0">{{ assignment.course.title }} / {{ elabel("assignment_status", assignment.status) }}</p>
   </div>
   <a class="btn btn-outline-secondary" href="/teacher/courses/{{ assignment.course_id }}">
-    {{ "返回课程" if current_locale == "zh" else "Back to course" }}
+    {{ lx("Back to course", "返回课程") }}
   </a>
 </div>
+
+{% if assignment_staff_stats %}
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 small align-items-center">
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Active students", "活跃学生") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Any submission", "至少一题已交") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.students_with_any_submission }} / {{ assignment_staff_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("All questions done", "全题齐") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.students_fully_complete }} / {{ assignment_staff_stats.active_student_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Pending teacher review", "待教师确认") }}</div>
+        <div class="fs-5 fw-semibold {% if assignment_staff_stats.pending_teacher_review_count %}text-warning{% endif %}">{{ assignment_staff_stats.pending_teacher_review_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Evaluating", "评测中") }}</div>
+        <div class="fs-5 fw-semibold {% if assignment_staff_stats.stuck_evaluation_count %}text-info{% endif %}">{{ assignment_staff_stats.stuck_evaluation_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Failed", "失败") }}</div>
+        <div class="fs-5 fw-semibold {% if assignment_staff_stats.failed_evaluation_count %}text-danger{% endif %}">{{ assignment_staff_stats.failed_evaluation_count }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Late rows", "迟交条数") }}</div>
+        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.late_submission_row_count }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-7">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ "作业设置" if current_locale == "zh" else "Assignment settings" }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Assignment settings", "作业设置") }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-4">{{ "开放时间" if current_locale == "zh" else "Open at" }}</dt>
+          <dt class="col-sm-4">{{ lx("Open at", "开放时间") }}</dt>
           <dd class="col-sm-8">{{ format_datetime(assignment.open_at) }}</dd>
-          <dt class="col-sm-4">{{ "截止时间" if current_locale == "zh" else "Due at" }}</dt>
+          <dt class="col-sm-4">{{ lx("Due at", "截止时间") }}</dt>
           <dd class="col-sm-8">{{ format_datetime(assignment.due_at) }}</dd>
-          <dt class="col-sm-4">{{ "关闭时间" if current_locale == "zh" else "Close at" }}</dt>
+          <dt class="col-sm-4">{{ lx("Close at", "关闭时间") }}</dt>
           <dd class="col-sm-8">{{ format_datetime(assignment.close_at) }}</dd>
-          <dt class="col-sm-4">{{ "允许迟交" if current_locale == "zh" else "Allow late" }}</dt>
-          <dd class="col-sm-8">{{ "是" if assignment.allow_late and current_locale == "zh" else "否" if current_locale == "zh" else "Yes" if assignment.allow_late else "No" }}</dd>
-          <dt class="col-sm-4">{{ "计分规则" if current_locale == "zh" else "Scoring rule" }}</dt>
-          <dd class="col-sm-8">{{ assignment.default_scoring_rule.value }}</dd>
-          <dt class="col-sm-4">{{ "提交限制" if current_locale == "zh" else "Submission limit" }}</dt>
+          <dt class="col-sm-4">{{ lx("Allow late", "允许迟交") }}</dt>
+          <dd class="col-sm-8">{{ lx("Yes", "是") if assignment.allow_late else lx("No", "否") }}</dd>
+          <dt class="col-sm-4">{{ lx("Scoring rule", "计分规则") }}</dt>
+          <dd class="col-sm-8">{{ elabel("scoring_rule", assignment.default_scoring_rule) }}</dd>
+          <dt class="col-sm-4">{{ lx("Submission limit", "提交限制") }}</dt>
           <dd class="col-sm-8">
-            {{ assignment.submission_limit_mode.value }}
-            {% if assignment.submission_limit_value %}({{ assignment.submission_limit_value }}){% endif %}
+            {{ elabel("submission_limit_mode", assignment.submission_limit_mode) }}
+            {% if assignment.submission_limit_value %}({{ assignment.submission_limit_value }}){% else %}<span class="text-muted">({{ lx("No cap", "不限制") }})</span>{% endif %}
           </dd>
         </dl>
       </div>
@@ -40,34 +77,55 @@
 
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ "题目列表" if current_locale == "zh" else "Questions" }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Questions", "题目列表") }}</h2>
         {% if questions %}
         <div class="table-responsive">
           <table class="table align-middle">
             <thead>
               <tr>
                 <th>#</th>
-                <th>{{ "标题" if current_locale == "zh" else "Title" }}</th>
-                <th>{{ "题型" if current_locale == "zh" else "Type" }}</th>
-                <th>{{ "满分" if current_locale == "zh" else "Max score" }}</th>
+                <th>{{ lx("Title", "标题") }}</th>
+                <th>{{ lx("Kind", "类型") }}</th>
+                <th>{{ lx("Max score", "满分") }}</th>
+                {% if assignment_staff_stats %}
+                <th class="text-end text-nowrap">{{ lx("Submitted", "已交人数") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Missing", "缺交") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Mean", "均分") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Median", "中位") }}</th>
+                <th class="text-end text-nowrap">{{ lx("Zeros", "零分人数") }}</th>
+                {% endif %}
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {% for question in questions %}
+              {% set qs = assignment_staff_stats.question_stats_by_id.get(question.id) if assignment_staff_stats else none %}
               <tr>
                 <td>{{ question.order_index }}</td>
                 <td>{{ question.title }}</td>
-                <td>{{ question.question_type.value }}</td>
+                <td>{{ elabel("question_type", question.question_type) }}</td>
                 <td>{{ question.max_score }}</td>
-                <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">{{ "管理" if current_locale == "zh" else "Manage" }}</a></td>
+                {% if assignment_staff_stats and qs %}
+                <td class="text-end small">{{ qs.submitted_student_count }} / {{ assignment_staff_stats.active_student_count }}</td>
+                <td class="text-end small">{{ qs.missing_student_count }}</td>
+                <td class="text-end small">{% if qs.score_stats.count %}{{ "%.1f"|format(qs.score_stats.mean) }}{% else %}—{% endif %}</td>
+                <td class="text-end small">{% if qs.score_stats.median is not none %}{{ "%.1f"|format(qs.score_stats.median) }}{% else %}—{% endif %}</td>
+                <td class="text-end small">{{ qs.score_stats.zero_count }}</td>
+                {% elif assignment_staff_stats %}
+                <td class="text-end small" colspan="5">—</td>
+                {% endif %}
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="/teacher/questions/{{ question.id }}">
+                    {{ lx("Manage", "管理") }}
+                  </a>
+                </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
         {% else %}
-        <p class="text-muted mb-0">{{ "还没有题目。" if current_locale == "zh" else "No questions yet." }}</p>
+        <p class="text-muted mb-0">{{ lx("No questions yet.", "还没有题目。") }}</p>
         {% endif %}
       </div>
     </div>
@@ -76,191 +134,214 @@
   <div class="col-lg-5">
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ "创建题目" if current_locale == "zh" else "Create question" }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Create question", "创建题目") }}</h2>
         {% if can_manage_course %}
-        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" class="row g-3" id="create-question-form">
+        <div class="alert alert-info">
+          <strong>{{ lx("Question type guidance", "题型说明") }}:</strong>
+          {{ lx(
+            "Use code questions for executable Python, C, or C++ submissions. For uploads graded by the LLM, pick allowed file formats (you may allow more than one, for example PDF and TeX together).",
+            "需要执行评测的编程题请使用代码题，可允许 Python、C 或 C++；需要上传并由 LLM 评分的题目请选择“允许提交的文件格式”（可多选，例如同时允许 PDF 与 TeX）。"
+          ) }}
+        </div>
+        <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" enctype="multipart/form-data" class="row g-3" id="create-question-form">
           <div class="col-12">
-            <label class="form-label">{{ "标题" if current_locale == "zh" else "Title" }}</label>
+            <label class="form-label">{{ lx("Title", "标题") }}</label>
             <input class="form-control" name="title" required />
           </div>
           <div class="col-12">
-            <label class="form-label">{{ "描述" if current_locale == "zh" else "Description" }}</label>
+            <label class="form-label">{{ lx("Description", "描述") }}</label>
             <textarea class="form-control" name="description" rows="3"></textarea>
           </div>
           <div class="col-md-6">
-            <label class="form-label">{{ "题型" if current_locale == "zh" else "Type" }}</label>
+            <label class="form-label">{{ lx("Question kind", "题目类型") }}</label>
             <select class="form-select" name="question_type">
-              <option value="python_code">{{ "Python 代码题" if current_locale == "zh" else "Python code" }}</option>
-              <option value="pdf_llm">{{ "PDF 文档题" if current_locale == "zh" else "PDF (LLM graded)" }}</option>
-              <option value="formatted_text_llm">{{ "格式化文本题" if current_locale == "zh" else "Formatted text (LLM graded)" }}</option>
+              <option value="code">{{ lx("Code question", "代码题") }}</option>
+              <option value="notebook">{{ lx("Notebook (.ipynb) / LLM text review", "Notebook（.ipynb）/ LLM 文本评阅") }}</option>
+              <option value="file_llm">{{ lx("File upload / LLM-reviewed", "文件上传 / LLM 评测题") }}</option>
             </select>
           </div>
           <div class="col-md-6">
-            <label class="form-label">{{ "满分" if current_locale == "zh" else "Max score" }}</label>
+            <label class="form-label">{{ lx("Max score", "满分") }}</label>
             <input class="form-control" name="max_score" value="100" />
           </div>
           <div class="col-md-6">
-            <label class="form-label">{{ "计分规则覆盖" if current_locale == "zh" else "Rule override" }}</label>
+            <label class="form-label">{{ lx("Rule override", "计分规则覆盖") }}</label>
             <select class="form-select" name="scoring_rule_override">
-              <option value="">{{ "使用作业默认规则" if current_locale == "zh" else "Use assignment default" }}</option>
-              <option value="latest">{{ "最后一次" if current_locale == "zh" else "Latest" }}</option>
-              <option value="highest">{{ "最高分" if current_locale == "zh" else "Highest" }}</option>
+              <option value="">{{ lx("Use assignment default", "使用作业默认规则") }}</option>
+              <option value="latest">{{ lx("Latest", "最后一次") }}</option>
+              <option value="highest">{{ lx("Highest", "最高分") }}</option>
             </select>
           </div>
-          <div class="col-md-6 legacy-notebook-only d-none">
-            <label class="form-label">{{ "Notebook 超时秒数" if current_locale == "zh" else "Notebook timeout" }}</label>
+
+          <div class="col-12 code-only">
+            <div class="alert alert-info mb-0">
+              <strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong>
+              {{ default_allowed_code_libraries }}
+            </div>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Allowed languages", "允许语言") }}</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="python" id="lang_python_create" checked />
+                <label class="form-check-label" for="lang_python_create">Python</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="c" id="lang_c_create" />
+                <label class="form-check-label" for="lang_c_create">C</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowed_languages" value="cpp" id="lang_cpp_create" />
+                <label class="form-check-label" for="lang_cpp_create">C++</label>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Input specification", "输入格式") }}</label>
+            <textarea class="form-control" name="input_spec" rows="3" required></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Output specification", "输出格式") }}</label>
+            <textarea class="form-control" name="output_spec" rows="3" required></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Allowed libraries note", "允许库备注") }}</label>
+            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ default_allowed_code_libraries }}</textarea>
+          </div>
+          <div class="col-md-4 code-only">
+            <label class="form-label">{{ lx("Timeout (seconds)", "超时秒数") }}</label>
             <input class="form-control" name="time_limit_seconds" value="300" />
           </div>
-          <div class="col-md-6 legacy-notebook-only d-none">
-            <label class="form-label">{{ "Notebook 内存 MB" if current_locale == "zh" else "Notebook memory MB" }}</label>
+          <div class="col-md-4 code-only">
+            <label class="form-label">{{ lx("Memory MB", "内存 MB") }}</label>
             <input class="form-control" name="memory_limit_mb" value="1024" />
           </div>
-          <div class="col-md-6 legacy-notebook-only d-none">
-            <label class="form-label">{{ "Notebook CPU" if current_locale == "zh" else "Notebook CPU" }}</label>
+          <div class="col-md-4 code-only">
+            <label class="form-label">{{ lx("CPU", "CPU") }}</label>
             <input class="form-control" name="cpu_limit" value="1" />
           </div>
-          <div class="col-md-4 legacy-notebook-only d-none">
-            <label class="form-label">{{ "执行成功权重" if current_locale == "zh" else "Execution weight" }}</label>
-            <input class="form-control" name="execution_weight" value="0" />
+          <div class="col-12 code-only">
+            <h3 class="h6 mb-2">{{ lx("5 test cases (20 points each)", "5 个测试点（默认每个 20 分）") }}</h3>
           </div>
-          <div class="col-md-4 legacy-notebook-only d-none">
-            <label class="form-label">{{ "可见测试权重" if current_locale == "zh" else "Visible weight" }}</label>
-            <input class="form-control" name="visible_weight" value="100" />
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Visible test 1 input", "可见测试 1 输入") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_1_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-4 legacy-notebook-only d-none">
-            <label class="form-label">{{ "隐藏测试权重" if current_locale == "zh" else "Hidden weight" }}</label>
-            <input class="form-control" name="hidden_weight" value="0" />
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Visible test 1 output", "可见测试 1 输出") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_1_output" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 legacy-notebook-only d-none">
-            <label class="form-label">{{ "LLM 评分权重" if current_locale == "zh" else "LLM score weight" }}</label>
-            <input class="form-control" name="llm_score_weight" value="0" />
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Visible test 2 input", "可见测试 2 输入") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_2_input" rows="3" required></textarea>
           </div>
-          <div class="col-md-6 legacy-notebook-only d-none">
-            <label class="form-label">{{ "Notebook 启用 LLM 评分反馈" if current_locale == "zh" else "Enable notebook LLM scoring feedback" }}</label>
-            <select class="form-select" name="llm_feedback_enabled">
-              <option value="false">{{ "否" if current_locale == "zh" else "No" }}</option>
-              <option value="true">{{ "是" if current_locale == "zh" else "Yes" }}</option>
-            </select>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Visible test 2 output", "可见测试 2 输出") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_2_output" rows="3" required></textarea>
           </div>
-          <div class="col-12 legacy-notebook-only d-none">
-            <label class="form-label">{{ "可见测试代码" if current_locale == "zh" else "Visible tests source" }}</label>
-            <textarea class="form-control font-monospace" name="visible_tests_source" rows="5" placeholder="assert 1 + 1 == 2"></textarea>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Visible test 3 input", "可见测试 3 输入") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_3_input" rows="3" required></textarea>
           </div>
-          <div class="col-12 legacy-notebook-only d-none">
-            <label class="form-label">{{ "隐藏测试代码" if current_locale == "zh" else "Hidden tests source" }}</label>
-            <textarea class="form-control font-monospace" name="hidden_tests_source" rows="5"></textarea>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Visible test 3 output", "可见测试 3 输出") }}</label>
+            <textarea class="form-control font-monospace" name="visible_test_3_output" rows="3" required></textarea>
           </div>
-          <div class="col-12 legacy-notebook-only d-none">
-            <label class="form-label">{{ "Notebook LLM 评分细则" if current_locale == "zh" else "Notebook LLM scoring rubric" }}</label>
-            <textarea class="form-control" name="llm_scoring_rubric" rows="3" placeholder="{{ '用于无唯一答案题目，指导 LLM 给出分数建议。' if current_locale == 'zh' else 'Use this for open-ended notebook questions to guide LLM score suggestions.' }}"></textarea>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Hidden test 1 input", "隐藏测试 1 输入") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_1_input" rows="3" required></textarea>
+          </div>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Hidden test 1 output", "隐藏测试 1 输出") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_1_output" rows="3" required></textarea>
+          </div>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Hidden test 2 input", "隐藏测试 2 输入") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_2_input" rows="3" required></textarea>
+          </div>
+          <div class="col-md-6 code-only">
+            <label class="form-label">{{ lx("Hidden test 2 output", "隐藏测试 2 输出") }}</label>
+            <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3" required></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - Python", "参考答案 - Python") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_python" rows="5"></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - C", "参考答案 - C") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_c" rows="5"></textarea>
+          </div>
+          <div class="col-12 code-only">
+            <label class="form-label">{{ lx("Reference solution - C++", "参考答案 - C++") }}</label>
+            <textarea class="form-control font-monospace" name="reference_solution_cpp" rows="5"></textarea>
+          </div>
+
+          <div class="col-12 notebook-llm-only d-none">
+            <label class="form-label">{{ lx("LLM score weight (cap for LLM portion)", "LLM 分数上限（LLM 部分不超过此值）") }}</label>
+            <input class="form-control" name="notebook_llm_score_weight" type="number" step="0.01" min="0.01" value="20" />
+            <input type="hidden" name="notebook_llm_feedback_enabled" value="true" />
+            <div class="form-text">{{ lx("After auto tests, the notebook is converted to text and graded by the LLM.", "自动评测后，系统会将 ipynb 转为文本并由 LLM 评分。") }}</div>
+          </div>
+          <div class="col-12 notebook-llm-only d-none">
+            <label class="form-label">{{ lx("LLM scoring rubric", "LLM 评分细则") }}</label>
+            <textarea class="form-control" name="llm_scoring_rubric" rows="4"></textarea>
           </div>
           <div class="col-12 llm-graded-only d-none">
-            <label class="form-label">{{ "参考答案" if current_locale == "zh" else "Reference answer" }}</label>
+            <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
             <textarea class="form-control" name="reference_answer" rows="4"></textarea>
           </div>
           <div class="col-12 llm-graded-only d-none">
-            <label class="form-label">{{ "简答题评分细则" if current_locale == "zh" else "Short answer rubric" }}</label>
+            <label class="form-label">{{ lx("Reference answer file (optional)", "参考答案附件（可选）") }}</label>
+            <input class="form-control" type="file" name="reference_answer_file" accept=".pdf,.tex,.txt,.md,.ipynb" />
+            <div class="form-text">{{ lx("PDF and TeX are converted to text for the model.", "PDF 与 TeX 会先转为文本再送入模型。") }}</div>
+          </div>
+          <div class="col-12 llm-graded-only d-none">
+            <label class="form-label">{{ lx("Rubric", "评分细则") }}</label>
             <textarea class="form-control" name="rubric_text" rows="3"></textarea>
           </div>
-          <div class="col-md-6 llm-graded-only d-none">
-            <label class="form-label">{{ "允许扩展名" if current_locale == "zh" else "Accepted extensions" }}</label>
-            <input class="form-control" name="accepted_extensions" value=".txt,.tex,.ipynb" />
-          </div>
-          <div class="col-md-6 llm-graded-only d-none">
-            <label class="form-label">{{ "教师确认后生效" if current_locale == "zh" else "Teacher confirmation required" }}</label>
-            <select class="form-select" name="require_teacher_confirmation">
-              <option value="true">{{ "是" if current_locale == "zh" else "Yes" }}</option>
-              <option value="false">{{ "否" if current_locale == "zh" else "No" }}</option>
-            </select>
-          </div>
-          <div class="col-md-6 short-answer-only d-none">
-            <label class="form-label">{{ "最小长度" if current_locale == "zh" else "Minimum length" }}</label>
-            <input class="form-control" name="min_length" />
-          </div>
-          <div class="col-md-6 short-answer-only d-none">
-            <label class="form-label">{{ "最大长度" if current_locale == "zh" else "Maximum length" }}</label>
-            <input class="form-control" name="max_length" />
-          </div>
-          <div class="col-12 python-code-only">
-            <div class="alert alert-info mb-0">
-              <strong>{{ "允许使用的库" if current_locale == "zh" else "Allowed libraries" }}:</strong>
-              {{ default_allowed_python_libraries }}
+          <div class="col-12 llm-graded-only d-none">
+            <label class="form-label">{{ lx("Allowed submission formats", "允许提交的文件格式") }}</label>
+            <input type="hidden" name="accepted_extensions" id="combined_accepted_extensions" value=".pdf" />
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".pdf" id="fmt_pdf" checked />
+                <label class="form-check-label" for="fmt_pdf">PDF</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".txt" id="fmt_txt" />
+                <label class="form-check-label" for="fmt_txt">TXT</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".tex" id="fmt_tex" />
+                <label class="form-check-label" for="fmt_tex">TeX</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input file-format-cb" type="checkbox" value=".ipynb" id="fmt_ipynb" />
+                <label class="form-check-label" for="fmt_ipynb">Jupyter (.ipynb)</label>
+              </div>
+            </div>
+            <div class="form-text">
+              {{ lx("Select one or more. PDF submissions use page rendering for the LLM. If your answer relies on diagrams, prefer PDF so images are preserved.", "可多选。勾选 PDF 时，系统会对 PDF 渲染页面供 LLM 评阅。若答案强依赖示意图，尽量提交 PDF 以保留图片信息。") }}
             </div>
           </div>
-          <div class="col-12 python-code-only">
-            <label class="form-label">{{ "输入格式" if current_locale == "zh" else "Input specification" }}</label>
-            <textarea class="form-control" name="input_spec" rows="3" required></textarea>
+          <div class="col-md-6 llm-graded-only d-none">
+            <label class="form-label">{{ lx("Teacher confirmation required", "教师确认后生效") }}</label>
+            <select class="form-select" name="require_teacher_confirmation">
+              <option value="false">{{ lx("No", "否") }}</option>
+              <option value="true">{{ lx("Yes", "是") }}</option>
+            </select>
           </div>
-          <div class="col-12 python-code-only">
-            <label class="form-label">{{ "输出格式" if current_locale == "zh" else "Output specification" }}</label>
-            <textarea class="form-control" name="output_spec" rows="3" required></textarea>
-          </div>
-          <div class="col-12 python-code-only">
-            <label class="form-label">{{ "允许库备注" if current_locale == "zh" else "Allowed libraries note" }}</label>
-            <textarea class="form-control" name="allowed_libraries_note" rows="3">{{ default_allowed_python_libraries }}</textarea>
-          </div>
-          <div class="col-md-4 python-code-only">
-            <label class="form-label">{{ "超时秒数" if current_locale == "zh" else "Timeout (seconds)" }}</label>
-            <input class="form-control" name="time_limit_seconds" value="300" />
-          </div>
-          <div class="col-md-4 python-code-only">
-            <label class="form-label">{{ "内存 MB" if current_locale == "zh" else "Memory MB" }}</label>
-            <input class="form-control" name="memory_limit_mb" value="1024" />
-          </div>
-          <div class="col-md-4 python-code-only">
-            <label class="form-label">{{ "CPU" if current_locale == "zh" else "CPU" }}</label>
-            <input class="form-control" name="cpu_limit" value="1" />
-          </div>
-          <div class="col-12 python-code-only">
-            <h3 class="h6 mb-2">{{ "5 个测试点（默认每个 20 分）" if current_locale == "zh" else "5 test cases (20 points each)" }}</h3>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "可见测试 1 输入" if current_locale == "zh" else "Visible test 1 input" }}</label>
-            <textarea class="form-control font-monospace" name="visible_test_1_input" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "可见测试 1 输出" if current_locale == "zh" else "Visible test 1 output" }}</label>
-            <textarea class="form-control font-monospace" name="visible_test_1_output" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "可见测试 2 输入" if current_locale == "zh" else "Visible test 2 input" }}</label>
-            <textarea class="form-control font-monospace" name="visible_test_2_input" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "可见测试 2 输出" if current_locale == "zh" else "Visible test 2 output" }}</label>
-            <textarea class="form-control font-monospace" name="visible_test_2_output" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "可见测试 3 输入" if current_locale == "zh" else "Visible test 3 input" }}</label>
-            <textarea class="form-control font-monospace" name="visible_test_3_input" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "可见测试 3 输出" if current_locale == "zh" else "Visible test 3 output" }}</label>
-            <textarea class="form-control font-monospace" name="visible_test_3_output" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "隐藏测试 1 输入" if current_locale == "zh" else "Hidden test 1 input" }}</label>
-            <textarea class="form-control font-monospace" name="hidden_test_1_input" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "隐藏测试 1 输出" if current_locale == "zh" else "Hidden test 1 output" }}</label>
-            <textarea class="form-control font-monospace" name="hidden_test_1_output" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "隐藏测试 2 输入" if current_locale == "zh" else "Hidden test 2 input" }}</label>
-            <textarea class="form-control font-monospace" name="hidden_test_2_input" rows="3" required></textarea>
-          </div>
-          <div class="col-md-6 python-code-only">
-            <label class="form-label">{{ "隐藏测试 2 输出" if current_locale == "zh" else "Hidden test 2 output" }}</label>
-            <textarea class="form-control font-monospace" name="hidden_test_2_output" rows="3" required></textarea>
-          </div>
+
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">{{ "创建题目" if current_locale == "zh" else "Create question" }}</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Create question", "创建题目") }}</button>
           </div>
         </form>
         {% else %}
         <div class="alert alert-secondary mb-0">
-          {{ "当前仅教师可以修改题目配置，TA 在 Phase 1 保持只读查看。 " if current_locale == "zh" else "Only teachers can change question configuration in Phase 1. TA access stays read-only here." }}
+          {{ lx(
+            "Only teachers can change question configuration in this phase. TA access stays read-only here.",
+            "当前阶段仅教师可以修改题目配置，TA 保持只读查看。"
+          ) }}
         </div>
         {% endif %}
       </div>
@@ -268,17 +349,17 @@
 
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">{{ "最近提交" if current_locale == "zh" else "Recent submissions" }}</h2>
+        <h2 class="h5 mb-3">{{ lx("Recent submissions", "最近提交") }}</h2>
         {% if submissions %}
         <div class="list-group list-group-flush">
           {% for submission in submissions %}
           <a class="list-group-item list-group-item-action" href="/teacher/submissions/{{ submission.id }}">
-            #{{ submission.id }} - {{ submission.user.username }} - {{ submission.status.value }}
+            #{{ submission.id }} - {{ submission.user.username }} - {{ elabel("submission_status", submission.status) }}
           </a>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">{{ "还没有提交。" if current_locale == "zh" else "No submissions yet." }}</p>
+        <p class="text-muted mb-0">{{ lx("No submissions yet.", "还没有提交。") }}</p>
         {% endif %}
       </div>
     </div>
@@ -289,28 +370,36 @@
     const typeSelect = document.querySelector('select[name="question_type"]');
     if (!typeSelect) return;
 
+    const combined = document.getElementById("combined_accepted_extensions");
+    const syncFormats = () => {
+      if (!combined) return;
+      const parts = Array.from(document.querySelectorAll(".file-format-cb:checked")).map((cb) => cb.value);
+      combined.value = parts.length ? parts.join(",") : "";
+    };
+
     const toggle = () => {
       const selected = typeSelect.value;
-      const isPython = selected === "python_code";
-      const isPdf = selected === "pdf_llm";
-      const isFormatted = selected === "formatted_text_llm";
-      const isLlm = isPdf || isFormatted;
+      const isCode = selected === "code";
+      const isNotebook = selected === "notebook";
+      const isLlm = selected === "file_llm";
 
-      document.querySelectorAll(".python-code-only").forEach((el) => {
-        el.classList.toggle("d-none", !isPython);
+      document.querySelectorAll(".code-only").forEach((el) => {
+        el.classList.toggle("d-none", !isCode);
+      });
+      document.querySelectorAll(".notebook-llm-only").forEach((el) => {
+        el.classList.toggle("d-none", !isNotebook);
       });
       document.querySelectorAll(".llm-graded-only").forEach((el) => {
-        el.classList.toggle("d-none", !isLlm);
-      });
-      document.querySelectorAll(".short-answer-only").forEach((el) => {
-        el.classList.toggle("d-none", !isLlm);
+        el.classList.toggle("d-none", !(isLlm || isNotebook));
       });
       document.querySelectorAll(".legacy-notebook-only").forEach((el) => {
         el.classList.add("d-none");
       });
+      if (isLlm) syncFormats();
     };
 
     typeSelect.addEventListener("change", toggle);
+    document.querySelectorAll(".file-format-cb").forEach((cb) => cb.addEventListener("change", syncFormats));
     toggle();
   })();
 </script>

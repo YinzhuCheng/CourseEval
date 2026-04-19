@@ -1,9 +1,14 @@
 import logging
+import multiprocessing
+import time
 
 from rq import Worker
+from sqlalchemy import select
 
 from app.config import get_settings
-from app.services.jobs import cleanup_stale_running_jobs, redis_connection
+from app.db import SessionLocal
+from app.models import LLMConfig
+from app.services.submissions import cleanup_stale_running_items, get_python_queue_name, llm_queue_name_for_config, redis_connection
 
 
 settings = get_settings()
@@ -14,14 +19,72 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    recovered_jobs = cleanup_stale_running_jobs()
-    if recovered_jobs:
-        logger.warning("Marked %s stale running jobs as failed during worker startup.", recovered_jobs)
-
+def _run_worker(queue_name: str) -> None:
     connection = redis_connection()
-    worker = Worker([settings.rq_queue_name], connection=connection)
+    worker = Worker([queue_name], connection=connection)
     worker.work(with_scheduler=False)
+
+
+def _desired_worker_layout() -> dict[str, int]:
+    layout: dict[str, int] = {get_python_queue_name(): 1}
+    with SessionLocal() as db:
+        configs = list(
+            db.scalars(
+                select(LLMConfig)
+                .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
+                .order_by(LLMConfig.id.asc())
+            ).all()
+        )
+        for config in configs:
+            layout[llm_queue_name_for_config(config)] = max(int(config.queue_concurrency or 1), 1)
+    return layout
+
+
+def _stop_process(process: multiprocessing.Process) -> None:
+    if not process.is_alive():
+        return
+    process.terminate()
+    process.join(timeout=5)
+
+
+def main() -> None:
+    recovered_items = cleanup_stale_running_items()
+    if recovered_items:
+        logger.warning(
+            "Marked %s stale submissions or evaluation tasks as failed during worker startup.",
+            recovered_items,
+        )
+
+    processes: dict[str, list[multiprocessing.Process]] = {}
+    try:
+        while True:
+            desired_layout = _desired_worker_layout()
+
+            for queue_name in list(processes):
+                live_processes = [process for process in processes[queue_name] if process.is_alive()]
+                processes[queue_name] = live_processes
+                desired_count = desired_layout.get(queue_name, 0)
+                while len(processes[queue_name]) > desired_count:
+                    process = processes[queue_name].pop()
+                    _stop_process(process)
+                if not processes[queue_name]:
+                    processes.pop(queue_name, None)
+
+            for queue_name, desired_count in desired_layout.items():
+                current_processes = processes.setdefault(queue_name, [])
+                while len(current_processes) < desired_count:
+                    process = multiprocessing.Process(target=_run_worker, args=(queue_name,), daemon=True)
+                    process.start()
+                    current_processes.append(process)
+                    logger.info("Started worker process pid=%s for queue %s", process.pid, queue_name)
+
+            time.sleep(10)
+    except KeyboardInterrupt:
+        logger.info("Stopping worker manager.")
+    finally:
+        for queue_processes in processes.values():
+            for process in queue_processes:
+                _stop_process(process)
 
 
 if __name__ == "__main__":

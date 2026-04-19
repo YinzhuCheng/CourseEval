@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Submission #{{ submission.id }} - {{ t("site.title") }}{% endblock %}
+{% block title %}{{ lx("Submission", "提交") }} #{{ submission.id }} - {{ t("site.title") }}{% endblock %}
 
 {% block extra_head %}
 {% if submission.status.value in ["queued", "running", "submitted"] %}
@@ -11,142 +11,134 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
-    <h1 class="h3 mb-1">Submission #{{ submission.id }}</h1>
+    <h1 class="h3 mb-1">{{ lx("Submission", "提交") }} #{{ submission.id }}</h1>
     <p class="text-muted mb-0">
       {{ submission.question.assignment.course.title }} / {{ submission.question.assignment.title }} / {{ submission.question.title }}
     </p>
   </div>
-  <a class="btn btn-outline-secondary" href="/student/questions/{{ submission.question_id }}">Back to question</a>
+  <a class="btn btn-outline-secondary" href="/student/questions/{{ submission.question_id }}">
+    {{ lx("Back to question", "返回题目") }}
+  </a>
 </div>
 
 <div class="row g-4">
   <div class="col-lg-4">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submission status</h2>
+        <h2 class="h5 mb-3">{{ lx("Submission status", "提交状态") }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-5">Status</dt>
-          <dd class="col-sm-7"><span class="badge status-badge status-{{ submission.status.value }}">{{ submission.status.value }}</span></dd>
+          <dt class="col-sm-5">{{ lx("Status", "状态") }}</dt>
+          <dd class="col-sm-7"><span class="badge status-badge status-{{ submission.status.value }}">{{ elabel("submission_status", submission.status) }}</span></dd>
 
-          <dt class="col-sm-5">Submitted</dt>
+          <dt class="col-sm-5">{{ lx("Submitted", "提交时间") }}</dt>
           <dd class="col-sm-7">{{ format_datetime(submission.submitted_at) }}</dd>
 
-          <dt class="col-sm-5">Started</dt>
+          <dt class="col-sm-5">{{ lx("Started", "开始时间") }}</dt>
           <dd class="col-sm-7">{{ format_datetime(submission.started_at) if submission.started_at else "-" }}</dd>
 
-          <dt class="col-sm-5">Completed</dt>
+          <dt class="col-sm-5">{{ lx("Completed", "完成时间") }}</dt>
           <dd class="col-sm-7">{{ format_datetime(submission.completed_at) if submission.completed_at else "-" }}</dd>
 
-          <dt class="col-sm-5">Late</dt>
-          <dd class="col-sm-7">{{ "Yes" if submission.is_late else "No" }}</dd>
+          <dt class="col-sm-5">{{ lx("Late", "是否迟交") }}</dt>
+          <dd class="col-sm-7">{{ lx("Yes", "是") if submission.is_late else lx("No", "否") }}</dd>
 
-          <dt class="col-sm-5">Counts limit</dt>
-          <dd class="col-sm-7">{{ "Yes" if submission.counts_toward_limit else "No" }}</dd>
+          <dt class="col-sm-5">{{ lx("Counts toward limit", "是否计入次数限制") }}</dt>
+          <dd class="col-sm-7">{{ lx("Yes", "是") if submission.counts_toward_limit else lx("No", "否") }}</dd>
 
-          <dt class="col-sm-5">Effective</dt>
-          <dd class="col-sm-7">{{ "Yes" if submission.is_effective_submission else "No" }}</dd>
+          <dt class="col-sm-5">{{ lx("Effective", "是否已生效") }}</dt>
+          <dd class="col-sm-7">{{ lx("Yes", "是") if submission.is_effective_submission else lx("No", "否") }}</dd>
         </dl>
         {% if pending_teacher_review %}
         <div class="alert alert-warning mt-3 mb-0">
-          This submission is saved, but it will not affect your final grade until a teacher confirms the score.
+          {{ lx(
+            "This submission has been saved, but it will not affect your final grade until a teacher confirms the score.",
+            "该提交已保存，但在教师确认成绩前不会影响你的最终成绩。"
+          ) }}
         </div>
         {% elif submission.status.value == "queued" %}
-        <div class="alert alert-info mt-3 mb-0">Automatic evaluation has been queued.</div>
+        <div class="alert alert-info mt-3 mb-0">{{ lx("Automatic evaluation has been queued.", "自动评测已进入排队。") }}</div>
         {% elif submission.status.value == "running" %}
-        <div class="alert alert-info mt-3 mb-0">Automatic evaluation is running.</div>
+        <div class="alert alert-info mt-3 mb-0">{{ lx("Automatic evaluation is running.", "自动评测正在运行。") }}</div>
         {% elif submission.status.value == "failed_system" %}
-        <div class="alert alert-danger mt-3 mb-0">The system could not complete this evaluation, so the attempt does not count against your limit.</div>
+        <div class="alert alert-danger mt-3 mb-0">{{ lx("The system could not complete this evaluation, so the attempt does not count against your limit.", "系统未能完成本次评测，因此这次尝试不会计入你的提交次数限制。") }}</div>
         {% elif submission.status.value == "failed_answer" %}
-        <div class="alert alert-warning mt-3 mb-0">Execution or tests failed for this submission, so the attempt counts as an answer attempt.</div>
+        <div class="alert alert-warning mt-3 mb-0">{{ lx("Execution or tests failed for this submission, so the attempt counts as an answer attempt.", "本次提交在执行或测试时失败，因此仍会计作一次有效尝试。") }}</div>
         {% endif %}
       </div>
     </div>
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Scores</h2>
+        <h2 class="h5 mb-3">{{ lx("Scores", "成绩信息") }}</h2>
         <dl class="row mb-0">
-          <dt class="col-sm-6">Current score</dt>
+          <dt class="col-sm-6">{{ lx("Current score", "当前得分") }}</dt>
           <dd class="col-sm-6">
             {% if result_view.score is not none %}
             {{ result_view.score }}
             {% else %}
-            {{ "Awaiting teacher review" if pending_teacher_review else "-" }}
+            {{ lx("Awaiting teacher review", "等待教师确认") if pending_teacher_review else "-" }}
             {% endif %}
           </dd>
-          <dt class="col-sm-6">Score source</dt>
-          <dd class="col-sm-6">{{ result_view.score_source.value if result_view.score_source else "-" }}</dd>
+          <dt class="col-sm-6">{{ lx("Score source", "分数来源") }}</dt>
+          <dd class="col-sm-6">{{ elabel("feedback_source", result_view.score_source) if result_view.score_source else "-" }}</dd>
           {% if result_view.run_success is not none %}
-          <dt class="col-sm-6">Run success</dt>
-          <dd class="col-sm-6">{{ "Yes" if result_view.run_success else "No" }}</dd>
+          <dt class="col-sm-6">{{ lx("Run success", "运行是否成功") }}</dt>
+          <dd class="col-sm-6">{{ lx("Yes", "是") if result_view.run_success else lx("No", "否") }}</dd>
           {% endif %}
           {% if result_view.visible_score is not none %}
-          <dt class="col-sm-6">Visible score</dt>
+          <dt class="col-sm-6">{{ lx("Visible score", "可见测试得分") }}</dt>
           <dd class="col-sm-6">{{ result_view.visible_score }}</dd>
           {% endif %}
           {% if result_view.auto_score is not none %}
-          <dt class="col-sm-6">Automatic score</dt>
+          <dt class="col-sm-6">{{ lx("Automatic score", "自动评分") }}</dt>
           <dd class="col-sm-6">{{ result_view.auto_score }}</dd>
           {% endif %}
         </dl>
         {% if result_view.message or result_view.visible_message or result_view.hidden_checks_applied %}
         <hr />
-        <h3 class="h6 mb-2">Evaluation summary</h3>
+        <h3 class="h6 mb-2">{{ lx("Evaluation summary", "评测摘要") }}</h3>
         <ul class="small text-muted mb-0">
           {% if result_view.message %}
           <li>{{ result_view.message }}</li>
           {% endif %}
           {% if result_view.visible_message %}
-          <li>Visible checks: {{ result_view.visible_message }}</li>
+          <li>{{ lx("Visible checks", "可见测试") }}: {{ result_view.visible_message }}</li>
           {% endif %}
           {% if result_view.hidden_checks_applied %}
-          <li>Additional hidden checks were run, but their detailed breakdown is only visible to course staff.</li>
+          <li>{{ lx("Additional hidden checks were run, but their detailed breakdown is only visible to course staff.", "系统还运行了隐藏测试，但详细结果仅对课程教师与助教可见。") }}</li>
           {% endif %}
         </ul>
         {% endif %}
       </div>
     </div>
 
-    {% if latest_result %}
-    <div class="card shadow-sm mt-4">
-      <div class="card-body">
-        <h2 class="h5 mb-3">Artifacts</h2>
-        <div class="d-grid gap-2">
-          <a class="btn btn-outline-primary" href="/student/submissions/{{ submission.id }}/artifacts/executed_notebook">Download executed notebook</a>
-          <a class="btn btn-outline-primary" href="/student/submissions/{{ submission.id }}/artifacts/html" target="_blank" rel="noreferrer">Open HTML</a>
-          <a class="btn btn-outline-secondary" href="/student/submissions/{{ submission.id }}/artifacts/stdout">Download stdout</a>
-          <a class="btn btn-outline-secondary" href="/student/submissions/{{ submission.id }}/artifacts/stderr">Download stderr</a>
-        </div>
-      </div>
-    </div>
-    {% endif %}
   </div>
 
   <div class="col-lg-8">
     {% if pending_teacher_review %}
     <div class="alert alert-warning">
-      Your submission is in the manual review queue. LLM suggestions may appear below, but the final grade only becomes effective after teacher confirmation.
+      {{ lx("Your submission is in the manual review queue. LLM suggestions may appear below, but the final grade only becomes effective after teacher confirmation.", "你的提交正在等待人工复核。下方可能会出现 LLM 评阅建议，但只有在教师确认后最终成绩才会生效。") }}
     </div>
     {% endif %}
 
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Feedback</h2>
+        <h2 class="h5 mb-3">{{ lx("Feedback", "反馈记录") }}</h2>
         {% if feedback_items %}
         <div class="list-group list-group-flush">
           {% for item in feedback_items %}
           <div class="list-group-item px-0">
             <div class="d-flex justify-content-between">
-              <strong>{{ item.source.value }}</strong>
+              <strong>{{ elabel("feedback_source", item.source) }}</strong>
               <span class="text-muted small">{{ format_datetime(item.created_at) }}</span>
             </div>
-            <div class="small text-muted mb-1">Score suggestion: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}</div>
+            <div class="small text-muted mb-1">{{ lx("Score suggestion", "建议分数") }}: {{ item.score_suggestion if item.score_suggestion is not none else "-" }}</div>
             <div>{{ item.comment_text or "-" }}</div>
           </div>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">No feedback available yet.</p>
+        <p class="text-muted mb-0">{{ lx("No feedback available yet.", "当前还没有反馈记录。") }}</p>
         {% endif %}
       </div>
     </div>
@@ -154,7 +146,7 @@
     {% if submission.answer_text %}
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submitted content</h2>
+        <h2 class="h5 mb-3">{{ lx("Submitted content", "提交内容") }}</h2>
         <pre class="artifact-block">{{ submission.answer_text }}</pre>
       </div>
     </div>
@@ -163,7 +155,7 @@
     {% if submission.original_filename %}
     <div class="card shadow-sm mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Submitted file</h2>
+        <h2 class="h5 mb-3">{{ lx("Submitted file", "已提交文件") }}</h2>
         <div class="small text-muted">{{ submission.original_filename }}</div>
       </div>
     </div>
@@ -173,14 +165,14 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">stdout</h2>
-        <pre class="artifact-block">{{ stdout_text or "No stdout captured yet." }}</pre>
+        <pre class="artifact-block">{{ stdout_text or lx("No stdout captured yet.", "当前还没有 stdout 输出。") }}</pre>
       </div>
     </div>
 
     <div class="card shadow-sm">
       <div class="card-body">
         <h2 class="h5 mb-3">stderr</h2>
-        <pre class="artifact-block">{{ stderr_text or "No stderr captured yet." }}</pre>
+        <pre class="artifact-block">{{ stderr_text or lx("No stderr captured yet.", "当前还没有 stderr 输出。") }}</pre>
       </div>
     </div>
     {% endif %}

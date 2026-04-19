@@ -13,6 +13,28 @@
 
 <div class="row g-4">
   <div class="col-lg-5">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <div class="section-eyebrow">{{ lx("Default teaching runtime", "默认教学运行环境") }}</div>
+        <h2 class="h5 mb-2">{{ lx("Supported Python version and packages", "支持的 Python 版本与预装包") }}</h2>
+        <p class="text-muted small mb-3">
+          {{ lx(
+            "Use the same matrix shown to students so course instructions, grading rules, and runtime image records stay aligned.",
+            "请与学生帮助页使用同一套运行环境说明，避免课程要求、评测规则与实际镜像不一致。"
+          ) }}
+        </p>
+        <div class="border rounded-3 p-3 bg-light-subtle">
+          <div class="fw-semibold mb-2">Python {{ default_python_version }}</div>
+          <ul class="small mb-2">
+            {% for package in default_python_packages %}
+            <li><code>{{ package.name }}=={{ package.version }}</code></li>
+            {% endfor %}
+          </ul>
+          <div class="small text-muted mb-0">{{ default_package_note }}</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card shadow-sm">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ t("admin.runtime.create") }}</h2>
@@ -27,7 +49,7 @@
           </div>
           <div class="col-md-6">
             <label class="form-label">{{ t("admin.runtime.python_version") }}</label>
-            <input class="form-control" name="python_version" value="python3.11" />
+            <input class="form-control" name="python_version" value="python{{ default_python_version }}" />
           </div>
           <div class="col-md-6">
             <label class="form-label">{{ t("admin.runtime.cpu_limit") }}</label>
@@ -43,7 +65,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">{{ t("admin.runtime.package_summary") }}</label>
-            <textarea class="form-control" name="package_summary" rows="4"></textarea>
+            <textarea class="form-control" name="package_summary" rows="7">{{ default_runtime_package_summary }}</textarea>
           </div>
           <div class="col-12">
             <label class="form-label">{{ t("admin.runtime.networking") }}</label>

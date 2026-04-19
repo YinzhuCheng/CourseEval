@@ -2,10 +2,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.auth import get_current_user, is_admin, is_super_admin, is_teacher_account, push_flash
+from app.auth import (
+    get_current_user,
+    is_admin,
+    is_super_admin,
+    is_teacher_account,
+    landing_path_for_user,
+    push_flash,
+)
 from app.constants import CourseRole, MembershipStatus
 from app.i18n import t
 from app.models import Course, CourseMember, User
+from app.services.courses import is_open_community_course
 
 
 class RedirectRequired(Exception):
@@ -25,7 +33,7 @@ def require_super_admin(request: Request, db: Session) -> User:
     user = require_user(request, db)
     if not is_super_admin(user):
         push_flash(request, t(request, "flash.super_admin_required"), "danger")
-        raise RedirectRequired("/dashboard")
+        raise RedirectRequired(landing_path_for_user(user))
     return user
 
 
@@ -56,6 +64,8 @@ def can_manage_course(db: Session, course: Course, user: User | None) -> bool:
         return False
     if is_platform_admin(user):
         return True
+    if is_open_community_course(course):
+        return False
     role = get_course_role(db, course.id, user.id)
     return role in COURSE_MANAGEMENT_ROLES
 
@@ -88,7 +98,7 @@ def require_admin(request: Request, db: Session) -> User:
     user = require_user(request, db)
     if not is_platform_admin(user):
         push_flash(request, t(request, "flash.admin_required"), "danger")
-        raise RedirectRequired("/dashboard")
+        raise RedirectRequired(landing_path_for_user(user))
     return user
 
 

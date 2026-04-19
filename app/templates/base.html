@@ -11,8 +11,8 @@
     <link href="{{ url_for('static', path='/style.css') }}" rel="stylesheet" />
     {% block extra_head %}{% endblock %}
   </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+  <body class="app-shell">
+    <nav class="navbar navbar-expand-lg app-navbar mb-4">
       <div class="container">
         <a class="navbar-brand" href="/">{{ t("site.title") }}</a>
         <div class="collapse navbar-collapse show">
@@ -22,7 +22,10 @@
               <a class="nav-link" href="/student/courses">{{ t("nav.my_courses") }}</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="/dashboard">{{ t("nav.runner_dashboard") }}</a>
+              <a class="nav-link" href="/student/help/python-runtime">{{ t("nav.python_runtime_help") }}</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/student/llm-usage">{{ t("student.llm_usage.title") }}</a>
             </li>
             {% if can_use_teacher_features %}
             <li class="nav-item">
@@ -42,16 +45,21 @@
               <a class="btn btn-outline-light {% if current_locale == 'zh' %}active{% endif %}" href="/locale/zh">{{ t("locale.switch_to_zh") }}</a>
             </div>
             {% if current_user %}
-            <span class="small">
-              {{ t("nav.signed_in_as", username=current_user.username) | safe }}
-              {% if current_user_role == "super_admin" %}
-              <span class="badge bg-danger ms-1">super_admin</span>
-              {% elif current_user_role == "admin" %}
-              <span class="badge bg-warning text-dark ms-1">admin</span>
-              {% elif current_user_role == "teacher" %}
-              <span class="badge bg-info text-dark ms-1">teacher</span>
+            <a class="nav-user-pill text-white text-decoration-none d-inline-flex align-items-center gap-2 px-2 py-1 rounded-pill" href="/me/profile" title="{{ t('nav.profile') }}">
+              {% if current_user_avatar_url %}
+              <img src="{{ current_user_avatar_url }}" alt="" class="rounded-circle object-fit-cover" width="28" height="28" />
+              {% else %}
+              <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center fw-semibold" style="width:28px;height:28px;font-size:0.75rem;">{{ current_user.username[0]|upper }}</span>
               {% endif %}
-            </span>
+              <span class="small text-white-50 d-none d-sm-inline">{{ current_user.username }}</span>
+              {% if current_user_role == "super_admin" %}
+              <span class="badge bg-danger">super</span>
+              {% elif current_user_role == "admin" %}
+              <span class="badge bg-warning text-dark">admin</span>
+              {% elif current_user_role == "teacher" %}
+              <span class="badge bg-info text-dark">teacher</span>
+              {% endif %}
+            </a>
             <form method="post" action="/logout" class="m-0">
               <button class="btn btn-sm btn-outline-light" type="submit">{{ t("nav.logout") }}</button>
             </form>

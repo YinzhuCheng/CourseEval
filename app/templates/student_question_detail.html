@@ -1,77 +1,119 @@
 {% extends "base.html" %}
 
-{% block title %}{{ question.title }} - Student{% endblock %}
+{% block title %}{{ question.title }} - {{ t("site.title") }}{% endblock %}
 
 {% block content %}
+{% set accepted = question.file_question_config.accepted_extensions if question.file_question_config and question.file_question_config.accepted_extensions else '.pdf' if question.question_type.value == 'pdf_llm' else '.txt,.tex,.ipynb' %}
+{% if question.question_type.value == 'file_llm' and question.file_question_config %}
+  {% set accepted = question.file_question_config.accepted_extensions %}
+{% endif %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
     <h1 class="h3 mb-1">{{ question.title }}</h1>
     <p class="text-muted mb-0">{{ question.assignment.course.code }} / {{ question.assignment.title }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="/student/assignments/{{ question.assignment.id }}">Back to assignment</a>
+  <a class="btn btn-outline-secondary" href="/student/assignments/{{ question.assignment.id }}">{{ lx("Back to assignment", "返回作业") }}</a>
 </div>
 
 <div class="row g-4">
   <div class="col-lg-7">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h2 class="h5">Question description</h2>
-        <p class="text-muted">{{ question.description or "No description provided." }}</p>
-        <ul class="small text-muted mb-0">
-          <li>Type: {{ question.question_type.value }}</li>
-          <li>Max score: {{ question.max_score }}</li>
-          <li>Scoring rule: {{ (question.scoring_rule_override or question.assignment.default_scoring_rule).value }}</li>
-        </ul>
+    <div class="card shadow-sm surface-card">
+      <div class="card-body p-4">
+        <h2 class="h5">{{ lx("Question overview", "题目说明") }}</h2>
+        <p class="text-muted">{{ question.description or lx("No description provided yet.", "题目暂未补充说明。") }}</p>
+        <div class="info-grid mt-3">
+          <div class="info-item">
+            <span class="info-label">{{ lx("Type", "题型") }}</span>
+            <span class="info-value">{{ elabel("question_type", question.question_type) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ lx("Max score", "满分") }}</span>
+            <span class="info-value">{{ question.max_score }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ lx("Scoring rule", "计分规则") }}</span>
+            <span class="info-value">{{ elabel("scoring_rule", question.scoring_rule_override or question.assignment.default_scoring_rule) }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="card shadow-sm mt-4">
-      <div class="card-body">
-        <h2 class="h5 mb-3">Submit answer</h2>
+    <div class="card shadow-sm surface-card mt-4">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-3">{{ lx("Submit your work", "提交作业") }}</h2>
+
         {% if question.question_type.value == "notebook" %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-notebook" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Notebook file</label>
-            <input class="form-control" type="file" name="notebook_file" accept=".ipynb" required />
-          </div>
-          {% if question.notebook_config %}
-          <div class="col-12">
-            <div class="small text-muted">
-              Time limit {{ question.notebook_config.time_limit_seconds }}s,
-              memory {{ question.notebook_config.memory_limit_mb }} MB,
-              CPU {{ question.notebook_config.cpu_limit }},
-              network {{ "enabled" if question.notebook_config.allow_network else "disabled" }}.
+            <div class="section-note">
+              {{ lx(
+                "Upload your .ipynb file. It will be converted to text for automated tests (if any) and LLM review. Diagram-heavy answers may lose image detail in text form—consider a PDF-based question if you rely on figures.",
+                "请上传 .ipynb 文件。系统会先转为文本用于自动测试（如有）和 LLM 评阅。若答案强依赖示意图，纯文本可能丢失图片信息，可考虑使用支持 PDF 的题目。",
+              ) }}
             </div>
           </div>
-          {% endif %}
+          <div class="col-12">
+            <label class="form-label">{{ lx("Notebook file", "Notebook 文件") }}</label>
+            <input class="form-control" type="file" name="notebook_file" accept=".ipynb,application/x-ipynb+json" required />
+          </div>
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Upload notebook submission</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Upload notebook", "上传 Notebook") }}</button>
           </div>
         </form>
-        {% elif question.question_type.value == "python_code" %}
-        <form method="post" action="/student/questions/{{ question.id }}/submit-python" enctype="multipart/form-data" class="row g-3">
+        {% elif question.question_type.value == "code" %}
+        <form method="post" action="/student/questions/{{ question.id }}/submit-code" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Python file</label>
-            <input class="form-control" type="file" name="code_file" accept=".py,text/x-python" required />
-          </div>
-          {% if question.python_code_config %}
-          <div class="col-12">
-            <div class="alert alert-info mb-0">
-              <div><strong>Input format:</strong> {{ question.python_code_config.input_spec }}</div>
-              <div class="mt-2"><strong>Output format:</strong> {{ question.python_code_config.output_spec }}</div>
-              <div class="mt-2"><strong>Allowed libraries:</strong> {{ question.python_code_config.allowed_libraries_note }}</div>
-              <div class="mt-2 small text-muted">This mode uses 5 tests worth 20 points each. Three sample tests are visible below; two hidden tests are staff-only.</div>
+            <div class="section-note">
+              {{ lx(
+                "This question runs Python, C, or C++ code in an isolated Docker runner. Single-file submissions and zip archives are supported.",
+                "该题会在 Docker 隔离环境中运行 Python、C 或 C++ 代码，支持单文件提交和 zip 多文件提交。"
+              ) }}
+              <a href="/student/help/python-runtime">{{ lx("View language rules and allowed libraries", "查看语言规则与允许使用的库") }}</a>.
             </div>
           </div>
           <div class="col-12">
-            <div class="border rounded p-3">
-              <div class="fw-semibold mb-2">Visible test cases</div>
-              {% for sample in question.python_code_config.visible_tests() %}
+            <label class="form-label">{{ lx("Language", "语言") }}</label>
+            <select class="form-select" name="code_language">
+              {% for language in question.code_config.allowed_languages() %}
+              <option value="{{ language.value }}">
+                {% if language.value == "cpp" %}C++{% elif language.value == "c" %}C{% else %}Python{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Code file or zip archive", "代码文件或 zip 压缩包") }}</label>
+            <input class="form-control" type="file" name="code_file" accept=".py,.c,.cpp,.cc,.cxx,.zip,text/x-python,text/x-c,text/x-c++" required />
+            <div class="form-text">
+              {{ lx(
+                "For zip submissions include main.py, main.c, or main.cpp as the entry file. The program must read stdin and write stdout.",
+                "zip 多文件提交必须包含入口文件 main.py、main.c 或 main.cpp。程序必须读取标准输入并写入标准输出。"
+              ) }}
+            </div>
+          </div>
+          {% if question.code_config %}
+          <div class="col-12">
+            <div class="alert alert-info mb-0">
+              <div><strong>{{ lx("Input format", "输入格式") }}:</strong> {{ question.code_config.input_spec }}</div>
+              <div class="mt-2"><strong>{{ lx("Output format", "输出格式") }}:</strong> {{ question.code_config.output_spec }}</div>
+              <div class="mt-2"><strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong> {{ question.code_config.allowed_libraries_note }}</div>
+              <div class="mt-2 small text-muted">
+                {{ lx(
+                  "This question uses 5 tests worth 20 points each. Three sample tests are visible below and two hidden tests are staff-only.",
+                  "该题共有 5 个测试点，每个 20 分。其中 3 个示例测试对学生可见，2 个隐藏测试仅课程教师可见。"
+                ) }}
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="border rounded-4 p-3 bg-light-subtle">
+              <div class="fw-semibold mb-2">{{ lx("Visible test cases", "可见测试样例") }}</div>
+              {% for sample in question.code_config.visible_tests() %}
               <div class="mb-3 {% if not loop.last %}border-bottom pb-3{% endif %}">
-                <div class="small text-muted">Visible test {{ loop.index }} · 20 points</div>
-                <div><strong>Input</strong></div>
+                <div class="small text-muted">{{ lx("Visible test", "可见测试") }} {{ loop.index }} · 20 {{ lx("points", "分") }}</div>
+                <div><strong>{{ lx("Input", "输入") }}</strong></div>
                 <pre class="artifact-block mb-2">{{ sample.input }}</pre>
-                <div><strong>Expected output</strong></div>
+                <div><strong>{{ lx("Expected output", "期望输出") }}</strong></div>
                 <pre class="artifact-block mb-0">{{ sample.expected_output }}</pre>
               </div>
               {% endfor %}
@@ -79,61 +121,100 @@
           </div>
           {% endif %}
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Upload Python solution</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Upload code solution", "上传代码解答") }}</button>
           </div>
         </form>
-        {% elif question.question_type.value in ["pdf_llm", "formatted_text_llm"] %}
+        {% elif question.question_type.value in ["pdf_llm", "formatted_text_llm", "file_llm"] %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-file" enctype="multipart/form-data" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Submission file</label>
-            {% set accepted = question.file_question_config.accepted_extensions if question.file_question_config and question.file_question_config.accepted_extensions else '.pdf' if question.question_type.value == 'pdf_llm' else '.txt,.tex,.ipynb' %}
+            <div class="section-note">
+              {% if question.question_type.value in ["formatted_text_llm", "file_llm"] %}
+              {{ lx(
+                "Use this route for open-ended files such as .txt, .tex, or .ipynb. ipynb files are reviewed through the file / LLM workflow instead of the retired notebook runner.",
+                "开放式文件题请走这里提交，例如 .txt、.tex 或 .ipynb。ipynb 会通过文件 / LLM 评测流程处理，不再走旧版 Notebook 执行链路。"
+              ) }}
+              {% else %}
+              {{ lx(
+                "Use this route for PDF-based answers that need rubric-based LLM review and teacher confirmation.",
+                "PDF 类作答请走这里提交，系统会先生成基于评分细则的 LLM 评阅建议，再由教师确认。"
+              ) }}
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">{{ lx("Submission file", "提交文件") }}</label>
             <input class="form-control" type="file" name="submission_file" accept="{{ accepted }}" required />
           </div>
           {% if question.file_question_config %}
           <div class="col-12">
             <div class="alert alert-warning mb-0">
-              {% if question.question_type.value == "pdf_llm" %}
-              Upload a text-based PDF. Scanned image PDFs are not supported in this Phase 1 workflow.
+              {% if question.question_type.value == "pdf_llm" or (question.question_type.value == "file_llm" and question.file_question_config and '.pdf' in question.file_question_config.accepted_extensions.lower()) %}
+              {{ lx(
+                "Please upload a text-based PDF. Scanned image PDFs are not supported in the current workflow.",
+                "请上传可提取文本的 PDF。当前流程暂不支持纯扫描图片型 PDF。"
+              ) }}
               {% else %}
-              Supported formats: {{ question.file_question_config.accepted_extensions }}.
+              {{ lx("Supported formats", "支持的格式") }}: {{ question.file_question_config.accepted_extensions }}.
               {% if question.file_question_config.notebook_outputs_required %}
-              Notebook submissions must already contain executed outputs before upload.
+              {{ lx(
+                "If you upload an ipynb file, it should already contain executed outputs.",
+                "如果上传的是 ipynb，请确保文件中已经包含执行输出。"
+              ) }}
               {% endif %}
               {% endif %}
             </div>
           </div>
+          {% if assignment_rubric_public(question.assignment) %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
-              <strong>Rubric:</strong> {{ question.file_question_config.rubric_text }}
+              <strong>{{ lx("Rubric", "评分细则") }}:</strong> {{ question.file_question_config.rubric_text }}
             </div>
           </div>
+          {% else %}
+          <div class="col-12">
+            <p class="small text-muted mb-0">
+              {{ lx("The grading rubric will be shown after the assignment deadline.", "评分细则将在作业截止时间到达后公开。") }}
+            </p>
+          </div>
+          {% endif %}
           {% endif %}
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Upload file submission</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Upload file submission", "上传文件提交") }}</button>
           </div>
         </form>
         {% else %}
         <form method="post" action="/student/questions/{{ question.id }}/submit-text" class="row g-3">
           <div class="col-12">
-            <label class="form-label">Answer</label>
+            <label class="form-label">{{ lx("Answer", "作答内容") }}</label>
             <textarea class="form-control" rows="8" name="answer_text" required></textarea>
           </div>
           {% if question.short_answer_config and question.short_answer_config.teacher_confirmation_required %}
           <div class="col-12">
             <div class="alert alert-warning mb-0">
-              Your submission will be saved immediately, but the score only becomes effective after a teacher confirms the final grade.
+              {{ lx(
+                "Your answer will be saved immediately, but the final score becomes effective only after teacher confirmation.",
+                "你的答案会先保存，但最终分数需要教师确认后才会正式生效。"
+              ) }}
             </div>
           </div>
           {% endif %}
           {% if question.short_answer_config and question.short_answer_config.rubric_text %}
+            {% if assignment_rubric_public(question.assignment) %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
-              <strong>Rubric:</strong> {{ question.short_answer_config.rubric_text }}
+              <strong>{{ lx("Rubric", "评分细则") }}:</strong> {{ question.short_answer_config.rubric_text }}
             </div>
           </div>
+            {% else %}
+          <div class="col-12">
+            <p class="small text-muted mb-0">
+              {{ lx("The grading rubric will be shown after the assignment deadline.", "评分细则将在作业截止时间到达后公开。") }}
+            </p>
+          </div>
+            {% endif %}
           {% endif %}
           <div class="col-12 d-grid">
-            <button class="btn btn-primary" type="submit">Submit answer</button>
+            <button class="btn btn-primary" type="submit">{{ lx("Submit answer", "提交答案") }}</button>
           </div>
         </form>
         {% endif %}
@@ -142,28 +223,52 @@
   </div>
 
   <div class="col-lg-5">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h2 class="h5 mb-3">Submission history</h2>
+    <div class="card shadow-sm surface-card">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-3">{{ lx("Submission history", "提交历史") }}</h2>
         {% if submissions %}
         <div class="list-group">
           {% for submission in submissions %}
           <a class="list-group-item list-group-item-action" href="/student/submissions/{{ submission.id }}">
             <div class="d-flex justify-content-between align-items-center">
               <strong>#{{ submission.id }}</strong>
-              <span class="badge status-badge status-{{ submission.status.value|replace('_', '-') }}">{{ submission.status.value }}</span>
+              <span class="badge status-badge status-{{ submission.status.value|replace('_', '-') }}">{{ elabel("submission_status", submission.status) }}</span>
             </div>
             <div class="small text-muted mt-1">
-              {{ submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S") }}
+              {{ format_datetime(submission.submitted_at) }}
             </div>
           </a>
           {% endfor %}
         </div>
         {% else %}
-        <p class="text-muted mb-0">No submissions yet.</p>
+        <p class="text-muted mb-0">{{ lx("No submissions yet.", "还没有提交记录。") }}</p>
         {% endif %}
       </div>
     </div>
   </div>
 </div>
+
+{% if reveal and reveal.open %}
+<div class="card shadow-sm surface-card mb-4">
+  <div class="card-body p-4">
+    <h2 class="h5 mb-3">{{ lx("After close: reference & rubric", "关闭后公布：参考答案与评分标准") }}</h2>
+    <p class="small text-muted mb-3">{{ lx("Shown after the assignment close time (or due time if no close is set).", "在作业关闭时间到达后展示（若未设置关闭时间，则在截止时间后展示）。") }}</p>
+    {% if reveal.reference_text %}
+    <h3 class="h6">{{ lx("Reference answer", "参考答案") }}</h3>
+    <pre class="artifact-block mb-3">{{ reveal.reference_text }}</pre>
+    {% endif %}
+    {% if reveal.rubric_text %}
+    <h3 class="h6">{{ lx("Rubric / grading criteria", "评分标准 / 细则") }}</h3>
+    <div class="border rounded-3 p-3 bg-light-subtle mb-3">{{ reveal.rubric_text }}</div>
+    {% endif %}
+    {% if reveal.sample %}
+    <h3 class="h6">{{ lx("Anonymous full-score sample", "匿名满分样例") }}</h3>
+    <p class="small text-muted">{{ lx("One randomly selected effective full-score submission (text excerpt).", "从生效满分提交中随机抽取一条，仅展示文本摘录且匿名。") }}</p>
+    <pre class="artifact-block">{{ reveal.sample.preview_text }}</pre>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% include "partials/discussion_board.html" %}
 {% endblock %}
