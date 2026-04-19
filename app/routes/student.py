@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.auth import push_flash
-from app.constants import CodeLanguage, CourseRole, QuestionType
+from app.constants import CodeLanguage, CourseRole, FeedbackSource, QuestionType
 from app.db import get_db
 from app.i18n import choose_text
 from app.runtime_support import (
@@ -47,6 +47,7 @@ from app.services.submissions import (
     list_submissions_for_question,
     read_student_safe_submission_artifact_text,
 )
+from app.services.upload_limits import read_upload_file_limited
 from app.services.user_storage import purge_submission_as_viewer
 from app.web import render_template
 
@@ -340,9 +341,9 @@ async def submit_code(
         )
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    file_bytes = await code_file.read()
     filename = code_file.filename or "solution.py"
     try:
+        file_bytes = await read_upload_file_limited(code_file)
         submission = create_code_submission(
             db,
             user_id=user.id,
@@ -363,10 +364,14 @@ async def submit_code(
         )
     except ValueError as exc:
         msg = str(exc)
-        if msg == "storage_quota_exceeded":
+        if msg in {"storage_quota_exceeded", "file_too_large"}:
             push_flash(
                 request,
-                choose_text(request, "Storage quota exceeded.", "存储空间已满，无法提交。"),
+                choose_text(
+                    request,
+                    "Upload is too large." if msg == "file_too_large" else "Storage quota exceeded.",
+                    "文件超过大小限制。" if msg == "file_too_large" else "存储空间已满，无法提交。",
+                ),
                 "danger",
             )
         else:
@@ -454,9 +459,9 @@ async def submit_file_question(
         )
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    file_bytes = await submission_file.read()
     filename = submission_file.filename or "submission.txt"
     try:
+        file_bytes = await read_upload_file_limited(submission_file)
         submission = create_file_submission(
             db,
             user_id=user.id,
@@ -475,10 +480,14 @@ async def submit_file_question(
         )
     except ValueError as exc:
         msg = str(exc)
-        if msg == "storage_quota_exceeded":
+        if msg in {"storage_quota_exceeded", "file_too_large"}:
             push_flash(
                 request,
-                choose_text(request, "Storage quota exceeded.", "存储空间已满，无法提交。"),
+                choose_text(
+                    request,
+                    "Upload is too large." if msg == "file_too_large" else "Storage quota exceeded.",
+                    "文件超过大小限制。" if msg == "file_too_large" else "存储空间已满，无法提交。",
+                ),
                 "danger",
             )
         else:
@@ -535,6 +544,8 @@ def student_submission_detail(submission_id: int, request: Request, db: Session 
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
     feedback = sorted(submission.feedback_items, key=lambda item: item.created_at)
     pending_teacher_review = is_submission_pending_teacher_review(submission)
+    if pending_teacher_review:
+        feedback = [item for item in feedback if item.source != FeedbackSource.LLM]
     return render_template(
         request,
         db,

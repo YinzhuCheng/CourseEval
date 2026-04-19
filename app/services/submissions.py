@@ -4,10 +4,11 @@ import shutil
 import subprocess
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import fitz
 from redis import Redis
@@ -20,6 +21,7 @@ from app.constants import (
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
+    AssignmentStatus,
     CodeLanguage,
     CodeSubmissionMode,
     MembershipStatus,
@@ -127,6 +129,50 @@ def _code_config(question: Question | None) -> CodeQuestionConfig | None:
     return question.code_config if question is not None else None
 
 
+def _submission_snapshot_payload(submission: Submission) -> dict:
+    version = submission.question_version
+    if version is None or not version.snapshot_json:
+        return {}
+    try:
+        payload = json.loads(version.snapshot_json)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _submission_snapshot_config(submission: Submission, key: str) -> dict:
+    cfg = _submission_snapshot_payload(submission).get(key)
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _tests_from_snapshot_json(raw: object, fallback: list[dict]) -> list[dict]:
+    if not isinstance(raw, str):
+        return fallback
+    try:
+        parsed = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return fallback
+    if not isinstance(parsed, list):
+        return fallback
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _bool_snapshot_value(value: object, fallback: bool) -> bool:
+    return value if isinstance(value, bool) else fallback
+
+
+def _int_snapshot_value(value: object, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _str_snapshot_value(value: object, fallback: str) -> str:
+    return value if isinstance(value, str) and value.strip() else fallback
+
+
 def _resolve_runtime_image_for_question(question: Question) -> RuntimeImage | None:
     return question.runtime_image or question.assignment.runtime_image or question.assignment.course.default_runtime_image
 
@@ -136,6 +182,37 @@ def _resolve_runner_image_tag(question: Question) -> tuple[str, RuntimeImage | N
     if runtime_image is not None and runtime_image.image_tag:
         return runtime_image.image_tag, runtime_image
     return settings.runner_image, None
+
+
+def _bounded_cpu_limit(question_cpu: str, runtime_cpu: str | None) -> str:
+    if not runtime_cpu:
+        return question_cpu
+    try:
+        question_value = Decimal(str(question_cpu))
+        runtime_value = Decimal(str(runtime_cpu))
+    except Exception:
+        return question_cpu
+    return str(min(question_value, runtime_value))
+
+
+def _runner_limits_for_code_config(
+    *,
+    timeout_seconds: int,
+    memory_limit_mb: int,
+    cpu_limit: str,
+    allow_network: bool,
+    runtime_image: RuntimeImage | None,
+) -> tuple[int, str, str, bool]:
+    timeout_seconds = int(timeout_seconds)
+    memory_limit_mb = int(memory_limit_mb)
+    cpus = str(cpu_limit)
+    network_disabled = not bool(allow_network)
+    if runtime_image is not None:
+        timeout_seconds = min(timeout_seconds, int(runtime_image.timeout_seconds))
+        memory_limit_mb = min(memory_limit_mb, int(runtime_image.memory_limit_mb))
+        cpus = _bounded_cpu_limit(cpus, runtime_image.cpu_limit)
+        network_disabled = network_disabled or not bool(runtime_image.network_enabled)
+    return timeout_seconds, f"{memory_limit_mb}m", cpus, network_disabled
 
 
 def _runner_script_path(script_name: str) -> Path:
@@ -542,6 +619,7 @@ def get_question_for_student(db: Session, question_id: int, user_id: int) -> Que
         .join(CourseMember, and_(CourseMember.course_id == Assignment.course_id, CourseMember.user_id == user_id))
         .where(
             Question.id == question_id,
+            Assignment.status == AssignmentStatus.PUBLISHED,
             CourseMember.status == MembershipStatus.ACTIVE,
         )
     )
@@ -572,6 +650,7 @@ def get_submission_for_student(db: Session, submission_id: int, user_id: int) ->
             joinedload(Submission.evaluation_tasks),
             joinedload(Submission.evaluation_results),
             joinedload(Submission.feedback_items),
+            joinedload(Submission.question_version),
         )
         .where(Submission.id == submission_id, Submission.user_id == user_id)
     )
@@ -590,6 +669,7 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
             joinedload(Submission.evaluation_tasks),
             joinedload(Submission.evaluation_results),
             joinedload(Submission.feedback_items),
+            joinedload(Submission.question_version),
         )
         .join(Assignment, Submission.assignment_id == Assignment.id)
         .join(Course, Course.id == Assignment.course_id)
@@ -656,6 +736,8 @@ def _is_late(question: Question) -> bool:
 def _submission_window_open(question: Question) -> tuple[bool, str | None]:
     now = _now()
     assignment = question.assignment
+    if assignment.status != AssignmentStatus.PUBLISHED:
+        return False, "Assignment is not published."
     open_at = _as_utc(assignment.open_at)
     due_at = _as_utc(assignment.due_at)
     close_at = _as_utc(assignment.close_at)
@@ -695,7 +777,12 @@ def _check_submission_limit(db: Session, question: Question, user_id: int) -> tu
 
     if mode == SubmissionLimitMode.DAILY:
         now = _now()
-        start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        try:
+            local_now = now.astimezone(ZoneInfo(settings.timezone_name))
+        except ZoneInfoNotFoundError:
+            local_now = now
+        local_start = datetime(local_now.year, local_now.month, local_now.day, tzinfo=local_now.tzinfo)
+        start_of_day = local_start.astimezone(timezone.utc)
         used = _count_attempts(db, user_id, question.id, start_of_day=start_of_day)
         if used >= limit:
             return False, f"You have already used the daily submission limit for this question ({limit})."
@@ -1008,14 +1095,18 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
     target_func = process_code_evaluation
     timeout_seconds = settings.execution_timeout_seconds + 60
 
-    rq_job = get_queue(get_code_queue_name()).enqueue(
-        target_func,
-        submission_id,
-        task.id,
-        job_timeout=timeout_seconds,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+    try:
+        rq_job = get_queue(get_code_queue_name()).enqueue(
+            target_func,
+            submission_id,
+            task.id,
+            job_timeout=timeout_seconds,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_system_failed(db, submission, task, f"Failed to enqueue code evaluation: {exc}")
+        raise
     submission.status = SubmissionStatus.QUEUED
     submission.queued_at = utcnow()
     task.backend_job_id = rq_job.id
@@ -1045,15 +1136,20 @@ def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
 
     llm_group = _resolve_llm_config_for_question(submission.question, db)
     if llm_group is None:
+        _mark_submission_system_failed(db, submission, task, "No enabled LLM group available.")
         raise ValueError("No enabled LLM group available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_group)).enqueue(
-        process_short_answer_llm_evaluation,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+    try:
+        rq_job = get_queue(llm_queue_name_for_config(llm_group)).enqueue(
+            process_short_answer_llm_evaluation,
+            submission_id,
+            task.id,
+            job_timeout=120,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_system_failed(db, submission, task, f"Failed to enqueue short-answer LLM evaluation: {exc}")
+        raise
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
@@ -1081,15 +1177,20 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
 
     llm_group = _resolve_llm_config_for_question(submission.question, db)
     if llm_group is None:
+        _mark_submission_system_failed(db, submission, task, "No enabled LLM group available.")
         raise ValueError("No enabled LLM group available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_group)).enqueue(
-        process_file_llm_evaluation,
-        submission_id,
-        task.id,
-        job_timeout=120,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
+    try:
+        rq_job = get_queue(llm_queue_name_for_config(llm_group)).enqueue(
+            process_file_llm_evaluation,
+            submission_id,
+            task.id,
+            job_timeout=120,
+            result_ttl=86400,
+            failure_ttl=86400,
+        )
+    except Exception as exc:
+        _mark_submission_system_failed(db, submission, task, f"Failed to enqueue file LLM evaluation: {exc}")
+        raise
     task.backend_job_id = rq_job.id
     task.status = EvaluationTaskStatus.QUEUED
     db.commit()
@@ -1103,6 +1204,16 @@ def cleanup_stale_running_items() -> int:
         )
         running_tasks = list(
             db.scalars(select(EvaluationTask).where(EvaluationTask.status == EvaluationTaskStatus.RUNNING)).all()
+        )
+        stale_cutoff = utcnow() - timedelta(minutes=10)
+        unqueued_tasks = list(
+            db.scalars(
+                select(EvaluationTask).where(
+                    EvaluationTask.status == EvaluationTaskStatus.QUEUED,
+                    EvaluationTask.backend_job_id.is_(None),
+                    EvaluationTask.created_at < stale_cutoff,
+                )
+            ).all()
         )
 
         finished_at = utcnow()
@@ -1118,8 +1229,19 @@ def cleanup_stale_running_items() -> int:
             task.finished_at = finished_at
             task.error_message = "Worker restarted before this evaluation task completed."
 
+        for task in unqueued_tasks:
+            task.status = EvaluationTaskStatus.FAILED
+            task.finished_at = finished_at
+            task.error_message = "Evaluation task was created but never enqueued."
+            if task.submission and task.submission.status in {SubmissionStatus.SUBMITTED, SubmissionStatus.QUEUED}:
+                task.submission.status = SubmissionStatus.FAILED_SYSTEM
+                task.submission.completed_at = finished_at
+                task.submission.counts_toward_limit = False
+                task.submission.is_effective_submission = False
+                task.submission.failure_reason_code = "system_error"
+
         db.commit()
-        return len(running_submissions)
+        return len(running_submissions) + len(unqueued_tasks)
 
 
 def process_code_evaluation(submission_id: int, task_id: int) -> None:
@@ -1132,6 +1254,7 @@ def process_code_evaluation(submission_id: int, task_id: int) -> None:
                 joinedload(Submission.assignment),
                 joinedload(Submission.evaluation_results),
                 joinedload(Submission.evaluation_tasks),
+                joinedload(Submission.question_version),
             )
             .where(Submission.id == submission_id)
         )
@@ -1169,18 +1292,32 @@ def process_code_evaluation(submission_id: int, task_id: int) -> None:
         ensure_writable_directory(output_dir)
         runtime_image_tag, runtime_image = _resolve_runner_image_tag(question)
         task.runtime_image_id = runtime_image.id if runtime_image is not None else None
+        snapshot_config = _submission_snapshot_config(submission, "code_config")
+        visible_tests = _tests_from_snapshot_json(snapshot_config.get("visible_tests_json"), config.visible_tests())
+        hidden_tests = _tests_from_snapshot_json(snapshot_config.get("hidden_tests_json"), config.hidden_tests())
+        time_limit_seconds = _int_snapshot_value(snapshot_config.get("time_limit_seconds"), config.time_limit_seconds)
+        memory_limit_mb = _int_snapshot_value(snapshot_config.get("memory_limit_mb"), config.memory_limit_mb)
+        cpu_limit = _str_snapshot_value(snapshot_config.get("cpu_limit"), config.cpu_limit)
+        allow_network = _bool_snapshot_value(snapshot_config.get("allow_network"), config.allow_network)
+        runner_timeout, runner_memory, runner_cpus, runner_network_disabled = _runner_limits_for_code_config(
+            timeout_seconds=time_limit_seconds,
+            memory_limit_mb=memory_limit_mb,
+            cpu_limit=cpu_limit,
+            allow_network=allow_network,
+            runtime_image=runtime_image,
+        )
         result = run_code_in_docker(
             input_relative_path=submission.stored_file_path,
             language=(submission.code_language or CodeLanguage.PYTHON).value,
             submission_mode=(submission.code_submission_mode or CodeSubmissionMode.SINGLE_FILE).value,
             output_dir_relative_path=relative_to_data(output_dir),
             runner_image=runtime_image_tag,
-            timeout_seconds=config.time_limit_seconds,
-            memory_limit=f"{config.memory_limit_mb}m",
-            cpus=config.cpu_limit,
-            network_disabled=True,
-            visible_tests_json=json.dumps(config.visible_tests(), ensure_ascii=True),
-            hidden_tests_json=json.dumps(config.hidden_tests(), ensure_ascii=True),
+            timeout_seconds=runner_timeout,
+            memory_limit=runner_memory,
+            cpus=runner_cpus,
+            network_disabled=runner_network_disabled,
+            visible_tests_json=json.dumps(visible_tests, ensure_ascii=True),
+            hidden_tests_json=json.dumps(hidden_tests, ensure_ascii=True),
         )
 
         evaluation_result = EvaluationResult(
@@ -1394,7 +1531,11 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
     try:
         submission = db.scalar(
             select(Submission)
-            .options(joinedload(Submission.question).joinedload(Question.short_answer_config), joinedload(Submission.assignment).joinedload(Assignment.course))
+            .options(
+                joinedload(Submission.question).joinedload(Question.short_answer_config),
+                joinedload(Submission.assignment).joinedload(Assignment.course),
+                joinedload(Submission.question_version),
+            )
             .where(Submission.id == submission_id)
         )
         task = db.get(EvaluationTask, task_id)
@@ -1414,6 +1555,11 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         db.commit()
 
         notices: list[str] = []
+        snapshot_config = _submission_snapshot_config(submission, "short_answer_config")
+        rubric_text = _str_snapshot_value(
+            snapshot_config.get("rubric_text"),
+            submission.question.short_answer_config.rubric_text if submission.question.short_answer_config else "",
+        )
         prev = _find_previous_submission_with_feedback(db, submission)
         prev_answer = _submission_text_for_llm_context(prev) if prev else ""
         prev_fb = _latest_feedback_comment(prev) if prev else ""
@@ -1428,9 +1574,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
                 llm_target,
                 question_title=submission.question.title,
                 question_description=submission.question.description or "",
-                rubric_text=submission.question.short_answer_config.rubric_text
-                if submission.question.short_answer_config
-                else "",
+                rubric_text=rubric_text,
                 reference_answer_text="",
                 answer_text=answer_text,
                 max_score=float(submission.question.max_score),
@@ -1462,7 +1606,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         )
         submission.status = SubmissionStatus.COMPLETED
         submission.completed_at = utcnow()
-        submission.is_effective_submission = True
+        submission.is_effective_submission = not submission_requires_teacher_confirmation(submission)
         submission.failure_reason_code = None
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
@@ -1486,6 +1630,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             .options(
                 joinedload(Submission.question).joinedload(Question.file_question_config),
                 joinedload(Submission.assignment).joinedload(Assignment.course),
+                joinedload(Submission.question_version),
             )
             .where(Submission.id == submission_id)
         )
@@ -1515,9 +1660,22 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         db.commit()
 
         notices: list[str] = []
+        snapshot_config = _submission_snapshot_config(submission, "file_question_config")
+        reference_answer_text = _str_snapshot_value(
+            snapshot_config.get("reference_answer_text"),
+            question_config.reference_answer_text,
+        )
+        reference_answer_file_path = snapshot_config.get("reference_answer_file_path")
+        if not isinstance(reference_answer_file_path, str):
+            reference_answer_file_path = question_config.reference_answer_file_path
+        rubric_text = _str_snapshot_value(snapshot_config.get("rubric_text"), question_config.rubric_text)
+        notebook_outputs_required = _bool_snapshot_value(
+            snapshot_config.get("notebook_outputs_required"),
+            question_config.notebook_outputs_required,
+        )
         ref_merged = _merged_reference_answer_text(
-            base_text=question_config.reference_answer_text,
-            file_relative_path=question_config.reference_answer_file_path,
+            base_text=reference_answer_text,
+            file_relative_path=reference_answer_file_path,
             notices=notices,
         )
         prev = _find_previous_submission_with_feedback(db, submission)
@@ -1544,7 +1702,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     llm_target,
                     question_title=submission.question.title,
                     question_description=submission.question.description or "",
-                    rubric_text=question_config.rubric_text,
+                    rubric_text=rubric_text,
                     reference_answer_text=ref_for_prompt,
                     max_score=float(submission.question.max_score),
                     images=_image_inputs_from_png_paths(page_paths),
@@ -1567,7 +1725,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             if ext == ".ipynb" and submission.stored_file_path:
                 nb_mm = sanitize_notebook_for_llm(
                     absolute_data_path(submission.stored_file_path),
-                    require_outputs=question_config.notebook_outputs_required,
+                    require_outputs=notebook_outputs_required,
                 )
                 notebook_images = nb_mm.images or None
                 notebook_instructions = notebook_placeholder_alignment_block(nb_mm.registry, len(nb_mm.images))
@@ -1577,7 +1735,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     llm_target,
                     question_title=submission.question.title,
                     question_description=submission.question.description or "",
-                    rubric_text=question_config.rubric_text,
+                    rubric_text=rubric_text,
                     reference_answer_text=ref_for_prompt,
                     answer_text=ans,
                     max_score=float(submission.question.max_score),
@@ -1610,7 +1768,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
         )
         submission.status = SubmissionStatus.COMPLETED
         submission.completed_at = utcnow()
-        submission.is_effective_submission = True
+        submission.is_effective_submission = not submission_requires_teacher_confirmation(submission)
         submission.failure_reason_code = None
         task.status = EvaluationTaskStatus.SUCCEEDED
         task.finished_at = utcnow()
@@ -1679,6 +1837,8 @@ def update_final_grade_snapshot(db: Session, submission: Submission) -> None:
         effective = None
         effective_score = Decimal("0")
         feedback_source = None
+        if snapshot is None:
+            return
     elif use_historical_highest:
         for item in submissions:
             current_score = score_for(item)

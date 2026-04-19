@@ -26,6 +26,7 @@ from app.models import Assignment, Course, CourseMember, Question, User
 from app.services.discussion_attachments import attach_discussion_images_to_post
 from app.services.discussions import assignment_past_close_for_discussion, create_post, flat_thread_for_template
 from app.services.image_uploads import normalize_uploaded_image
+from app.services.course_materials import create_material
 from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.redirects import safe_local_redirect
 
@@ -198,6 +199,27 @@ class DiscussionsAndMaterialsTests(unittest.TestCase):
         self.assertEqual(safe_local_redirect("https://evil.example/path", "/fallback"), "/fallback")
         self.assertEqual(safe_local_redirect("//evil.example/path", "/fallback"), "/fallback")
         self.assertEqual(safe_local_redirect("/student/questions/1?page=2", "/fallback"), "/student/questions/1?page=2")
+
+    def test_course_material_external_url_allows_only_http_urls(self) -> None:
+        with self.assertRaises(ValueError):
+            create_material(
+                self.db,
+                course=self.course,
+                title="Bad URL",
+                body_markdown="",
+                external_url="javascript:alert(1)",
+                creator=self.teacher,
+            )
+
+        material = create_material(
+            self.db,
+            course=self.course,
+            title="Good URL",
+            body_markdown="",
+            external_url="https://example.com/resource",
+            creator=self.teacher,
+        )
+        self.assertEqual(material.external_url, "https://example.com/resource")
 
     def test_uploaded_image_validation_rejects_fake_or_mismatched_images(self) -> None:
         with self.assertRaises(ValueError):

@@ -30,7 +30,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     same_site="lax",
-    https_only=False,
+    https_only=settings.session_https_only,
 )
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 app.include_router(auth_router)

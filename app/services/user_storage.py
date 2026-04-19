@@ -115,8 +115,22 @@ def record_stored_object(
 ) -> UserStoredObject:
     if size_bytes <= 0:
         raise ValueError("size_bytes must be positive")
-    if not can_add_bytes(db, user_id, size_bytes):
+    existing = db.scalar(select(UserStoredObject).where(UserStoredObject.relative_path == relative_path))
+    quota_delta = size_bytes
+    if existing is not None and existing.deleted_at is None and existing.user_id == user_id:
+        quota_delta = max(size_bytes - existing.size_bytes, 0)
+    if not can_add_bytes(db, user_id, quota_delta):
         raise QuotaExceededError("storage_quota_exceeded")
+    if existing is not None:
+        existing.user_id = user_id
+        existing.category = category
+        existing.ref_type = ref_type
+        existing.ref_id = ref_id
+        existing.size_bytes = size_bytes
+        existing.deleted_at = None
+        existing.deleted_by_actor = None
+        db.flush()
+        return existing
     row = UserStoredObject(
         user_id=user_id,
         category=category,
@@ -331,6 +345,12 @@ def describe_asset_for_profile(db: Session, obj: UserStoredObject, viewer_id: in
             label_en = f"Open discussion topic cover ({ft.title})"
             label_zh = f"自由讨论话题封面（{ft.title}）"
             link = f"/free-discussion/topics/{ft.id}/edit"
+    elif obj.category == "course_cover" and obj.ref_id:
+        course = db.get(Course, obj.ref_id)
+        if course:
+            label_en = f"Course cover ({course.title})"
+            label_zh = f"课程封面（{course.title}）"
+            link = f"/teacher/courses/{course.id}"
     elif obj.category == "discussion_attachment" and obj.ref_id:
         att = db.get(DiscussionPostAttachment, obj.ref_id)
         if att:
@@ -503,6 +523,25 @@ def resolve_purge_actor(db: Session, viewer: User, target_user_id: int, obj: Use
         return None
     if obj.category == "avatar":
         return None
+    if obj.category == "course_cover" and obj.ref_id:
+        course = db.get(Course, obj.ref_id)
+        if course is None:
+            return None
+        role = get_course_role(db, course.id, viewer.id)
+        if role == CourseRole.TEACHER:
+            return StorageDeletionActor.TEACHER
+        return None
+    if obj.category == "free_discussion_cover" and obj.ref_id:
+        ft = db.get(FreeDiscussionTopic, obj.ref_id)
+        if ft is None:
+            return None
+        course = db.get(Course, ft.course_id)
+        if course is None:
+            return None
+        role = get_course_role(db, course.id, viewer.id)
+        if role == CourseRole.TEACHER:
+            return StorageDeletionActor.TEACHER
+        return None
     if obj.category in ("submission", "submission_extra") and obj.ref_id:
         sub = db.get(Submission, obj.ref_id)
         if sub is None:
@@ -571,6 +610,26 @@ def purge_user_asset(
     if actor is None:
         return "forbidden"
     if obj.category == "course_material_image":
+        soft_delete_stored_row(db, obj, actor=actor, unlink=True)
+        db.flush()
+        return None
+    if obj.category == "course_cover" and obj.ref_id:
+        course = db.get(Course, obj.ref_id)
+        if course is None:
+            return "not_found"
+        if course.cover_image_path == obj.relative_path:
+            course.cover_image_path = None
+            course.updated_at = utcnow()
+        soft_delete_stored_row(db, obj, actor=actor, unlink=True)
+        db.flush()
+        return None
+    if obj.category == "free_discussion_cover" and obj.ref_id:
+        ft = db.get(FreeDiscussionTopic, obj.ref_id)
+        if ft is None:
+            return "not_found"
+        if ft.cover_image_path == obj.relative_path:
+            ft.cover_image_path = None
+            ft.updated_at = utcnow()
         soft_delete_stored_row(db, obj, actor=actor, unlink=True)
         db.flush()
         return None

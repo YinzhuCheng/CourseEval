@@ -24,7 +24,7 @@ from app.constants import (
 from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSnapshot, LLMConfig, Question, ShortAnswerQuestionConfig, Submission, User
 from app.auth import assign_user_role, has_super_admin, resolve_registration_roles
-from app.services.courses import bootstrap_sample_data
+from app.services.courses import bootstrap_sample_data, get_assignment_for_student, get_question_for_student
 from app.services.permissions import can_manage_course, can_staff_course, is_platform_admin
 from app.services.submissions import (
     _resolve_llm_config_for_question,
@@ -237,6 +237,59 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertEqual(Decimal(str(snapshot.score)), Decimal("17"))
         self.assertEqual(snapshot.feedback_source, FeedbackSource.TEACHER)
         self.assertEqual(snapshot.effective_submission_id, submission.id)
+
+    def test_student_cannot_access_draft_assignment_or_question(self) -> None:
+        self.assignment.status = AssignmentStatus.DRAFT
+        self.db.commit()
+
+        self.assertIsNone(get_assignment_for_student(self.db, self.assignment.id, self.student.id))
+        self.assertIsNone(get_question_for_student(self.db, self.question.id, self.student.id))
+
+        with self.assertRaises(ValueError):
+            create_short_answer_submission(
+                self.db,
+                user_id=self.student.id,
+                question=self.question,
+                answer_text="Draft assignment answer",
+            )
+
+    def test_pending_llm_score_does_not_create_effective_snapshot(self) -> None:
+        submission = create_short_answer_submission(
+            self.db,
+            user_id=self.student.id,
+            question=self.question,
+            answer_text="Answer that still needs teacher confirmation",
+        )
+        self.db.add(
+            Feedback(
+                submission_id=submission.id,
+                source=FeedbackSource.LLM,
+                score_suggestion=Decimal("18"),
+                comment_text="Suggested score only.",
+            )
+        )
+        self.db.commit()
+
+        loaded = self.db.scalar(
+            select(Submission)
+            .options(
+                joinedload(Submission.question).joinedload(Question.short_answer_config),
+                joinedload(Submission.question_version),
+                joinedload(Submission.feedback_items),
+                joinedload(Submission.evaluation_results),
+            )
+            .where(Submission.id == submission.id)
+        )
+        assert loaded is not None
+        update_final_grade_snapshot(self.db, loaded)
+
+        snapshot = self.db.scalar(
+            select(FinalGradeSnapshot).where(
+                FinalGradeSnapshot.student_id == self.student.id,
+                FinalGradeSnapshot.question_id == self.question.id,
+            )
+        )
+        self.assertIsNone(snapshot)
 
     def test_ta_is_staff_but_not_course_manager(self) -> None:
         self.assertTrue(can_staff_course(self.db, self.course, self.ta))

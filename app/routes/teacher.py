@@ -91,7 +91,9 @@ from app.services.submissions import (
     refresh_final_grade_snapshot,
     store_reference_answer_file,
 )
-from app.services.user_storage import purge_submission_as_viewer
+from app.services.upload_limits import read_upload_file_limited
+from app.services.storage_paths import absolute_data_path
+from app.services.user_storage import record_stored_object, purge_submission_as_viewer
 from app.services.teacher_analytics import (
     active_student_ids,
     compute_assignment_staff_stats,
@@ -263,11 +265,20 @@ async def upload_course_cover(
     if course is None:
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect("/teacher/courses")
-    raw = await file.read()
     from app.services.user_media import store_course_cover_image
 
     try:
+        raw = await read_upload_file_limited(file)
         course.cover_image_path = store_course_cover_image(course.id, raw, file.filename or "cover.png")
+        record_stored_object(
+            db,
+            user_id=user.id,
+            category="course_cover",
+            relative_path=course.cover_image_path,
+            size_bytes=absolute_data_path(course.cover_image_path).stat().st_size,
+            ref_type="course",
+            ref_id=course.id,
+        )
     except ValueError as exc:
         key = str(exc) if exc else ""
         if key in ("unsupported_image_type", "file_too_large"):
@@ -291,7 +302,13 @@ def remove_course_cover(course_id: int, request: Request, db: Session = Depends(
     if course is None:
         return _redirect("/teacher/courses")
     from app.services.user_media import clear_course_cover_files
+    from app.constants import StorageDeletionActor
+    from app.services.user_storage import find_active_object_by_path, soft_delete_stored_row
 
+    if course.cover_image_path:
+        row = find_active_object_by_path(db, course.cover_image_path)
+        if row:
+            soft_delete_stored_row(db, row, actor=StorageDeletionActor.TEACHER, unlink=False)
     clear_course_cover_files(course.id)
     course.cover_image_path = None
     course.updated_at = utcnow()
@@ -815,7 +832,7 @@ async def create_question(
     ref_file_rel: str | None = None
     if reference_answer_file and reference_answer_file.filename:
         try:
-            raw = await reference_answer_file.read()
+            raw = await read_upload_file_limited(reference_answer_file)
             ref_file_rel = store_reference_answer_file(
                 user_id=user.id,
                 question_id=question.id,
@@ -1458,7 +1475,12 @@ async def update_question(
         push_flash(request, choose_text(request, "Question settings are invalid.", "题目配置无效，请检查后重试。"), "danger")
         return _redirect(f"/teacher/questions/{question.id}")
 
-    question.title = title.strip()
+    cleaned_title = title.strip()
+    if not cleaned_title:
+        push_flash(request, choose_text(request, "Question title is required.", "题目标题不能为空。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+
+    question.title = cleaned_title
     question.description = description.strip() or None
     question.max_score = max_score_decimal
     question.scoring_rule_override = scoring_rule_value
@@ -1469,7 +1491,7 @@ async def update_question(
     uploaded_ref = False
     if reference_answer_file and reference_answer_file.filename:
         try:
-            raw = await reference_answer_file.read()
+            raw = await read_upload_file_limited(reference_answer_file)
             new_reference_file_path = store_reference_answer_file(
                 user_id=user.id,
                 question_id=question.id,
@@ -1516,6 +1538,39 @@ async def update_question(
             {"input": hidden_test_1_input.strip(), "expected_output": hidden_test_1_output.strip(), "points": 20},
             {"input": hidden_test_2_input.strip(), "expected_output": hidden_test_2_output.strip(), "points": 20},
         ]
+        if not input_spec.strip() or not output_spec.strip():
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Code questions must define both input and output specifications.",
+                    "代码题必须同时填写输入说明和输出说明。",
+                ),
+                "danger",
+            )
+            return _redirect(f"/teacher/questions/{question.id}")
+        if any(not sample["input"] or not sample["expected_output"] for sample in visible_samples + hidden_samples):
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Code questions require 5 complete test cases (3 visible, 2 hidden).",
+                    "代码题需要完整填写 5 个测试点（3 个可见测试，2 个隐藏测试）。",
+                ),
+                "danger",
+            )
+            return _redirect(f"/teacher/questions/{question.id}")
+        if max_score_decimal != Decimal("100"):
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Code questions currently use a fixed 100-point rubric (5 tests x 20 points).",
+                    "当前代码题固定按 100 分计分（5 个测试点，每个 20 分）。",
+                ),
+                "warning",
+            )
+            question.max_score = Decimal("100")
         cfg.input_spec = input_spec.strip()
         cfg.output_spec = output_spec.strip()
         cfg.visible_tests_json = json.dumps(visible_samples, ensure_ascii=True, indent=2)
@@ -1553,6 +1608,19 @@ async def update_question(
                 return _redirect(f"/teacher/questions/{question.id}")
             cfg.accepted_extensions = ",".join(normalized)
             cfg.notebook_outputs_required = ".ipynb" in set(normalized)
+        existing_ref_file = cfg.reference_answer_file_path if clear_reference_answer_file != "true" else None
+        next_ref_file = new_reference_file_path if uploaded_ref else existing_ref_file
+        if not rubric_text.strip() or (not reference_answer.strip() and not next_ref_file):
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Rubric is required, and you must provide a reference answer (text and/or upload).",
+                    "必须填写评分细则，并提供参考答案（文本和/或上传附件）。",
+                ),
+                "danger",
+            )
+            return _redirect(f"/teacher/questions/{question.id}")
         cfg.rubric_text = rubric_text.strip()
         cfg.reference_answer_text = reference_answer.strip()
         if clear_reference_answer_file == "true":
@@ -1704,7 +1772,7 @@ def grade_submission(
     except ValueError:
         push_flash(request, choose_text(request, "Score must be a valid number.", "分数必须是有效数字。"), "danger")
         return _redirect(f"/teacher/submissions/{submission.id}")
-    requires_teacher_score = submission.submission_type == QuestionType.SHORT_ANSWER
+    requires_teacher_score = submission.submission_type in {QuestionType.SHORT_ANSWER, QuestionType.FILE_LLM}
     if requires_teacher_score and score_value is None:
         push_flash(
             request,

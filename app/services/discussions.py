@@ -388,10 +388,16 @@ def unmute_user_in_course(db: Session, *, course_id: int, target_user_id: int, a
 
 
 def hard_delete_post(db: Session, post: DiscussionPost, *, actor: User, course_id: int) -> None:
+    from app.constants import StorageDeletionActor
     from app.services.discussion_attachments import delete_attachment_file
+    from app.services.user_storage import find_active_object_by_path, soft_delete_stored_row
 
     for att in list(post.attachments or []):
-        delete_attachment_file(att.relative_path)
+        row = find_active_object_by_path(db, att.relative_path)
+        if row is not None:
+            soft_delete_stored_row(db, row, actor=StorageDeletionActor.TEACHER, unlink=True)
+        else:
+            delete_attachment_file(att.relative_path)
         db.delete(att)
     _log_moderation(db, course_id=course_id, actor=actor, action="delete_post", post_id=post.id)
     db.delete(post)

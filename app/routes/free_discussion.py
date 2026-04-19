@@ -50,6 +50,7 @@ from app.services.markdown_sanitize import render_material_markdown
 from app.services.permissions import RedirectRequired, get_course_membership, require_user
 from app.services.redirects import safe_local_redirect
 from app.services.storage_paths import absolute_data_path
+from app.services.upload_limits import read_upload_file_limited
 from app.services.user_storage import QuotaExceededError, record_stored_object
 from app.web import render_template
 
@@ -71,6 +72,10 @@ def _require_oc_member(db: Session, user: User):
     if oc is None or get_course_membership(db, oc.id, user.id) is None:
         return None
     return oc
+
+
+def _free_chapter_belongs_to_topic(material, topic_id: int) -> bool:
+    return material is not None and (material.sort_order or 0) // 100000 == topic_id
 
 
 @router.get("/free-discussion")
@@ -227,8 +232,8 @@ async def free_topic_cover_upload(
     if not can_manage_free_topic(db, user, ft):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
-    raw = await file.read()
     try:
+        raw = await read_upload_file_limited(file)
         rel = store_free_topic_cover_image(oc.id, ft.id, raw, file.filename or "cover.png")
         sz = absolute_data_path(rel).stat().st_size
         record_stored_object(
@@ -518,8 +523,17 @@ def free_chapter_create(
         m = create_material(db, course=oc, title=title, body_markdown=body_markdown, external_url=external_url, creator=user)
         m.sort_order = ft.id * 100000 + m.id
         db.commit()
-    except ValueError:
-        push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
+    except ValueError as exc:
+        msg = str(exc)
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "External URL must start with http:// or https://." if msg == "invalid_external_url" else "Title is required.",
+                "外部链接必须以 http:// 或 https:// 开头。" if msg == "invalid_external_url" else "标题不能为空。",
+            ),
+            "danger",
+        )
         return _redirect(f"/free-discussion/topics/{topic_id}/chapters/new")
     push_flash(request, choose_text(request, "Chapter saved.", "章节已保存。"), "success")
     return _redirect(f"/free-discussion/topics/{topic_id}/chapters/{m.id}")
@@ -534,7 +548,7 @@ def free_chapter_edit(topic_id: int, material_id: int, request: Request, db: Ses
     ft = get_free_topic(db, topic_id)
     oc = get_open_community_course(db)
     m = get_material_for_course(db, material_id, oc.id if oc else -1)
-    if ft is None or oc is None or m is None or ft.course_id != oc.id:
+    if ft is None or oc is None or m is None or ft.course_id != oc.id or not _free_chapter_belongs_to_topic(m, topic_id):
         return _redirect("/free-discussion")
     if not can_manage_free_topic(db, user, ft):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
@@ -570,7 +584,7 @@ def free_chapter_update(
     ft = get_free_topic(db, topic_id)
     oc = get_open_community_course(db)
     m = get_material_for_course(db, material_id, oc.id if oc else -1)
-    if ft is None or oc is None or m is None or ft.course_id != oc.id:
+    if ft is None or oc is None or m is None or ft.course_id != oc.id or not _free_chapter_belongs_to_topic(m, topic_id):
         return _redirect("/free-discussion")
     if not can_manage_free_topic(db, user, ft):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
@@ -578,8 +592,17 @@ def free_chapter_update(
     try:
         update_material(db, m, title=title, body_markdown=body_markdown, external_url=external_url)
         db.commit()
-    except ValueError:
-        push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
+    except ValueError as exc:
+        msg = str(exc)
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "External URL must start with http:// or https://." if msg == "invalid_external_url" else "Title is required.",
+                "外部链接必须以 http:// 或 https:// 开头。" if msg == "invalid_external_url" else "标题不能为空。",
+            ),
+            "danger",
+        )
         return _redirect(f"/free-discussion/topics/{topic_id}/chapters/{material_id}/edit")
     push_flash(request, choose_text(request, "Chapter updated.", "章节已更新。"), "success")
     return _redirect(f"/free-discussion/topics/{topic_id}/chapters/{material_id}")
@@ -600,12 +623,12 @@ async def free_chapter_upload_image(
     ft = get_free_topic(db, topic_id)
     oc = get_open_community_course(db)
     m = get_material_for_course(db, material_id, oc.id if oc else -1)
-    if ft is None or oc is None or m is None or ft.course_id != oc.id:
+    if ft is None or oc is None or m is None or ft.course_id != oc.id or not _free_chapter_belongs_to_topic(m, topic_id):
         return _redirect("/free-discussion")
     if not can_manage_free_topic(db, user, ft):
         return _redirect(f"/free-discussion/topics/{topic_id}")
-    raw = await file.read()
     try:
+        raw = await read_upload_file_limited(file)
         rel = store_material_image(oc.id, material_id, raw, file.filename or "image.png")
         sz = absolute_data_path(rel).stat().st_size
         record_stored_object(
@@ -797,7 +820,7 @@ def free_topic_mute_user(
     oc = get_open_community_course(db)
     if ft is None or oc is None or ft.course_id != oc.id:
         return _redirect("/free-discussion")
-    if not can_manage_free_topic(db, user, ft):
+    if not can_moderate_discussion(db, oc.id, user):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
     target = db.get(User, user_id)
@@ -834,7 +857,7 @@ def free_topic_unmute_user(
     oc = get_open_community_course(db)
     if ft is None or oc is None or ft.course_id != oc.id:
         return _redirect("/free-discussion")
-    if not can_manage_free_topic(db, user, ft):
+    if not can_moderate_discussion(db, oc.id, user):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
     unmute_user_in_course(db, course_id=oc.id, target_user_id=user_id, actor=user)

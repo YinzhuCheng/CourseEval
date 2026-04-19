@@ -72,6 +72,12 @@ def main() -> None:
                 while len(processes[queue_name]) > desired_count:
                     process = processes[queue_name].pop()
                     _stop_process(process)
+                    recovered = cleanup_stale_running_items()
+                    if recovered:
+                        logger.warning(
+                            "Marked %s stale submissions or evaluation tasks as failed after stopping a worker.",
+                            recovered,
+                        )
                 if not processes[queue_name]:
                     processes.pop(queue_name, None)
 

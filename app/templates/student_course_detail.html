@@ -43,7 +43,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for assignment in course.assignments %}
+            {% for assignment in course.assignments if assignment.status.value == "published" %}
           <tr>
             <td>
               <div class="fw-semibold">{{ assignment.title }}</div>

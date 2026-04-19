@@ -29,6 +29,7 @@ from app.services.discussions import (
 )
 from app.services.permissions import RedirectRequired, get_course_role, require_teacher_account, require_user
 from app.services.redirects import safe_local_redirect
+from app.services.upload_limits import read_upload_file_limited
 from app.web import render_template
 
 router = APIRouter(tags=["course_content"])
@@ -79,8 +80,17 @@ def teacher_create_material(
     try:
         create_material(db, course=course, title=title, body_markdown=body_markdown, external_url=external_url, creator=user)
         db.commit()
-    except ValueError:
-        push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
+    except ValueError as exc:
+        msg = str(exc)
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "External URL must start with http:// or https://." if msg == "invalid_external_url" else "Title is required.",
+                "外部链接必须以 http:// 或 https:// 开头。" if msg == "invalid_external_url" else "标题不能为空。",
+            ),
+            "danger",
+        )
         return _redirect(f"/teacher/courses/{course_id}/materials/new")
     push_flash(request, choose_text(request, "Discussion item was saved.", "讨论已保存。"), "success")
     return _redirect(f"/teacher/courses/{course_id}")
@@ -126,8 +136,17 @@ def teacher_update_material(
     try:
         update_material(db, material, title=title, body_markdown=body_markdown, external_url=external_url)
         db.commit()
-    except ValueError:
-        push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
+    except ValueError as exc:
+        msg = str(exc)
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "External URL must start with http:// or https://." if msg == "invalid_external_url" else "Title is required.",
+                "外部链接必须以 http:// 或 https:// 开头。" if msg == "invalid_external_url" else "标题不能为空。",
+            ),
+            "danger",
+        )
         return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}/edit")
     push_flash(request, choose_text(request, "Discussion item was updated.", "讨论已更新。"), "success")
     return _redirect(f"/teacher/courses/{course_id}")
@@ -151,8 +170,8 @@ async def teacher_upload_material_image(
     material = get_material_for_course(db, material_id, course_id)
     if material is None:
         return _redirect(f"/teacher/courses/{course_id}")
-    raw = await file.read()
     try:
+        raw = await read_upload_file_limited(file)
         rel = store_material_image(course_id, material_id, raw, file.filename or "image.png")
         from app.services.storage_paths import absolute_data_path
         from app.services.user_storage import QuotaExceededError, record_stored_object

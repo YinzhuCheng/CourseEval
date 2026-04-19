@@ -27,7 +27,7 @@
     </dl>
     {% if assignment.description %}
     <hr />
-    <div class="markdown-like">{{ assignment.description | replace('\n', '<br />') | safe }}</div>
+    <div class="markdown-like">{{ assignment.description | replace('\n', '<br />') }}</div>
     {% endif %}
   </div>
 </div>

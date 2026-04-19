@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -15,6 +16,16 @@ from app.services.image_uploads import normalize_uploaded_image
 from app.services.storage_paths import relative_to_data
 
 settings = get_settings()
+
+
+def normalize_external_url(external_url: str | None) -> str | None:
+    url = (external_url or "").strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("invalid_external_url")
+    return url
 
 
 def list_materials_for_course(db: Session, course_id: int) -> list[CourseMaterial]:
@@ -51,7 +62,7 @@ def create_material(
         course_id=course.id,
         title=title,
         body_markdown=(body_markdown or "").strip() or None,
-        external_url=(external_url or "").strip() or None,
+        external_url=normalize_external_url(external_url),
         sort_order=0,
         created_by=creator.id,
         updated_at=utcnow(),
@@ -74,7 +85,7 @@ def update_material(
     if not material.title:
         raise ValueError("title_required")
     material.body_markdown = (body_markdown or "").strip() or None
-    material.external_url = (external_url or "").strip() or None
+    material.external_url = normalize_external_url(external_url)
     material.updated_at = utcnow()
     return material
 

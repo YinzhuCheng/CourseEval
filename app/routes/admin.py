@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, Form, Query
@@ -66,6 +67,35 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 def _redirect(location: str) -> RedirectResponse:
     return RedirectResponse(url=location, status_code=303)
+
+
+def _valid_cpu_limit(raw: str) -> str:
+    text = (raw or "").strip() or "1"
+    try:
+        value = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError("invalid_cpu") from exc
+    if value <= 0 or value > Decimal("8"):
+        raise ValueError("invalid_cpu")
+    return text
+
+
+def _valid_temperature(raw: str) -> str:
+    text = (raw or "").strip() or "0.2"
+    try:
+        value = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError("invalid_temperature") from exc
+    if value < 0 or value > Decimal("2"):
+        raise ValueError("invalid_temperature")
+    return text
+
+
+def _valid_provider(raw: str) -> LLMProvider:
+    try:
+        return LLMProvider(raw)
+    except ValueError as exc:
+        raise ValueError("invalid_provider") from exc
 
 
 @router.get("")
@@ -380,6 +410,17 @@ def admin_create_runtime_image(
     except PermissionError:
         return _redirect("/login")
 
+    if not name.strip() or not image_tag.strip():
+        push_flash(request, choose_text(request, "Name and image tag are required.", "名称和镜像标签不能为空。"), "danger")
+        return _redirect("/admin/runtime-images")
+    try:
+        timeout_seconds = max(1, min(int(timeout_seconds), 3600))
+        memory_limit_mb = max(128, min(int(memory_limit_mb), 32768))
+        cpu_limit = _valid_cpu_limit(cpu_limit)
+    except ValueError:
+        push_flash(request, choose_text(request, "Runtime resource limits are invalid.", "运行资源限制无效。"), "danger")
+        return _redirect("/admin/runtime-images")
+
     image = RuntimeImage(
         scope=RuntimeScope.PLATFORM,
         name=name.strip(),
@@ -389,7 +430,7 @@ def admin_create_runtime_image(
         network_enabled=network_enabled == "true",
         timeout_seconds=timeout_seconds,
         memory_limit_mb=memory_limit_mb,
-        cpu_limit=cpu_limit.strip() or "1",
+        cpu_limit=cpu_limit,
         created_by=admin_user.id,
     )
     db.add(image)
@@ -588,20 +629,35 @@ def admin_create_llm_config(
     except PermissionError:
         return _redirect("/login")
 
+    try:
+        provider = _valid_provider(provider_type)
+        timeout_seconds = max(1, min(int(timeout_seconds), 300))
+        max_tokens = max(1, min(int(max_tokens), 200000))
+        queue_concurrency = max(1, min(int(queue_concurrency), 32))
+        max_llm_retries = max(1, min(int(max_llm_retries), 10))
+        llm_retry_initial_seconds = max(1, min(int(llm_retry_initial_seconds), 3600))
+        temperature = _valid_temperature(temperature)
+    except ValueError:
+        push_flash(request, choose_text(request, "LLM configuration values are invalid.", "LLM 配置参数无效。"), "danger")
+        return _redirect("/admin/llm-configs")
+    if not name.strip() or not model_name.strip():
+        push_flash(request, choose_text(request, "Name and model name are required.", "名称和模型名不能为空。"), "danger")
+        return _redirect("/admin/llm-configs")
+
     config = LLMConfig(
         scope=LLMScope.PLATFORM,
         name=name.strip(),
         description=description.strip() or None,
-        provider_type=LLMProvider(provider_type),
+        provider_type=provider,
         base_url=base_url.strip() or None,
         api_key=api_key.strip() or None,
         model_name=model_name.strip(),
         timeout_seconds=timeout_seconds,
         max_tokens=max_tokens,
-        temperature=temperature.strip(),
-        queue_concurrency=max(queue_concurrency, 1),
-        max_llm_retries=max(1, max_llm_retries),
-        llm_retry_initial_seconds=max(1, llm_retry_initial_seconds),
+        temperature=temperature,
+        queue_concurrency=queue_concurrency,
+        max_llm_retries=max_llm_retries,
+        llm_retry_initial_seconds=llm_retry_initial_seconds,
         created_by=admin_user.id,
     )
     db.add(config)
@@ -638,18 +694,33 @@ def admin_create_llm_config_member(
         push_flash(request, t(request, "flash.llm_config_not_found"), "danger")
         return _redirect("/admin/llm-configs")
 
+    try:
+        provider = _valid_provider(provider_type)
+        timeout_seconds = max(1, min(int(timeout_seconds), 300))
+        max_tokens = max(1, min(int(max_tokens), 200000))
+        priority_order = max(2, min(int(priority_order), 1000))
+        max_llm_retries = max(1, min(int(max_llm_retries), 10))
+        llm_retry_initial_seconds = max(1, min(int(llm_retry_initial_seconds), 3600))
+        temperature = _valid_temperature(temperature)
+    except ValueError:
+        push_flash(request, choose_text(request, "LLM member values are invalid.", "LLM 组成员参数无效。"), "danger")
+        return _redirect("/admin/llm-configs")
+    if not model_name.strip():
+        push_flash(request, choose_text(request, "Model name is required.", "模型名不能为空。"), "danger")
+        return _redirect("/admin/llm-configs")
+
     member = LLMConfigMember(
         group_id=group.id,
-        priority_order=max(2, int(priority_order)),
-        provider_type=LLMProvider(provider_type),
+        priority_order=priority_order,
+        provider_type=provider,
         base_url=base_url.strip() or None,
         api_key=api_key.strip() or None,
         model_name=model_name.strip(),
         timeout_seconds=timeout_seconds,
         max_tokens=max_tokens,
-        temperature=temperature.strip(),
-        max_llm_retries=max(1, max_llm_retries),
-        llm_retry_initial_seconds=max(1, llm_retry_initial_seconds),
+        temperature=temperature,
+        max_llm_retries=max_llm_retries,
+        llm_retry_initial_seconds=llm_retry_initial_seconds,
         created_by=admin_user.id,
     )
     db.add(member)
