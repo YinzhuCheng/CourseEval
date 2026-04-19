@@ -9,7 +9,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.constants import DiscussionTopicKind
-from app.models import Course, CourseMaterial, DiscussionPost, DiscussionTopic, LLMConfig, PlatformLlmTokenPolicy, Question, User
+from app.models import (
+    Course,
+    CourseMaterial,
+    DiscussionPost,
+    DiscussionTopic,
+    FreeDiscussionTopic,
+    LLMConfig,
+    PlatformLlmTokenPolicy,
+    Question,
+    User,
+)
 from app.services.discussions import create_post
 from app.services.llm import generate_text
 from app.services.llm_groups import (
@@ -76,6 +86,14 @@ def resolve_discussion_ai_llm_config(db: Session, topic: DiscussionTopic) -> LLM
         if c:
             return c
     elif topic.kind == DiscussionTopicKind.COURSE_MATERIAL:
+        if course and course.discussion_ai_material_llm_config_id:
+            c = _first_discussion_config(db, course.discussion_ai_material_llm_config_id)
+            if c:
+                return c
+        c = _first_discussion_config(db, policy.discussion_ai_material_llm_config_id)
+        if c:
+            return c
+    elif topic.kind == DiscussionTopicKind.FREE_DISCUSSION_TOPIC:
         if course and course.discussion_ai_material_llm_config_id:
             c = _first_discussion_config(db, course.discussion_ai_material_llm_config_id)
             if c:
@@ -167,12 +185,24 @@ def _material_context_text(db: Session, material_id: int) -> str:
     return "\n".join(parts)
 
 
+def _free_topic_context_text(db: Session, free_topic_id: int) -> str:
+    ft = db.get(FreeDiscussionTopic, free_topic_id)
+    if ft is None:
+        return ""
+    desc = (ft.description or "").strip()
+    if len(desc) > 12000:
+        desc = desc[:12000] + "\n...[truncated]"
+    return f"Open discussion topic title: {ft.title}\nTopic description:\n{desc}"
+
+
 def build_discussion_ai_prompts(db: Session, topic: DiscussionTopic, user_message: str) -> tuple[str, str]:
     ctx = ""
     if topic.kind == DiscussionTopicKind.QUESTION and topic.question_id:
         ctx = _question_context_text(db, topic.question_id)
     elif topic.kind == DiscussionTopicKind.COURSE_MATERIAL and topic.course_material_id:
         ctx = _material_context_text(db, topic.course_material_id)
+    elif topic.kind == DiscussionTopicKind.FREE_DISCUSSION_TOPIC and topic.free_discussion_topic_id:
+        ctx = _free_topic_context_text(db, topic.free_discussion_topic_id)
 
     system = (
         "You are a helpful teaching assistant in a course discussion. "

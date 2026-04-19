@@ -94,6 +94,7 @@ def list_courses_for_student(db: Session, user_id: int) -> list[Course]:
         .where(
             CourseMember.user_id == user_id,
             CourseMember.status == MembershipStatus.ACTIVE,
+            Course.is_hidden_from_course_lists.is_(False),
         )
         .order_by(
             case((Course.is_open_community.is_(True), 0), else_=1).asc(),
@@ -115,6 +116,7 @@ def get_course_for_student(db: Session, course_id: int, user_id: int) -> Course 
             Course.id == course_id,
             CourseMember.user_id == user_id,
             CourseMember.status == MembershipStatus.ACTIVE,
+            Course.is_hidden_from_course_lists.is_(False),
         )
     )
     return db.scalar(statement)
@@ -204,7 +206,11 @@ def list_courses_for_user(db: Session, user: User) -> list[Course]:
         statement = (
             select(Course)
             .join(CourseMember, CourseMember.course_id == Course.id)
-            .where(CourseMember.user_id == user.id, CourseMember.status == MembershipStatus.ACTIVE)
+            .where(
+                CourseMember.user_id == user.id,
+                CourseMember.status == MembershipStatus.ACTIVE,
+                Course.is_hidden_from_course_lists.is_(False),
+            )
             .order_by(
                 case((Course.is_open_community.is_(True), 0), else_=1).asc(),
                 Course.title.asc(),

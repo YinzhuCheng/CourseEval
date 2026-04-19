@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-3 mb-3">
+    <div class="list-group shadow-sm">
+      <a
+        href="/me/profile"
+        class="list-group-item list-group-item-action {% if profile_section == 'overview' %}active{% endif %}"
+      >{{ t("profile.nav.overview") }}</a>
+      <a
+        href="/me/profile/llm-usage"
+        class="list-group-item list-group-item-action {% if profile_section == 'llm' %}active{% endif %}"
+      >{{ t("student.llm_usage.title") }}</a>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    {% block profile_body %}{% endblock %}
+  </div>
+</div>
+{% endblock %}

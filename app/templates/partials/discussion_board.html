@@ -78,6 +78,7 @@
               {% if b == 'course_teacher' %}<span class="badge bg-primary" style="font-size:0.65rem;">{{ lx("Teacher", "教师") }}</span>{% endif %}
               {% if b == 'course_ta' %}<span class="badge bg-secondary" style="font-size:0.65rem;">TA</span>{% endif %}
               {% if b == 'account_teacher' %}<span class="badge bg-info text-dark" style="font-size:0.65rem;">{{ lx("Teacher", "教师") }}</span>{% endif %}
+              {% if b == 'free_topic_owner' %}<span class="badge bg-primary" style="font-size:0.65rem;">{{ lx("Topic owner", "话题主") }}</span>{% endif %}
             {% endfor %}
           </div>
           {% if node.staff_hint and (node.staff_hint == 'admin' or node.staff_hint == 'staff_student_anon' or node.staff_hint == 'self_anon') %}

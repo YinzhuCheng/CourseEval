@@ -8,7 +8,7 @@
     <h1 class="h3 mb-1">{{ material.title }}</h1>
     <p class="text-muted mb-0">{{ course.code }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="{% if is_teacher_view %}/teacher/courses/{{ course.id }}{% else %}/student/courses/{{ course.id }}{% endif %}">{{ lx("Back to course", "返回课程") }}</a>
+  <a class="btn btn-outline-secondary" href="{% if back_to_course_url is defined and back_to_course_url %}{{ back_to_course_url }}{% elif is_teacher_view %}/teacher/courses/{{ course.id }}{% else %}/student/courses/{{ course.id }}{% endif %}">{% if back_to_course_label_en is defined %}{{ lx(back_to_course_label_en, back_to_course_label_zh) }}{% else %}{{ lx("Back to course", "返回课程") }}{% endif %}</a>
 </div>
 
 {% if material.external_url %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{% if material %}{{ lx("Edit material", "编辑学习资料") }}{% else %}{{ lx("New material", "新建学习资料") }}{% endif %} - {{ course.title }}{% endblock %}
+{% block title %}{% if material %}{{ lx("Edit discussion item", "编辑讨论") }}{% else %}{{ lx("New discussion item", "新建讨论") }}{% endif %} - {{ course.title }}{% endblock %}
 
 {% block extra_head %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css" />
@@ -8,13 +8,13 @@
 
 {% block content %}
 <div class="mb-4">
-  <a class="btn btn-outline-secondary btn-sm" href="/teacher/courses/{{ course.id }}">{{ lx("Back to course", "返回课程") }}</a>
-  <h1 class="h3 mt-3 mb-1">{% if material %}{{ lx("Edit learning material", "编辑学习资料") }}{% else %}{{ lx("New learning material", "新建学习资料") }}{% endif %}</h1>
+  <a class="btn btn-outline-secondary btn-sm" href="{% if back_url is defined %}{{ back_url }}{% else %}/teacher/courses/{{ course.id }}{% endif %}">{{ lx("Back to course", "返回课程") }}</a>
+  <h1 class="h3 mt-3 mb-1">{% if material %}{{ lx("Edit discussion item", "编辑讨论") }}{% else %}{{ lx("New discussion item", "新建讨论") }}{% endif %}</h1>
 </div>
 
 <div class="card shadow-sm mb-3">
   <div class="card-body row g-3">
-    <form method="post" action="{% if material %}/teacher/courses/{{ course.id }}/materials/{{ material.id }}{% else %}/teacher/courses/{{ course.id }}/materials{% endif %}" class="row g-3" id="material-main-form">
+    <form method="post" action="{% if material and form_action_update is defined and form_action_update %}{{ form_action_update }}{% elif form_action_create is defined and form_action_create %}{{ form_action_create }}{% elif material %}/teacher/courses/{{ course.id }}/materials/{{ material.id }}{% else %}/teacher/courses/{{ course.id }}/materials{% endif %}" class="row g-3" id="material-main-form">
       <div class="col-12">
         <label class="form-label">{{ lx("Title", "标题") }}</label>
         <input class="form-control" name="title" required value="{{ material.title if material else '' }}" />
@@ -31,7 +31,7 @@
         <textarea id="material-md" name="body_markdown" rows="16">{{ material.body_markdown if material and material.body_markdown else '' }}</textarea>
       </div>
       <div class="col-12 d-grid">
-        <button class="btn btn-primary" type="submit">{{ lx("Save", "保存") }}</button>
+        <button class="btn btn-primary" type="submit">{% if material %}{{ lx("Save", "保存") }}{% else %}{{ lx("Create", "创建") }}{% endif %}</button>
       </div>
     </form>
   </div>
@@ -41,7 +41,7 @@
 <div class="card shadow-sm mb-3">
   <div class="card-body">
     <h3 class="h6">{{ lx("Upload image", "上传图片") }}</h3>
-    <form method="post" action="/teacher/courses/{{ course.id }}/materials/{{ material.id }}/upload-image" enctype="multipart/form-data" class="row g-2 align-items-end">
+    <form method="post" action="{% if form_action_update is defined and form_action_update %}{{ form_action_update }}/upload-image{% else %}/teacher/courses/{{ course.id }}/materials/{{ material.id }}/upload-image{% endif %}" enctype="multipart/form-data" class="row g-2 align-items-end">
       <div class="col-md-8">
         <input class="form-control" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
       </div>
@@ -53,7 +53,7 @@
 </div>
 <div class="card shadow-sm">
   <div class="card-body">
-    <a class="btn btn-outline-secondary" href="/teacher/courses/{{ course.id }}/materials/{{ material.id }}">{{ lx("Preview & discussion", "预览与讨论") }}</a>
+    <a class="btn btn-outline-secondary" href="{% if form_action_update is defined and form_action_update %}{{ form_action_update }}{% else %}/teacher/courses/{{ course.id }}/materials/{{ material.id }}{% endif %}">{{ lx("Preview & discussion", "预览与讨论") }}</a>
   </div>
 </div>
 {% endif %}

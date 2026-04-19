@@ -41,6 +41,7 @@ from app.services.email import send_password_reset_email, send_verification_emai
 from app.services.permissions import RedirectRequired, require_user
 from app.services.storage_paths import absolute_data_path
 from app.services.user_media import store_user_avatar
+from app.services.llm_token_usage import usage_summary_for_user
 from app.services.user_storage import (
     PROFILE_ASSETS_PAGE_SIZE,
     QuotaExceededError,
@@ -478,6 +479,7 @@ async def profile_page(
         "profile.html",
         {
             "profile_user": user,
+            "profile_section": "overview",
             "storage_used_bytes": total_used_bytes(db, user.id),
             "storage_quota_bytes": effective_storage_quota_bytes(db, user),
             "profile_assets": assets,
@@ -486,6 +488,21 @@ async def profile_page(
             "profile_assets_total": total,
             "profile_assets_page_size": PROFILE_ASSETS_PAGE_SIZE,
         },
+    )
+
+
+@router.get("/me/profile/llm-usage")
+async def profile_llm_usage(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = require_user(request, db)
+    except RedirectRequired as redirect:
+        return RedirectResponse(url=redirect.location, status_code=303)
+    summary = usage_summary_for_user(db, user.id)
+    return render_template(
+        request,
+        db,
+        "profile_llm_usage.html",
+        {"llm_usage": summary, "profile_section": "llm"},
     )
 
 

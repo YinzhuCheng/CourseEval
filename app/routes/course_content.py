@@ -82,7 +82,7 @@ def teacher_create_material(
     except ValueError:
         push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
         return _redirect(f"/teacher/courses/{course_id}/materials/new")
-    push_flash(request, choose_text(request, "Material was saved.", "学习资料已保存。"), "success")
+    push_flash(request, choose_text(request, "Discussion item was saved.", "讨论已保存。"), "success")
     return _redirect(f"/teacher/courses/{course_id}")
 
 
@@ -129,7 +129,7 @@ def teacher_update_material(
     except ValueError:
         push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
         return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}/edit")
-    push_flash(request, choose_text(request, "Material was updated.", "学习资料已更新。"), "success")
+    push_flash(request, choose_text(request, "Discussion item was updated.", "讨论已更新。"), "success")
     return _redirect(f"/teacher/courses/{course_id}")
 
 

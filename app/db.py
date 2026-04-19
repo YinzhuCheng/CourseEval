@@ -94,6 +94,20 @@ def _patch_sqlite_schema(conn) -> None:
             conn.execute(text("ALTER TABLE submissions ADD COLUMN stored_file_purged_at DATETIME"))
         if "stored_file_purge_actor" not in cols:
             conn.execute(text("ALTER TABLE submissions ADD COLUMN stored_file_purge_actor VARCHAR(32)"))
+    if "courses" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("courses")}
+        if "is_hidden_from_course_lists" not in cols:
+            conn.execute(text("ALTER TABLE courses ADD COLUMN is_hidden_from_course_lists BOOLEAN NOT NULL DEFAULT 0"))
+    if "discussion_topics" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("discussion_topics")}
+        if "free_discussion_topic_id" not in cols:
+            conn.execute(text("ALTER TABLE discussion_topics ADD COLUMN free_discussion_topic_id INTEGER"))
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_discussion_topics_free_discussion_topic_id "
+                    "ON discussion_topics (free_discussion_topic_id)"
+                )
+            )
 
 
 def init_database() -> None:
@@ -137,16 +151,19 @@ def _ensure_open_community_course() -> None:
                 code=code,
                 join_code=None,
                 title="自由讨论区",
-                description="全员公共交流区：可发布学习资料与习题；无固定任课教师，由平台管理员治理。",
+                description="平台公共讨论区（后台载体）：在导航栏进入「自由讨论区」参与话题；不在课程列表中显示。",
                 status=CourseStatus.ACTIVE,
                 is_open_community=True,
+                is_hidden_from_course_lists=True,
                 created_by=None,
             )
             db.add(course)
             db.commit()
             db.refresh(course)
-        elif not course.is_open_community:
-            course.is_open_community = True
+        else:
+            course.is_hidden_from_course_lists = True
+            if not course.is_open_community:
+                course.is_open_community = True
             if not (course.title or "").strip():
                 course.title = "自由讨论区"
             db.commit()

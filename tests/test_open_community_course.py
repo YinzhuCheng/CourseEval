@@ -63,4 +63,5 @@ def test_open_community_course_exists_and_student_does_not_get_staff_views():
         db.commit()
 
         ordered = list_courses_for_student(db, user.id)
-        assert ordered[0].code == OPEN_COMMUNITY_COURSE_CODE
+        assert all(c.code != OPEN_COMMUNITY_COURSE_CODE for c in ordered)
+        assert any(c.code == f"ZZZ_{suffix}" for c in ordered)

@@ -23,7 +23,6 @@ from app.services.courses import (
     join_course_by_code,
     list_courses_for_student,
 )
-from app.services.llm_token_usage import usage_summary_for_user
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
 from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
 from app.services.discussion_forms import extract_discussion_images
@@ -75,8 +74,7 @@ def student_llm_usage(request: Request, db: Session = Depends(get_db)):
     except RedirectRequired as redirect:
         return RedirectResponse(url=redirect.location, status_code=303)
 
-    summary = usage_summary_for_user(db, user.id)
-    return render_template(request, db, "student_llm_usage.html", {"llm_usage": summary})
+    return RedirectResponse(url="/me/profile/llm-usage", status_code=303)
 
 
 @router.get("/help/python-runtime")

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}
+{% if free_topic %}{{ lx("Edit topic", "编辑话题") }}{% else %}{{ lx("New topic", "新建话题") }}{% endif %} - {{ t("nav.free_discussion") }}
+{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a class="btn btn-outline-secondary btn-sm" href="{% if free_topic %}/free-discussion/topics/{{ free_topic.id }}{% else %}/free-discussion{% endif %}">{{ lx("Back", "返回") }}</a>
+  <h1 class="h3 mt-3 mb-1">
+    {% if free_topic %}{{ lx("Edit topic", "编辑话题") }}{% else %}{{ lx("New topic", "新建话题") }}{% endif %}
+  </h1>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body row g-3">
+    <form method="post" action="{% if free_topic %}/free-discussion/topics/{{ free_topic.id }}{% else %}/free-discussion/topics{% endif %}" class="row g-3">
+      <div class="col-12">
+        <label class="form-label">{{ lx("Title", "标题") }}</label>
+        <input class="form-control" name="title" required value="{{ free_topic.title if free_topic else '' }}" />
+      </div>
+      <div class="col-12">
+        <label class="form-label">{{ lx("Description (optional)", "描述（可选）") }}</label>
+        <textarea class="form-control" name="description" rows="5">{{ free_topic.description if free_topic and free_topic.description else '' }}</textarea>
+        <div class="form-text">{{ lx("Shown on the topic card and as the opening post body.", "显示在话题卡片上，并作为话题主帖正文。") }}</div>
+      </div>
+      {% if free_topic %}
+      <div class="col-md-4">
+        <label class="form-label">{{ lx("Sort order", "排序") }}</label>
+        <input class="form-control" name="sort_order" type="number" value="{{ free_topic.sort_order }}" />
+      </div>
+      {% endif %}
+      <div class="col-12 d-grid">
+        <button class="btn btn-primary" type="submit">{{ lx("Save", "保存") }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if free_topic %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="h6 mb-2">{{ lx("Topic cover image", "话题封面图") }}</h2>
+    <p class="small text-muted">{{ lx("Optional. Shown on topic cards.", "可选。显示在话题列表卡片上。") }}</p>
+    <form method="post" action="/free-discussion/topics/{{ free_topic.id }}/cover" enctype="multipart/form-data" class="row g-2">
+      <div class="col-md-8">
+        <input class="form-control" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+      </div>
+      <div class="col-md-4">
+        <button class="btn btn-outline-primary w-100" type="submit">{{ lx("Upload", "上传") }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -185,6 +185,7 @@ def teacher_courses(request: Request, db: Session = Depends(get_db)):
             CourseMember.user_id == user.id,
             CourseMember.role.in_(tuple(COURSE_STAFF_ROLES)),
             CourseMember.status == MembershipStatus.ACTIVE,
+            Course.is_hidden_from_course_lists.is_(False),
         )
         .order_by(
             case((Course.is_open_community.is_(True), 0), else_=1).asc(),
