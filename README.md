@@ -187,6 +187,86 @@ Typical flow:
 └── README.md
 ```
 
+## Production deployment (basic steps)
+
+These steps assume a **single machine** (or one VM) running the web app, one worker manager, Redis, and Docker for code evaluation—the same shape as [Runtime and operational defaults](#runtime-and-operational-defaults). Adjust hosts, ports, and process supervision (systemd, Docker Compose, Kubernetes, etc.) to your environment.
+
+1. **Install runtime dependencies** on the host: Python **3.12+**, **Redis**, **Docker** (for the code runner), and build tools if you compile native wheels.
+2. **Clone the repository** and create a virtual environment, then install Python packages:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python3 -m pip install -r requirements.txt
+   ```
+3. **Configure environment**: copy `.env.example` to `.env` and set at least `SECRET_KEY`, `APP_BASE_URL`, `DATABASE_URL`, `REDIS_URL`, and `DATA_DIR`. For email registration, set the SMTP variables documented under [Registration deployment notes](#registration-deployment-notes).
+4. **Initialize the database and data directories**:
+   ```bash
+   python scripts/init_db.py
+   ```
+   On first startup the app also ensures `DATA_DIR` subfolders exist (`uploads/`, `outputs/`).
+5. **Build the code runner image** (name must match `RUNNER_IMAGE` in `.env`, default `notebook-runner-mvp:latest`):
+   ```bash
+   docker build -t notebook-runner-mvp:latest runner
+   ```
+6. **Start Redis** (or point `REDIS_URL` at a managed Redis instance).
+7. **Start the web process** (behind HTTPS termination such as nginx or a load balancer in production):
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+8. **Start the worker** in a separate process so RQ jobs (code + LLM evaluation) run:
+   ```bash
+   python worker.py
+   ```
+9. **Smoke-test**: open `APP_BASE_URL`, register or log in, submit a trivial code question in a test course, and confirm the worker processes the job.
+
+For day-two operations, reuse the same queues, LLM worker layout, and PDF limits described in [Queue and LLM deployment notes](#queue-and-llm-deployment-notes).
+
+## Upgrade and persistent assets
+
+When you **upgrade the application** (new code, new container image, OS reinstall, or migration to another host), treat the items below as **first-class state** to preserve or migrate. Everything else in the repository is reproducible from source control.
+
+### 1. Database (highest priority)
+
+- **What it holds**: users, sessions-related data is not in the DB (sessions use signed cookies keyed by `SECRET_KEY`), but **all teaching domain state** lives here: courses, memberships, assignments, questions, submissions metadata, evaluation tasks/results, feedback, LLM config rows, discussion posts, email logs, etc.
+- **Format / location**: whatever **`DATABASE_URL`** points to.
+  - Default dev layout: **SQLite** file, often `data/app.db` when `DATA_DIR=data` and `DATABASE_URL` is unset or set to that path.
+  - Production may use **PostgreSQL** or another SQLAlchemy-supported URL; the format is a standard SQLAlchemy URL, e.g. `postgresql+psycopg://user:pass@host:5432/dbname`.
+- **Access**: not served over HTTP directly; only the application (and your DBA tools) should connect using `DATABASE_URL`.
+
+### 2. File storage under `DATA_DIR`
+
+Large binaries and generated artifacts are stored **on disk** under the directory given by **`DATA_DIR`** (default `data/`). The database stores **relative POSIX paths** from that directory (e.g. `uploads/user-5/abc123.pdf`).
+
+| Area | Typical path pattern | Contents | Worth keeping on upgrade? |
+| --- | --- | --- | --- |
+| Student / teacher uploads | `uploads/user-<id>/...` | Submission files, stored notebooks, reference-answer uploads | **Yes** — without these, submission rows break or lose files. |
+| Course materials (images) | `uploads/course-materials/course-<id>/...` | Images embedded in Markdown materials | **Yes** if you use materials. |
+| User avatars | `uploads/avatars/user-<id>/...` | Profile images | **Yes** if you care about avatars. |
+| Course cover images | `uploads/courses/course-<id>/...` | Course card images | **Yes** if used. |
+| Evaluation outputs | `outputs/submissions/submission-<id>/...` | `stdout.txt`, `stderr.txt`, rendered PDF pages, `summary.json`, etc. | **Recommended** — avoids re-running all historical jobs after migration. |
+
+If `DATABASE_URL` is SQLite pointing inside `DATA_DIR`, **backing up `DATA_DIR` includes both schema and files** when paths are consistent.
+
+### 3. Secrets and configuration (not in Git)
+
+- **`.env`** (or injected env vars): especially **`SECRET_KEY`**. Changing it **invalidates existing browser sessions** (users must log in again); keep it stable across rolling restarts unless you intend to force re-login.
+- **`APP_BASE_URL`**, SMTP settings, invite codes, and queue names should be captured in your **secure config store** or deployment manifests so a new host behaves the same.
+
+### 4. Ephemeral / lower priority
+
+- **Redis**: holds **RQ job queues** only. It is **not** the system of record. You do not need to “migrate Redis” for a teaching-data backup, but expect **in-flight jobs** to be lost if Redis is wiped; workers can be restarted after upgrade.
+- **Docker images**: rebuild from `runner/`; not usually copied as “data,” but tag and retain **`RUNNER_IMAGE`** in config.
+
+### HTTP access to uploaded files (for operators and integrators)
+
+End users do **not** read arbitrary paths from disk. Authorized binary access for browser sessions is:
+
+- **Protocol**: HTTPS (recommended) **HTTP/1.1** (or HTTP/2) **GET**.
+- **URL pattern**: `{APP_BASE_URL}/data-files/{relative_path}` where `{relative_path}` is the **URL-encoded** path under `DATA_DIR` (slashes preserved as path segments), e.g. `uploads/avatars/user-3/face.webp` → `GET /data-files/uploads/avatars/user-3/face.webp`.
+- **Authentication**: user must be **logged in** (session cookie from the web app). The handler checks course membership or avatar visibility rules before returning **`FileResponse`** (images use common `image/*` types; other files may be `application/octet-stream`).
+
+Direct `file://` or unauthenticated scraping of `/data-files/...` is not supported by design.
+
 ## Local development
 
 ### 1. Install dependencies
