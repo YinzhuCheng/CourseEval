@@ -1,2 +1,4 @@
+# Layer 2 — Local development, CI, and pytest for the CourseEval codebase.
+# Always use this file (not requirements.txt alone) when running tests or scripts/verify.sh.
 -r requirements.txt
 pytest

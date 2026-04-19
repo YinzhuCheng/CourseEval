@@ -1,3 +1,4 @@
+# Code runner image (Layer 3). Python deps come only from runner/requirements.txt — not repo-root requirements.txt.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

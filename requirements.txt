@@ -1,5 +1,6 @@
+# Layer 1 — CourseEval application runtime (web + worker.py).
+# Install this set on production hosts. It is NOT the student code sandbox; that is Layer 3 (runner/).
 fastapi
-httpx
 uvicorn[standard]
 sqlalchemy
 jinja2
@@ -9,7 +10,6 @@ rq
 email-validator
 itsdangerous
 nbformat
-PyPDF2
 pymupdf
 markdown
 bleach

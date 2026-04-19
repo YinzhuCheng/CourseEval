@@ -24,6 +24,18 @@ This repository includes **layered documentation for AI coding agents** (and for
 
 Please read **AGENTS.md** and the relevant `docs/` pages **before making non-trivial code changes**, especially when touching submissions, evaluation, scoring, permissions, or the Docker runner.
 
+### Python dependencies (three layers)
+
+The repository splits Python packages into three **intentionally different** lists:
+
+| Layer | File | Use |
+|-------|------|-----|
+| **1 — Application runtime** | `requirements.txt` | Web app + `worker.py`: FastAPI, SQLAlchemy, Redis/RQ, templates, `nbformat` / `pymupdf` / `markdown` / `bleach` for submission handling on the host, etc. |
+| **2 — Application dev / test** | `requirements-dev.txt` | Layer 1 plus **pytest** (and any future lint/type-check tools). Use this for local development and CI. |
+| **3 — Student code sandbox** | `runner/requirements.txt` (installed by `runner/Dockerfile`) | Preinstalled packages **inside the Docker runner** for evaluated student Python code. Changing Layer 3 requires updating `app/runtime_support.py` and **rebuilding** the runner image. |
+
+`bash scripts/verify.sh` validates **Layers 1 and 2** only (compile + pytest). It does **not** replace rebuilding or smoke-testing the runner image (**Layer 3**).
+
 ## What the system supports
 
 ### Student workflows
@@ -220,7 +232,7 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 ```
 
-`requirements-dev.txt` includes the app dependencies plus the test runner used by the shared verification script.
+`requirements-dev.txt` pulls in **Layer 1** (`requirements.txt`) and adds **Layer 2** dev tools (`pytest`). It is the correct install target before `bash scripts/verify.sh`. Runner sandbox packages (**Layer 3**) are **not** listed in `requirements.txt`; they live in `runner/requirements.txt` and are installed only in the runner Docker image.
 
 ### 3. Prepare environment file
 
@@ -242,7 +254,7 @@ python scripts/init_db.py
 bash scripts/verify.sh
 ```
 
-This is the standard verification entrypoint for local development, Codex, and other agents. It runs Python compilation checks and the pytest suite.
+This is the standard verification entrypoint for local development, Codex, and other agents. It runs Python compilation checks and the pytest suite for the **CourseEval application** (Layers 1–2). It does **not** validate the **student code runner image** (Layer 3); after changing `runner/`, rebuild the image and rely on runner tests or a manual code submission smoke test.
 
 ### 6. Start Redis
 

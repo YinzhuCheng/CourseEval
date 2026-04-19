@@ -2,6 +2,18 @@
 
 This repository is optimized for a small single-machine deployment unless you add stronger infrastructure around it. The notes below summarize the current operational contract in code.
 
+### Python dependency layers
+
+Install targets are split on purpose:
+
+| Layer | File | Role |
+|-------|------|------|
+| **1 — Application runtime** | `requirements.txt` | CourseEval web + `worker.py` on the host. |
+| **2 — Dev / CI / tests** | `requirements-dev.txt` | Layer 1 plus `pytest`. Use on build agents before `bash scripts/verify.sh`. |
+| **3 — Student code sandbox** | `runner/requirements.txt` + `runner/Dockerfile` | Packages inside the **code runner** Docker image only. |
+
+`bash scripts/verify.sh` checks **application** code and tests (Layers 1–2). It is **not** a substitute for rebuilding and smoke-testing the runner image when `runner/` or Layer 3 packages change.
+
 ---
 
 ## Runtime services
