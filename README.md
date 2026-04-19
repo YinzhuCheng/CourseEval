@@ -10,6 +10,18 @@ The current product direction is:
 
 The old standalone Notebook execution workflow has been retired. Existing `/dashboard` and `/jobs/*` links now redirect users to the in-product code runtime help page so they can move to the supported flows.
 
+## Repository map for coding agents
+
+This repository includes **layered documentation for AI coding agents** (and for humans who want the same navigation hints). Those docs exist because agent workflows benefit from **explicit subsystem boundaries, invariants, and “edit these files together” guidance**—things that are easy to miss when scanning filenames or a single long README.
+
+- **README** stays the human-friendly entrypoint for what the product does.
+- **[AGENTS.md](AGENTS.md)** is the top-level map for agents: stack, subsystems, workflows, traps, validation commands.
+- **[docs/file-map.md](docs/file-map.md)** groups important files by responsibility (where to look first).
+- **[docs/change-guide.md](docs/change-guide.md)** explains common change couplings and failure modes.
+- **[docs/architecture/](docs/architecture/)** holds deeper, retrieval-friendly notes on submission flow, scoring, permissions, and the code runner.
+
+Please read **AGENTS.md** and the relevant `docs/` pages **before making non-trivial code changes**, especially when touching submissions, evaluation, scoring, permissions, or the Docker runner.
+
 ## What the system supports
 
 ### Student workflows
