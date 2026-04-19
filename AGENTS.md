@@ -211,7 +211,8 @@ bash scripts/verify.sh
 Agent-friendly validation convention:
 
 - After code changes, run `bash scripts/verify.sh` first.
-- For documentation-only changes, run at least `python3 -m compileall app runner -q`, or explicitly state why pytest was not run.
+- For documentation-only changes, run at least `python3 -m compileall app runner scripts -q`, or explicitly state why pytest was not run.
+- On a staging or production host, run `VERIFY_DEPLOYMENT=1 python3 scripts/verify_deployment_env.py` after `.env` is installed (see `docs/deployment-and-upgrades.md`).
 - Do not modify unrelated files while chasing validation failures unless the task explicitly asks for cleanup.
 
 There is **no dedicated lint script** in-repo; rely on the verification script unless the host environment adds ruff/mypy.

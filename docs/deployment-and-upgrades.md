@@ -44,6 +44,56 @@ Minimum production-like values:
 
 For invitation-code registration, set `REGISTRATION_INVITE_CODE`. Keep it server-side only.
 
+## Pre-deployment verification (repository + host)
+
+Deployment readiness has two layers: **automated quality in the repo** (tests and static checks) and **environment truth on the server** (ECS: same `.env`, Redis, Docker, processes). Both should pass before accepting traffic.
+
+### Layer 1 — Repository (CI or build machine)
+
+From the repository root, with `requirements-dev.txt` installed:
+
+```bash
+bash scripts/verify.sh
+```
+
+This runs:
+
+1. `python -m compileall app runner scripts -q`
+2. `pytest tests/`
+3. `scripts/verify_deployment_env.py` in **non-strict** mode (no-op unless you opt in; see below)
+
+Layer 1 is the bar for **logic and code quality** before merge or image build.
+
+### Layer 2 — Host / ECS (staging or production)
+
+Copy `.env` to the server (or inject equivalent environment variables). Then:
+
+1. **Strict environment validation** (fails fast on missing SMTP, weak `SECRET_KEY`, unset `APP_BASE_URL`, and similar):
+
+   ```bash
+   export VERIFY_DEPLOYMENT=1
+   python3 scripts/verify_deployment_env.py
+   ```
+
+   Or equivalently: `python3 scripts/verify_deployment_env.py --strict`
+
+   Optional live checks (same shell as the app will use):
+
+   ```bash
+   export VERIFY_DEPLOYMENT_REQUIRE_REDIS=1
+   export VERIFY_DEPLOYMENT_REQUIRE_DOCKER=1
+   python3 scripts/verify_deployment_env.py --strict
+   ```
+
+   `VERIFY_DEPLOYMENT_REQUIRE_REDIS=1` runs a Redis `PING` against `REDIS_URL`.  
+   `VERIFY_DEPLOYMENT_REQUIRE_DOCKER=1` runs `docker info` and `docker image inspect` for `RUNNER_IMAGE`.
+
+2. **Process smoke**: start Redis, web (`uvicorn`), and `python worker.py` with the **same** `.env`. Hit `GET /healthz` through your HTTPS front end.
+
+3. **Manual or scripted E2E** (not in `verify.sh`): register with SMTP, submit a code question, submit file/PDF LLM questions if enabled, confirm teacher flows. These depend on real credentials and provider behavior.
+
+Behavior of `scripts/verify_deployment_env.py` is covered by `tests/test_verify_deployment_env.py`.
+
 ## Runner image
 
 Build the default runner image before accepting code submissions:

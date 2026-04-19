@@ -405,6 +405,7 @@ Migration / upgrade summary:
 - There is no Alembic migration tree in this repository
 - `create_all()` will not rewrite existing columns or constraints; schema changes need an explicit migration script, an idempotent upgrade function, or a documented Alembic adoption
 - Run `bash scripts/verify.sh` in an environment with `requirements-dev.txt` installed
+- On the server, after `.env` is in place, run `VERIFY_DEPLOYMENT=1 python3 scripts/verify_deployment_env.py` (see `docs/deployment-and-upgrades.md` for optional Redis/Docker checks)
 - Test upgrades against a copy of production data before deploying
 
 ## Data model notes
@@ -497,3 +498,4 @@ For future schema changes:
 - Keep enum values stable once real deployments depend on them
 - Add a migration script or idempotent upgrade step before removing a column/table that may exist in deployed data
 - Run `bash scripts/verify.sh` in an environment with `requirements-dev.txt` installed
+- After deploying `.env` on a host, run `VERIFY_DEPLOYMENT=1 python3 scripts/verify_deployment_env.py` (see `docs/deployment-and-upgrades.md`)
