@@ -278,7 +278,10 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h5 mb-3">{{ lx("Course card image", "课程卡片图片") }}</h2>
-        <p class="small text-muted mb-3">{{ lx("Shown on the course list for students and teachers. PNG/JPG/WebP/GIF.", "显示在师生课程列表的卡片顶部。") }}</p>
+        <p class="small text-muted mb-3">
+          {{ lx("Shown on the course list for students and teachers.", "显示在师生课程列表的卡片顶部。") }}
+          {{ lx(course_cover_image_rules_en, course_cover_image_rules_zh) }}
+        </p>
         {% if course.cover_image_path %}
         <div class="mb-3 rounded overflow-hidden border" style="max-height: 160px;">
           <img src="{{ course_cover_url(course) }}" alt="" class="w-100 object-fit-cover" style="max-height:160px;" />

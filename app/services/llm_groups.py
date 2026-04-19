@@ -57,6 +57,20 @@ def group_has_callable_target(group: LLMConfig) -> bool:
     return group.enabled and bool(ordered_group_targets(group, tested_only=True))
 
 
+def group_has_any_enabled_target(group: LLMConfig) -> bool:
+    """Enabled group with at least one enabled primary or member (connectivity test may still be pending)."""
+    return group.enabled and bool(ordered_group_targets(group, tested_only=False))
+
+
+def first_group_with_any_enabled_target(db: Session, group_id: int | None) -> LLMConfig | None:
+    if not group_id:
+        return None
+    group = db.scalar(select(LLMConfig).options(selectinload(LLMConfig.members)).where(LLMConfig.id == group_id))
+    if group is None or not group_has_any_enabled_target(group):
+        return None
+    return group
+
+
 def latest_platform_llm_group(db: Session) -> LLMConfig | None:
     groups = list(
         db.scalars(
@@ -68,6 +82,22 @@ def latest_platform_llm_group(db: Session) -> LLMConfig | None:
     )
     for group in groups:
         if group_has_callable_target(group):
+            return group
+    return None
+
+
+def latest_platform_llm_group_relaxed(db: Session) -> LLMConfig | None:
+    """Prefer recently tested platform groups, but allow groups whose endpoints are enabled yet not marked tested."""
+    groups = list(
+        db.scalars(
+            select(LLMConfig)
+            .options(selectinload(LLMConfig.members))
+            .where(LLMConfig.scope == LLMScope.PLATFORM, LLMConfig.enabled.is_(True))
+            .order_by(LLMConfig.last_tested_at.desc(), LLMConfig.created_at.desc())
+        ).all()
+    )
+    for group in groups:
+        if group_has_any_enabled_target(group):
             return group
     return None
 

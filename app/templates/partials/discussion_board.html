@@ -10,7 +10,10 @@
     {% endif %}
     <label class="form-label">{{ lx("Your message (Markdown supported)", "发表内容（支持 Markdown）") }}</label>
     <textarea class="form-control mb-2 font-monospace small" name="body" rows="4" placeholder="{{ lx('Write here…', '在此输入…') }}"></textarea>
-    <div class="mb-2 small text-muted">{{ lx("Images: attach files below (no remote hotlinks). Links: https and mailto only.", "图片请使用下方上传（禁止外链图）。链接仅允许 https 与 mailto。") }}</div>
+    <div class="mb-2 small text-muted">
+      {{ lx(discussion_image_rules_en, discussion_image_rules_zh) }}
+      {{ lx(" Links: https and mailto only.", " 链接仅允许 https 与 mailto。") }}
+    </div>
     <div class="mb-2">
       <label class="form-label small">{{ lx("Attach images (optional)", "附加图片（可选）") }}</label>
       <input class="form-control form-control-sm" type="file" name="images" accept="image/png,image/jpeg,image/webp,image/gif" multiple />

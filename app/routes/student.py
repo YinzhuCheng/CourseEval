@@ -27,6 +27,7 @@ from app.services.llm_token_usage import usage_summary_for_user
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
 from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
 from app.services.discussion_forms import extract_discussion_images
+from app.services.image_uploads import format_image_upload_error
 from app.services.discussions import (
     assignment_past_close_for_discussion,
     build_discussion_view_context,
@@ -255,8 +256,11 @@ async def student_question_discuss(
                     db, _post, question.assignment.course_id, image_files
                 )
             except ValueError as att_err:
-                if str(att_err) == "too_many_images":
+                ak = str(att_err) if att_err else ""
+                if ak == "too_many_images":
                     raise ValueError("too_many_images") from att_err
+                if ak in ("unsupported_image_type", "file_too_large"):
+                    raise ValueError(ak) from att_err
                 raise
         db.commit()
     except ValueError as exc:
@@ -279,6 +283,8 @@ async def student_question_discuss(
             )
         elif key == "too_many_images":
             msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        elif key in ("unsupported_image_type", "file_too_large"):
+            msg = format_image_upload_error(request, key)
         else:
             msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
         push_flash(request, msg, "danger")
