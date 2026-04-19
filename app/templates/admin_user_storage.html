@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lx("User storage", "用户存储") }} — {{ target_user.username }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ lx("User storage", "用户存储") }}</h1>
+    <p class="text-muted mb-0">{{ target_user.username }} · {{ target_user.email }}</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="/admin/users">{{ t("admin.users.back") }}</a>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <p class="mb-1">
+      {{ lx("Used", "已用") }}: {{ (storage.used_bytes / (1024 * 1024))|round(2) }} MiB
+      · {{ lx("Quota", "额度") }}: {{ (storage.quota_bytes / (1024 * 1024))|round(2) }} MiB
+    </p>
+    {% if storage.override_bytes is not none %}
+    <p class="small text-muted mb-0">{{ lx("Per-user override active (bytes)", "已设置单用户覆盖（字节）") }}: {{ storage.override_bytes }}</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if assets %}
+<ul class="list-group shadow-sm mb-3">
+  {% for a in assets %}
+  <li class="list-group-item d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+    <div>
+      <div>{{ lx(a.label_en, a.label_zh) }}</div>
+      <div class="small text-muted">{{ (a.size_bytes / 1024)|round(1) }} KiB</div>
+      {% if a.link_url %}
+      <a class="small" href="{{ a.link_url }}">{{ lx("Open related page", "打开相关页面") }}</a>
+      {% endif %}
+    </div>
+    {% if a.can_delete %}
+    <form method="post" action="/admin/users/{{ target_user.id }}/storage/{{ a.id }}/delete" class="m-0" onsubmit="return confirm('Remove this file?');">
+      <button class="btn btn-sm btn-outline-danger" type="submit">{{ lx("Delete", "删除") }}</button>
+    </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if total_pages > 1 %}
+<nav aria-label="pagination">
+  <ul class="pagination">
+    {% for p in range(1, total_pages + 1) %}
+    <li class="page-item {% if p == page %}active{% endif %}">
+      <a class="page-link" href="/admin/users/{{ target_user.id }}/storage?page={{ p }}">{{ p }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endif %}
+{% else %}
+<p class="text-muted">{{ lx("No tracked files.", "暂无已跟踪文件。") }}</p>
+{% endif %}
+{% endblock %}

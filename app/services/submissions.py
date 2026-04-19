@@ -48,6 +48,13 @@ from app.services.storage_paths import (
     ensure_writable_directory,
     relative_to_data,
 )
+from app.services.user_storage import (
+    QuotaExceededError,
+    can_add_bytes,
+    record_stored_object,
+    submission_extra_paths,
+    unlink_file_disk,
+)
 from app.models import (
     Assignment,
     Course,
@@ -302,6 +309,51 @@ def _store_uploaded_file(*, user_id: int, question_id: int, original_filename: s
     stored_path = upload_dir / f"{uuid4().hex}{suffix}"
     stored_path.write_bytes(file_bytes)
     return relative_to_data(stored_path), stored_path.name
+
+
+def _cleanup_submission_disk_files(relative_main: str) -> None:
+    unlink_file_disk(relative_main)
+    try:
+        base = absolute_data_path(relative_main)
+    except ValueError:
+        return
+    if base.suffix.lower() == ".pdf":
+        pages_dir = base.parent / f"{base.stem}-pages"
+        if pages_dir.is_dir():
+            shutil.rmtree(pages_dir, ignore_errors=True)
+
+
+def _register_submission_storage(db: Session, user_id: int, submission: Submission) -> None:
+    if not submission.stored_file_path:
+        return
+    main_path = submission.stored_file_path
+    try:
+        main_sz = absolute_data_path(main_path).stat().st_size
+        record_stored_object(
+            db,
+            user_id=user_id,
+            category="submission",
+            relative_path=main_path,
+            size_bytes=main_sz,
+            ref_type="submission",
+            ref_id=submission.id,
+        )
+    except QuotaExceededError:
+        raise
+    for rel in submission_extra_paths(submission):
+        try:
+            sz = absolute_data_path(rel).stat().st_size
+            record_stored_object(
+                db,
+                user_id=user_id,
+                category="submission_extra",
+                relative_path=rel,
+                size_bytes=sz,
+                ref_type="submission",
+                ref_id=submission.id,
+            )
+        except QuotaExceededError:
+            raise
 
 
 def _ensure_text_file_extension(filename: str, allowed_extensions: set[str]) -> str:
@@ -788,6 +840,10 @@ def create_code_submission(
         original_filename=original_filename,
         file_bytes=submission_bytes,
     )
+    main_sz = absolute_data_path(stored_relative_path).stat().st_size
+    if not can_add_bytes(db, user_id, main_sz):
+        _cleanup_submission_disk_files(stored_relative_path)
+        raise ValueError("storage_quota_exceeded")
     source_text = _read_code_preview(absolute_data_path(stored_relative_path), code_language, submission_mode)
     if not source_text:
         raise ValueError("Uploaded code file is empty.")
@@ -812,6 +868,13 @@ def create_code_submission(
     )
     db.add(submission)
     db.flush()
+    try:
+        _register_submission_storage(db, user_id, submission)
+    except QuotaExceededError:
+        db.delete(submission)
+        db.flush()
+        _cleanup_submission_disk_files(stored_relative_path)
+        raise ValueError("storage_quota_exceeded") from None
 
     db.add(
         EvaluationTask(
@@ -867,7 +930,14 @@ def create_file_submission(
             require_ipynb_output=config.notebook_outputs_required,
         )
     if not extracted_text:
+        _cleanup_submission_disk_files(stored_relative_path)
         raise ValueError("The uploaded file does not contain any extractable content.")
+
+    main_sz = stored_path.stat().st_size
+    extra_sz = sum(p.stat().st_size for p in pdf_page_paths) if pdf_page_paths else 0
+    if not can_add_bytes(db, user_id, main_sz + extra_sz):
+        _cleanup_submission_disk_files(stored_relative_path)
+        raise ValueError("storage_quota_exceeded")
 
     llm_enabled = config.llm_suggestion_enabled
     teacher_confirmation_required = config.teacher_confirmation_required
@@ -890,6 +960,14 @@ def create_file_submission(
     )
     db.add(submission)
     db.flush()
+    try:
+        _register_submission_storage(db, user_id, submission)
+    except QuotaExceededError:
+        db.delete(submission)
+        db.flush()
+        _cleanup_submission_disk_files(stored_relative_path)
+        raise ValueError("storage_quota_exceeded") from None
+
     if llm_enabled:
         db.add(
             EvaluationTask(
@@ -1416,6 +1494,14 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             return
         if not _task_can_start(task):
             logger.info("Skipping file LLM task %s because it is already %s.", task_id, task.status.value)
+            return
+        if not submission.stored_file_path:
+            _mark_submission_system_failed(
+                db,
+                submission,
+                task,
+                "Submission file was removed (storage purge); scores are unchanged.",
+            )
             return
 
         llm_group = _resolve_llm_config_for_question(submission.question, db)

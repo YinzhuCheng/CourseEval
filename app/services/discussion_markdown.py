@@ -120,11 +120,40 @@ def _fix_links_and_images(html: str) -> str:
     return html
 
 
-def render_discussion_markdown(raw: str | None, *, for_ai: bool = False) -> Markup:
+def render_discussion_markdown(
+    raw: str | None,
+    *,
+    for_ai: bool = False,
+    viewer_user_id: int | None = None,
+    post_author_id: int | None = None,
+) -> Markup:
     """Render Markdown to safe HTML."""
     if not raw or not str(raw).strip():
         return Markup("")
-    html = _markdown_to_html(str(raw))
+    text = str(raw)
+    from app.services.user_storage import parse_purged_placeholder_line
+
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        parsed = parse_purged_placeholder_line(line)
+        if parsed:
+            actor, kind = parsed
+            if viewer_user_id is not None and post_author_id is not None and viewer_user_id == post_author_id:
+                label = f"You removed this {kind} attachment."
+            elif actor == "self":
+                label = f"The author removed this {kind} attachment."
+            elif actor == "teacher":
+                label = f"A course teacher removed this {kind} attachment."
+            elif actor == "super_admin":
+                label = f"A super administrator removed this {kind} attachment."
+            else:
+                label = f"A platform administrator removed this {kind} attachment."
+            out_lines.append(f"> {label}")
+        else:
+            out_lines.append(line)
+    text = "\n".join(out_lines)
+
+    html = _markdown_to_html(text)
     html = _clean_html(html, for_ai=for_ai)
     if not for_ai:
         html = _fix_links_and_images(html)

@@ -11,6 +11,25 @@
   <a class="btn btn-outline-secondary" href="/admin/system">{{ t("admin.users.back") }}</a>
 </div>
 
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h2 class="h6 mb-3">{{ lx("Default storage quotas (MiB per user)", "默认存储额度（每用户 MiB）") }}</h2>
+    <form method="post" action="/admin/system/storage-defaults" class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label small">{{ lx("Students", "学生") }}</label>
+        <input class="form-control" type="number" name="student_mb" min="1" value="{{ (default_student_storage_bytes / (1024*1024))|int }}" />
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small">{{ lx("Teachers / staff", "教师 / 教务") }}</label>
+        <input class="form-control" type="number" name="teacher_mb" min="1" value="{{ (default_teacher_storage_bytes / (1024*1024))|int }}" />
+      </div>
+      <div class="col-md-4">
+        <button class="btn btn-primary" type="submit">{{ lx("Save defaults", "保存默认") }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="card shadow-sm">
   <div class="card-body">
     <div class="table-responsive">
@@ -23,6 +42,7 @@
             <th>{{ t("admin.users.column.email_verified") }}</th>
             <th>{{ t("admin.users.column.role") }}</th>
             <th>{{ t("admin.users.column.created") }}</th>
+            <th>{{ lx("Storage", "存储") }}</th>
             <th>{{ lx("Avatar", "头像") }}</th>
             <th>{{ t("admin.users.column.actions") }}</th>
           </tr>
@@ -36,6 +56,17 @@
             <td>{{ t("admin.users.email_verified_yes") if user.email_verified else t("admin.users.email_verified_no") }}</td>
             <td>{{ t("role." ~ user.effective_role.value) }}</td>
             <td>{{ format_datetime(user.created_at) }}</td>
+            <td class="small">
+              {% set st = storage_by_user_id[user.id] %}
+              {{ (st.used_bytes / (1024*1024))|round(1) }} / {{ (st.quota_bytes / (1024*1024))|round(1) }} MiB
+              <div class="mt-1">
+                <a href="/admin/users/{{ user.id }}/storage">{{ lx("Manage files", "管理文件") }}</a>
+              </div>
+              <form method="post" action="/admin/users/{{ user.id }}/storage-override" class="d-flex gap-1 flex-wrap mt-1">
+                <input class="form-control form-control-sm" style="max-width:6rem" type="number" name="override_mb" min="0" placeholder="MiB" />
+                <button class="btn btn-sm btn-outline-secondary" type="submit" title="{{ lx('Leave empty to clear override', '留空清除覆盖') }}">{{ lx("Set", "设置") }}</button>
+              </form>
+            </td>
             <td>
               {% if user.avatar_banned %}
               <span class="badge text-bg-secondary">{{ lx("Banned", "已封禁") }}</span>
