@@ -2,6 +2,8 @@
 
 This repository is optimized for a small single-machine deployment unless you add stronger infrastructure around it. The notes below summarize the current operational contract in code.
 
+For **ECS-oriented copy-paste** (clean install vs migrate, optional SMTP / invite / code / LLM bundles), see [`deployment-reference-ecs.md`](deployment-reference-ecs.md).
+
 ---
 
 ## Runtime services
