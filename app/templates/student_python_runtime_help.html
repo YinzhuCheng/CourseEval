@@ -104,8 +104,8 @@
           <div class="fw-semibold mb-1">{{ lx("How the preinstalled Python packages are managed", "预装 Python 包如何维护") }}</div>
           <div class="small text-muted">
             {{ lx(
-              "The package list shown here is read from app/runtime_support.py. The deployment image installs the original packages from runner/requirements.txt. To expand the default Python library set, update both files and rebuild the runner Docker image.",
-              "本页显示的包列表读取自 app/runtime_support.py。部署镜像会从 runner/requirements.txt 安装原装预置包。若要扩充默认 Python 库，请同时修改这两个文件并重新构建 runner Docker 镜像。"
+              "The table above reflects the packages baked into the platform runner image. If your course needs a library that is not listed, ask your instructor first; site operators can update the runner image when a dependency is approved.",
+              "上表列出的是平台运行镜像中预装的包。若课程需要未列出的库，请先向任课教师说明；在获得批准后，站点运维人员可以更新运行镜像以加入相应依赖。"
             ) }}
           </div>
         </div>

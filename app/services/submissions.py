@@ -18,14 +18,15 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
 from app.constants import (
+    CodeLanguage,
+    CodeSubmissionMode,
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
     JobStatus,
-    CodeLanguage,
-    CodeSubmissionMode,
     LLMScope,
     LLMTestStatus,
+    Locale,
     MembershipStatus,
     QuestionType,
     ScoringRule,
@@ -33,6 +34,7 @@ from app.constants import (
     SubmissionStatus,
 )
 from app.db import SessionLocal, utcnow
+from app.i18n import translate
 from app.services.llm import (
     ImageInput,
     generate_notebook_evaluation_with_llm,
@@ -115,10 +117,7 @@ def _clamp_score(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
 
 _HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
 _HIDDEN_STDERR_MARKER = "=== Hidden Test stderr ==="
-_RETIRED_NOTEBOOK_MESSAGE = (
-    "Notebook execution has been retired. Use code questions for Python, C, or C++ submissions, "
-    "or use file / LLM-reviewed questions for .ipynb submissions."
-)
+_NOTEBOOK_EXECUTION_RETIRED_KEY = "evaluation.notebook_execution_retired"
 
 
 def _latest_feedback(submission: Submission, source: FeedbackSource) -> Feedback | None:
@@ -234,7 +233,7 @@ def resolve_submission_score(submission: Submission) -> tuple[Decimal | None, Fe
     return None, None
 
 
-def build_student_result_view(submission: Submission) -> dict:
+def build_student_result_view(submission: Submission, *, locale: str | None = None) -> dict:
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
     summary = _parsed_summary_json(latest_result)
     score_value, score_source = resolve_submission_score(submission)
@@ -247,13 +246,18 @@ def build_student_result_view(submission: Submission) -> dict:
             and str(hidden_message).strip() != "No tests configured."
         )
     )
+    loc = locale if locale in {"en", "zh"} else Locale.EN.value
+    message_key = summary.get("message_key")
+    display_message = summary.get("message")
+    if isinstance(message_key, str) and message_key.strip():
+        display_message = translate(loc, message_key.strip())
     return {
         "score": score_value,
         "score_source": score_source,
         "run_success": latest_result.run_success if latest_result is not None else None,
         "visible_score": latest_result.visible_score if latest_result is not None else None,
         "auto_score": latest_result.auto_score if latest_result is not None else None,
-        "message": summary.get("message"),
+        "message": display_message,
         "visible_message": summary.get("visible_message"),
         "failure_type": summary.get("failure_type"),
         "hidden_checks_applied": hidden_checks_applied,
@@ -1908,14 +1912,19 @@ def run_job_in_docker(
 
     summary = {
         "failure_type": "system_error",
-        "message": _RETIRED_NOTEBOOK_MESSAGE,
+        "message_key": _NOTEBOOK_EXECUTION_RETIRED_KEY,
+        "message": translate(Locale.EN.value, _NOTEBOOK_EXECUTION_RETIRED_KEY),
         "run_success": False,
         "auto_score": 0,
         "visible_score": 0,
         "hidden_score": 0,
     }
     write_text(stdout_path, "")
-    write_text(stderr_path, f"{_RETIRED_NOTEBOOK_MESSAGE}\n")
+    stderr_lines = [
+        translate(Locale.EN.value, _NOTEBOOK_EXECUTION_RETIRED_KEY),
+        translate(Locale.ZH.value, _NOTEBOOK_EXECUTION_RETIRED_KEY),
+    ]
+    write_text(stderr_path, "\n".join(stderr_lines) + "\n")
     summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
     return RunnerResult(exit_code=1, error_message=_RETIRED_NOTEBOOK_MESSAGE, summary_json=summary)
 

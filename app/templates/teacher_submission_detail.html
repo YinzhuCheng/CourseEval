@@ -147,14 +147,14 @@
     {% if latest_result %}
     <div class="card shadow-sm mt-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">stdout</h2>
+        <h2 class="h5 mb-3">{{ t("common.artifact_stdout_title") }}</h2>
         <pre class="artifact-block">{{ stdout_text or lx("No stdout captured yet.", "当前还没有 stdout 输出。") }}</pre>
       </div>
     </div>
 
     <div class="card shadow-sm mt-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">stderr</h2>
+        <h2 class="h5 mb-3">{{ t("common.artifact_stderr_title") }}</h2>
         <pre class="artifact-block">{{ stderr_text or lx("No stderr captured yet.", "当前还没有 stderr 输出。") }}</pre>
       </div>
     </div>
