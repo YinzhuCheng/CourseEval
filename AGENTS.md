@@ -226,6 +226,7 @@ There is **no dedicated lint script** in-repo; rely on the verification script u
 | `docs/change-guide.md` | You are modifying behavior and need coupling / failure-mode hints |
 | `docs/known-issues.md` | You are reviewing technical debt, historical compatibility traps, or doc/code inconsistencies |
 | `docs/deployment-and-upgrades.md` | You need deployment, persistence, queue, or migration/upgrade expectations |
+| `docs/deployment-reference-ecs.md` | ECS-style reference: clean vs migrate modes, optional bundles, shell snippets |
 | `docs/architecture/submission-lifecycle.md` | Submission + task + worker state flow |
 | `docs/architecture/scoring-pipeline.md` | Scores, feedback, snapshots, teacher confirmation |
 | `docs/architecture/roles-and-permissions.md` | Access control |
