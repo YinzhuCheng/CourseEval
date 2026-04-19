@@ -13,3 +13,4 @@ PyPDF2
 pymupdf
 markdown
 bleach
+Pillow

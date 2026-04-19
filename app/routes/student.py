@@ -26,14 +26,13 @@ from app.services.courses import (
 from app.services.permissions import RedirectRequired, get_course_role, require_student_access, require_user
 from app.services.llm_token_usage import usage_summary_for_user
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
+from app.services.discussion_attachments import attach_discussion_images_to_post
+from app.services.discussion_forms import extract_discussion_images
 from app.services.discussions import (
     assignment_past_close_for_discussion,
-    attach_avatar_and_role_badges,
+    build_discussion_view_context,
     can_post_on_question_topic,
-    display_label_for_post,
     get_or_create_question_topic,
-    list_posts_for_topic,
-    flat_thread_for_template,
 )
 from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.scoring import is_submission_pending_teacher_review
@@ -169,13 +168,12 @@ def student_question_detail(question_id: int, request: Request, db: Session = De
     submissions = list_submissions_for_question(db, question.id, user.id)
     topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
     db.commit()
-    posts = list_posts_for_topic(db, topic.id)
-    decorated = []
-    for p in posts:
-        label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
-        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = attach_avatar_and_role_badges(
-        db, question.assignment.course_id, flat_thread_for_template(posts, decorated)
+    disc_ctx = build_discussion_view_context(
+        db,
+        topic_id=topic.id,
+        course_id=question.assignment.course_id,
+        viewer=user,
+        request=request,
     )
     reveal = reveal_bundle_for_question(db, question)
     can_discuss = can_post_on_question_topic(db, question, user)
@@ -187,6 +185,8 @@ def student_question_detail(question_id: int, request: Request, db: Session = De
             "Discussion opens after the assignment close time.",
             "讨论将在作业「关闭时间」到达后对本课程学生开放；教师与助教可随时参与。",
         )
+    rq = getattr(request.url, "query", "") or ""
+    disc_ret = f"{request.url.path}?{rq}" if rq else request.url.path
     return render_template(
         request,
         db,
@@ -195,23 +195,25 @@ def student_question_detail(question_id: int, request: Request, db: Session = De
             "question": question,
             "submissions": submissions,
             "topic_id": topic.id,
-            "discussion_thread": threaded,
+            **disc_ctx,
             "can_post_discussion": can_discuss,
             "reveal": reveal,
             "discussion_post_url": f"/student/questions/{question_id}/discuss",
             "discussion_notice": disc_notice,
+            "discussion_redirect_to": disc_ret,
         },
     )
 
 
 @router.post("/questions/{question_id}/discuss")
-def student_question_discuss(
+async def student_question_discuss(
     question_id: int,
     request: Request,
     body: str = Form(""),
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -229,6 +231,7 @@ def student_question_discuss(
     topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    image_files = await extract_discussion_images(request)
     try:
         _post, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -238,16 +241,45 @@ def student_question_discuss(
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
+            pending_image_uploads=bool(image_files),
         )
+        if _post is not None and image_files:
+            try:
+                attach_discussion_images_to_post(db, _post, question.assignment.course_id, image_files)
+            except ValueError as att_err:
+                if str(att_err) == "too_many_images":
+                    raise ValueError("too_many_images") from att_err
+                raise
         db.commit()
-    except ValueError:
+    except ValueError as exc:
         db.rollback()
-        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
-        return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+        key = str(exc) if exc else ""
+        if key == "user_muted":
+            msg = choose_text(
+                request,
+                "You are muted from posting in this course discussion.",
+                "你已被禁止在本课程讨论区发言。",
+            )
+        elif key == "body_too_large":
+            msg = choose_text(request, "Message is too long.", "内容过长。")
+        elif key == "remote_images_not_allowed":
+            msg = choose_text(
+                request,
+                "Remote images in markdown are not allowed; use uploads instead.",
+                "不允许在 Markdown 中嵌入外链图片，请使用上传图片。",
+            )
+        elif key == "too_many_images":
+            msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        else:
+            msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
+        push_flash(request, msg, "danger")
+        dest = redirect_to.strip() or f"/student/questions/{question_id}"
+        return RedirectResponse(url=dest, status_code=303)
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
+    dest = redirect_to.strip() or f"/student/questions/{question_id}"
+    return RedirectResponse(url=dest, status_code=303)
 
 
 @router.post("/questions/{question_id}/submit-python")

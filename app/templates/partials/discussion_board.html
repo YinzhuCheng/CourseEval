@@ -4,9 +4,17 @@
   <div class="alert alert-info small mb-3">{{ discussion_notice }}</div>
   {% endif %}
   {% if can_post_discussion %}
-  <form method="post" action="{{ discussion_post_url }}" class="mb-4">
-    <label class="form-label">{{ lx("Your message", "发表内容") }}</label>
-    <textarea class="form-control mb-2" name="body" rows="3" required placeholder="{{ lx('Write here…', '在此输入…') }}"></textarea>
+  <form method="post" action="{{ discussion_post_url }}" enctype="multipart/form-data" class="mb-4">
+    {% if discussion_redirect_to is defined %}
+    <input type="hidden" name="redirect_to" value="{{ discussion_redirect_to }}" />
+    {% endif %}
+    <label class="form-label">{{ lx("Your message (Markdown supported)", "发表内容（支持 Markdown）") }}</label>
+    <textarea class="form-control mb-2 font-monospace small" name="body" rows="4" placeholder="{{ lx('Write here…', '在此输入…') }}"></textarea>
+    <div class="mb-2 small text-muted">{{ lx("Images: attach files below (no remote hotlinks). Links: https and mailto only.", "图片请使用下方上传（禁止外链图）。链接仅允许 https 与 mailto。") }}</div>
+    <div class="mb-2">
+      <label class="form-label small">{{ lx("Attach images (optional)", "附加图片（可选）") }}</label>
+      <input class="form-control form-control-sm" type="file" name="images" accept="image/png,image/jpeg,image/webp,image/gif" multiple />
+    </div>
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="anonymous" value="on" id="discuss-anon-root" />
       <label class="form-check-label" for="discuss-anon-root">{{ lx("Post anonymously", "匿名发布") }}</label>
@@ -16,9 +24,20 @@
   {% else %}
   <p class="text-muted small mb-3">{{ lx("You cannot post in this thread.", "你无法在此讨论串发言。") }}</p>
   {% endif %}
+  {% if discussion_pagination is defined and discussion_pagination.total > 0 %}
+  <div class="d-flex flex-wrap align-items-center gap-2 small mb-3">
+    <span class="text-muted">{{ lx("Page", "第") }} {{ discussion_pagination.page }} / {{ discussion_pagination.total_pages }} · {{ discussion_pagination.total }} {{ lx("posts", "条") }}</span>
+    {% if discussion_pagination.has_newer %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ request.url.path }}?page={{ discussion_pagination.page + 1 }}">{{ lx("Older posts", "更早") }}</a>
+    {% endif %}
+    {% if discussion_pagination.has_older %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ request.url.path }}?page={{ discussion_pagination.page - 1 }}">{{ lx("Newer posts", "更新") }}</a>
+    {% endif %}
+  </div>
+  {% endif %}
   {% if discussion_thread %}
   {% for node in discussion_thread %}
-  <div class="discussion-post mb-3 p-3 {% if node.depth %}discussion-post--nested{% endif %}" style="margin-left: {{ node.depth * 1.25 }}rem;">
+  <div id="post-{{ node.post.id }}" class="discussion-post mb-3 p-3 {% if node.depth %}discussion-post--nested{% endif %}" style="margin-left: {{ node.depth * 1.25 }}rem;">
     <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
       <div class="d-flex align-items-center gap-2">
         {% if node.avatar_url %}
@@ -44,15 +63,32 @@
           {% endif %}
         </div>
       </div>
-      <div class="small text-muted text-nowrap">{{ format_datetime(node.post.created_at) }}</div>
+      <div class="d-flex align-items-center gap-2">
+        {% if node.can_delete and discussion_delete_action is defined %}
+        <form method="post" action="{{ discussion_delete_action }}" class="d-inline" onsubmit="return confirm('{{ lx('Delete this post?', '删除这条帖子？') }}');">
+          <input type="hidden" name="post_id" value="{{ node.post.id }}" />
+          {% if discussion_redirect_to is defined %}
+          <input type="hidden" name="redirect_to" value="{{ discussion_redirect_to }}#post-{{ node.post.id }}" />
+          {% endif %}
+          <button type="submit" class="btn btn-sm btn-outline-danger">{{ lx("Delete", "删除") }}</button>
+        </form>
+        {% endif %}
+        <div class="small text-muted text-nowrap">{{ format_datetime(node.post.created_at) }}</div>
+      </div>
     </div>
-    <div class="mt-2 discussion-body">{{ format_discussion_body(node.post.body_text) }}</div>
+    <div class="mt-2 discussion-body">{{ node.body_html }}</div>
     {% if can_post_discussion %}
     <details class="mt-2 small">
       <summary class="text-primary" style="cursor:pointer;">{{ lx("Reply", "回复") }}</summary>
-      <form method="post" action="{{ discussion_post_url }}" class="mt-2">
+      <form method="post" action="{{ discussion_post_url }}" enctype="multipart/form-data" class="mt-2">
+        {% if discussion_redirect_to is defined %}
+        <input type="hidden" name="redirect_to" value="{{ discussion_redirect_to }}" />
+        {% endif %}
         <input type="hidden" name="parent_post_id" value="{{ node.post.id }}" />
-        <textarea class="form-control form-control-sm mb-2" name="body" rows="2" required></textarea>
+        <textarea class="form-control form-control-sm mb-2 font-monospace" name="body" rows="3" placeholder="{{ lx('Reply…', '回复…') }}"></textarea>
+        <div class="mb-2">
+          <input class="form-control form-control-sm" type="file" name="images" accept="image/png,image/jpeg,image/webp,image/gif" multiple />
+        </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" name="anonymous" value="on" id="anon-{{ node.post.id }}" />
           <label class="form-check-label" for="anon-{{ node.post.id }}">{{ lx("Post anonymously", "匿名发布") }}</label>

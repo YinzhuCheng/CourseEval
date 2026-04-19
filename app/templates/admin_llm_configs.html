@@ -91,6 +91,15 @@
             <button class="btn btn-outline-primary" type="submit">{{ t("admin.llm.tokens.save_platform") }}</button>
           </div>
         </form>
+        <form method="post" action="/admin/llm-configs/discussion-pagination" class="row g-2 align-items-end mb-4">
+          <div class="col-md-8">
+            <label class="form-label">{{ lx("Discussion posts per page (10–200)", "讨论区每页帖子数（10–200）") }}</label>
+            <input class="form-control" type="number" name="discussion_posts_page_size" min="10" max="200" value="{{ discussion_posts_page_size }}" />
+          </div>
+          <div class="col-md-4 d-grid">
+            <button class="btn btn-outline-secondary" type="submit">{{ lx("Save", "保存") }}</button>
+          </div>
+        </form>
         <h3 class="h6 mb-2">{{ t("admin.llm.tokens.usage_table") }}</h3>
         <div class="table-responsive">
           <table class="table table-sm align-middle">

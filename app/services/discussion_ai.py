@@ -161,7 +161,9 @@ def build_discussion_ai_prompts(db: Session, topic: DiscussionTopic, user_messag
     system = (
         "You are a helpful teaching assistant in a course discussion. "
         "Answer clearly and concisely. If the question is outside the provided course context, say so briefly. "
-        "Do not fabricate private information about students."
+        "Do not fabricate private information about students. "
+        "Do not include markdown images, raw URLs, or links in your reply (plain text and simple markdown only: "
+        "bold, italic, lists, code fences)."
     )
     user_block = f"Course context (for this thread):\n{ctx}\n\nStudent message:\n{user_message}"
     return system, user_block
@@ -202,16 +204,15 @@ def run_discussion_ai_reply(
 
     ai_user = get_or_create_ai_assistant_user(db)
     body = f"[AI]\n{text}"
-    post = DiscussionPost(
+    post = create_post(
+        db,
         topic_id=topic.id,
-        author_id=ai_user.id,
+        author=ai_user,
+        body=body,
         parent_post_id=parent_post_id,
-        body_text=body[:20000],
         is_anonymous=False,
         is_ai=True,
     )
-    db.add(post)
-    db.flush()
     return post
 
 
@@ -224,6 +225,7 @@ def create_user_post_and_maybe_ai_reply(
     parent_post_id: int | None,
     is_anonymous: bool,
     request_ai: bool,
+    pending_image_uploads: bool = False,
 ) -> tuple[DiscussionPost | None, str | None]:
     """Create user post when there is body; AI-only button with parent skips user post. Returns (user_post_or_none, ai_error_message)."""
     raw = (body or "").strip()
@@ -231,7 +233,7 @@ def create_user_post_and_maybe_ai_reply(
     user_body = strip_ai_prefix(raw) if wants_ai else raw
 
     ai_err: str | None = None
-    if wants_ai and not user_body and parent_post_id:
+    if wants_ai and not user_body and not pending_image_uploads and parent_post_id:
         parent = db.get(DiscussionPost, parent_post_id)
         if parent is None or parent.topic_id != topic.id:
             raise ValueError("empty_body")
@@ -250,7 +252,7 @@ def create_user_post_and_maybe_ai_reply(
             ai_err = str(e) or "AI request failed."
         return None, ai_err
 
-    if not user_body:
+    if not user_body and not pending_image_uploads:
         raise ValueError("empty_body")
 
     user_post = create_post(
@@ -261,6 +263,7 @@ def create_user_post_and_maybe_ai_reply(
         parent_post_id=parent_post_id,
         is_anonymous=is_anonymous,
         is_ai=False,
+        has_pending_image_uploads=pending_image_uploads and not user_body,
     )
     if wants_ai:
         prompt = strip_ai_prefix(raw)

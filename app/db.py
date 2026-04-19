@@ -1,7 +1,7 @@
 from collections.abc import Generator
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -44,10 +44,33 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def _patch_sqlite_schema(conn) -> None:
+    """Lightweight additive migrations for existing SQLite files (no Alembic in v0)."""
+    insp = inspect(conn)
+    if "platform_llm_token_policy" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("platform_llm_token_policy")}
+        if "discussion_posts_page_size" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE platform_llm_token_policy "
+                    "ADD COLUMN discussion_posts_page_size INTEGER NOT NULL DEFAULT 50"
+                )
+            )
+    if "discussion_posts" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("discussion_posts")}
+        if "deleted_at" not in cols:
+            conn.execute(text("ALTER TABLE discussion_posts ADD COLUMN deleted_at DATETIME"))
+        if "deleted_by_id" not in cols:
+            conn.execute(text("ALTER TABLE discussion_posts ADD COLUMN deleted_by_id INTEGER"))
+
+
 def init_database() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    if settings.database_url.startswith("sqlite"):
+        with engine.begin() as conn:
+            _patch_sqlite_schema(conn)
     _ensure_open_community_course()
 
 

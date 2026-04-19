@@ -111,7 +111,16 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="CourseMember.user_id",
     )
-    discussion_posts: Mapped[list["DiscussionPost"]] = relationship(back_populates="author", cascade="all, delete-orphan")
+    discussion_posts: Mapped[list["DiscussionPost"]] = relationship(
+        back_populates="author",
+        cascade="all, delete-orphan",
+        foreign_keys="DiscussionPost.author_id",
+    )
+    discussion_mutes_received: Mapped[list["CourseDiscussionMute"]] = relationship(
+        back_populates="user",
+        foreign_keys="CourseDiscussionMute.user_id",
+        cascade="all, delete-orphan",
+    )
     created_courses: Mapped[list["Course"]] = relationship(
         back_populates="creator",
         foreign_keys="Course.created_by",
@@ -211,6 +220,10 @@ class Course(Base):
         foreign_keys="LLMConfig.course_id",
     )
     materials: Mapped[list["CourseMaterial"]] = relationship(back_populates="course", cascade="all, delete-orphan")
+    discussion_mutes: Mapped[list["CourseDiscussionMute"]] = relationship(
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
 
 
 class CourseMember(Base):
@@ -286,6 +299,7 @@ class PlatformLlmTokenPolicy(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     default_user_daily_llm_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=100000)
+    discussion_posts_page_size: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     discussion_ai_default_llm_config_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_configs.id", ondelete="SET NULL"),
         nullable=True,
@@ -895,11 +909,64 @@ class DiscussionPost(Base):
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     topic: Mapped[DiscussionTopic] = relationship(back_populates="posts")
-    author: Mapped[User] = relationship(back_populates="discussion_posts")
+    author: Mapped[User] = relationship(
+        back_populates="discussion_posts",
+        foreign_keys=[author_id],
+    )
+    deleted_by: Mapped["User | None"] = relationship(foreign_keys=[deleted_by_id])
     parent: Mapped["DiscussionPost | None"] = relationship(remote_side="DiscussionPost.id", back_populates="replies")
     replies: Mapped[list["DiscussionPost"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
+    attachments: Mapped[list["DiscussionPostAttachment"]] = relationship(
+        back_populates="post",
+        cascade="all, delete-orphan",
+        order_by="DiscussionPostAttachment.id.asc()",
+    )
 
 
 Index("ix_discussion_posts_topic_created", DiscussionPost.topic_id, DiscussionPost.created_at)
+
+
+class DiscussionPostAttachment(Base):
+    __tablename__ = "discussion_post_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("discussion_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    relative_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    post: Mapped[DiscussionPost] = relationship(back_populates="attachments")
+
+
+class CourseDiscussionMute(Base):
+    __tablename__ = "course_discussion_mutes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    muted_until: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    course: Mapped[Course] = relationship(back_populates="discussion_mutes", foreign_keys=[course_id])
+    user: Mapped[User] = relationship(back_populates="discussion_mutes_received", foreign_keys=[user_id])
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+
+
+Index("ix_course_discussion_mutes_course_user", CourseDiscussionMute.course_id, CourseDiscussionMute.user_id, unique=True)
+
+
+class DiscussionModerationLog(Base):
+    __tablename__ = "discussion_moderation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    post_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)

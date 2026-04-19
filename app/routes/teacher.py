@@ -30,6 +30,9 @@ from app.models import (
     Assignment,
     Course,
     CourseMember,
+    CourseDiscussionMute,
+    DiscussionPost,
+    DiscussionTopic,
     Feedback,
     FinalGradeSnapshot,
     FileQuestionConfig,
@@ -62,13 +65,16 @@ from app.services.permissions import (
     require_teacher_account,
 )
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
+from app.services.discussion_attachments import attach_discussion_images_to_post
+from app.services.discussion_forms import extract_discussion_images
 from app.services.discussions import (
-    attach_avatar_and_role_badges,
+    build_discussion_view_context,
+    can_moderate_discussion,
     can_post_on_question_topic,
-    display_label_for_post,
     get_or_create_question_topic,
-    list_posts_for_topic,
-    flat_thread_for_template,
+    hard_delete_post,
+    mute_user_in_course,
+    unmute_user_in_course,
 )
 from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.question_versions import append_question_version_after_edit, create_initial_question_version
@@ -336,6 +342,9 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         course_staff_overview = compute_course_staff_overview(db, course.id)
     if course_role == CourseRole.TEACHER:
         grade_matrix = enrich_course_grade_matrix(db, course.id, summarize_course_grade_matrix(db, course.id))
+    staff_can_mod = can_moderate_discussion(db, course.id, user)
+    mute_rows = list(db.scalars(select(CourseDiscussionMute).where(CourseDiscussionMute.course_id == course.id)).all())
+    discussion_mute_by_user = {m.user_id: m for m in mute_rows}
     return render_template(
         request,
         db,
@@ -350,6 +359,9 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "available_llm_configs": available_llm_configs,
             "grade_matrix": grade_matrix,
             "course_staff_overview": course_staff_overview,
+            "can_moderate_discussion": staff_can_mod,
+            "discussion_moderation_course_id": course.id,
+            "discussion_mute_by_user": discussion_mute_by_user,
         },
     )
 
@@ -970,16 +982,18 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
     question_class_stats = compute_question_class_stats(db, question.id, question.assignment.course_id, sid_list)
     topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
     db.commit()
-    posts = list_posts_for_topic(db, topic.id)
-    decorated = []
-    for p in posts:
-        label, hint = display_label_for_post(p, user, db, question.assignment.course_id)
-        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = attach_avatar_and_role_badges(
-        db, question.assignment.course_id, flat_thread_for_template(posts, decorated)
+    disc_ctx = build_discussion_view_context(
+        db,
+        topic_id=topic.id,
+        course_id=question.assignment.course_id,
+        viewer=user,
+        request=request,
     )
     reveal = reveal_bundle_for_question(db, question)
     can_discuss = can_post_on_question_topic(db, question, user)
+    rq = getattr(request.url, "query", "") or ""
+    disc_ret = f"{request.url.path}?{rq}" if rq else request.url.path
+    cid = question.assignment.course_id
     return render_template(
         request,
         db,
@@ -994,23 +1008,26 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
             "question_class_stats": question_class_stats,
             "topic_id": topic.id,
-            "discussion_thread": threaded,
+            **disc_ctx,
             "can_post_discussion": can_discuss,
             "reveal": reveal,
             "discussion_post_url": f"/teacher/questions/{question_id}/discuss",
             "discussion_notice": "",
+            "discussion_redirect_to": disc_ret,
+            "discussion_delete_action": f"/teacher/courses/{cid}/discussion/delete-post",
         },
     )
 
 
 @router.post("/questions/{question_id}/discuss")
-def teacher_question_discuss(
+async def teacher_question_discuss(
     question_id: int,
     request: Request,
     body: str = Form(""),
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -1026,6 +1043,7 @@ def teacher_question_discuss(
     topic = get_or_create_question_topic(db, question.id, question.assignment.course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    image_files = await extract_discussion_images(request)
     try:
         _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -1035,16 +1053,146 @@ def teacher_question_discuss(
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
+            pending_image_uploads=bool(image_files),
         )
+        if _u is not None and image_files:
+            try:
+                attach_discussion_images_to_post(db, _u, question.assignment.course_id, image_files)
+            except ValueError as att_err:
+                if str(att_err) == "too_many_images":
+                    raise ValueError("too_many_images") from att_err
+                raise
         db.commit()
-    except ValueError:
+    except ValueError as exc:
         db.rollback()
-        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
-        return _redirect(f"/teacher/questions/{question_id}")
+        key = str(exc) if exc else ""
+        if key == "user_muted":
+            msg = choose_text(
+                request,
+                "You are muted from posting in this course discussion.",
+                "你已被禁止在本课程讨论区发言。",
+            )
+        elif key == "body_too_large":
+            msg = choose_text(request, "Message is too long.", "内容过长。")
+        elif key == "remote_images_not_allowed":
+            msg = choose_text(
+                request,
+                "Remote images in markdown are not allowed; use uploads instead.",
+                "不允许在 Markdown 中嵌入外链图片，请使用上传图片。",
+            )
+        elif key == "too_many_images":
+            msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        else:
+            msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
+        dest = redirect_to.strip() or f"/teacher/questions/{question_id}"
+        push_flash(request, msg, "danger")
+        return _redirect(dest)
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    return _redirect(f"/teacher/questions/{question_id}")
+    dest = redirect_to.strip() or f"/teacher/questions/{question_id}"
+    return _redirect(dest)
+
+
+def _discussion_post_in_course(db: Session, post_id: int, course_id: int) -> DiscussionPost | None:
+    post = db.get(DiscussionPost, post_id)
+    if post is None or getattr(post, "deleted_at", None) is not None:
+        return None
+    topic = db.get(DiscussionTopic, post.topic_id)
+    if topic is None or topic.course_id != course_id:
+        return None
+    return post
+
+
+@router.post("/courses/{course_id}/discussion/delete-post")
+def teacher_delete_discussion_post(
+    course_id: int,
+    request: Request,
+    post_id: int = Form(...),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_staff(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        return _redirect("/teacher/courses")
+    if not can_moderate_discussion(db, course_id, user):
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    post = _discussion_post_in_course(db, post_id, course_id)
+    if post is None:
+        push_flash(request, choose_text(request, "Post not found.", "未找到帖子。"), "danger")
+        return _redirect(redirect_to or f"/teacher/courses/{course_id}")
+    hard_delete_post(db, post, actor=user, course_id=course_id)
+    db.commit()
+    push_flash(request, choose_text(request, "Post deleted.", "帖子已删除。"), "success")
+    return _redirect(redirect_to or f"/teacher/courses/{course_id}")
+
+
+@router.post("/courses/{course_id}/discussion/mute-user")
+def teacher_mute_discussion_user(
+    course_id: int,
+    request: Request,
+    user_id: int = Form(...),
+    muted_until: str = Form(""),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_staff(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        return _redirect("/teacher/courses")
+    if not can_moderate_discussion(db, course_id, user):
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, choose_text(request, "User not found.", "用户不存在。"), "danger")
+        return _redirect(redirect_to or f"/teacher/courses/{course_id}")
+    until_dt = None
+    raw = (muted_until or "").strip()
+    if raw:
+        try:
+            until_dt = datetime.fromisoformat(raw)
+            if until_dt.tzinfo is None:
+                until_dt = until_dt.replace(tzinfo=display_timezone)
+        except ValueError:
+            push_flash(request, choose_text(request, "Invalid end time.", "结束时间无效。"), "danger")
+            return _redirect(redirect_to or f"/teacher/courses/{course_id}")
+    mute_user_in_course(db, course_id=course_id, target_user_id=target.id, actor=user, muted_until=until_dt)
+    db.commit()
+    push_flash(request, choose_text(request, "User muted from discussions.", "已禁止该用户在本课程讨论区发言。"), "success")
+    return _redirect(redirect_to or f"/teacher/courses/{course_id}")
+
+
+@router.post("/courses/{course_id}/discussion/unmute-user")
+def teacher_unmute_discussion_user(
+    course_id: int,
+    request: Request,
+    user_id: int = Form(...),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_staff(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        return _redirect("/teacher/courses")
+    if not can_moderate_discussion(db, course_id, user):
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    unmute_user_in_course(db, course_id=course_id, target_user_id=user_id, actor=user)
+    db.commit()
+    push_flash(request, choose_text(request, "Mute removed.", "已解除禁言。"), "success")
+    return _redirect(redirect_to or f"/teacher/courses/{course_id}")
 
 
 @router.get("/courses/{course_id}/grades/student/{student_id}")
