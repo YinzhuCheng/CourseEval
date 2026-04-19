@@ -75,6 +75,17 @@ settings = get_settings()
 display_timezone = ZoneInfo(settings.timezone_name)
 
 
+_TEACHER_UPLOAD_ERROR_ZH = {
+    "Reference answer uploads must be one of:": "参考答案附件格式不支持。请上传 PDF、TeX、TXT、Markdown 或 ipynb 文件。",
+}
+
+
+def _teacher_error_message(request: Request, exc: Exception) -> str:
+    text = str(exc)
+    zh = next((message for prefix, message in _TEACHER_UPLOAD_ERROR_ZH.items() if text.startswith(prefix)), text)
+    return choose_text(request, text, zh)
+
+
 def _redirect(location: str) -> RedirectResponse:
     return RedirectResponse(url=location, status_code=303)
 
@@ -537,7 +548,11 @@ async def create_question(
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:
-        push_flash(request, "You do not have teacher access to this assignment.", "danger")
+        push_flash(
+            request,
+            choose_text(request, "You do not have teacher access to this assignment.", "你没有该作业的教师端访问权限。"),
+            "danger",
+        )
         return _redirect("/teacher/courses")
 
     try:
@@ -572,7 +587,7 @@ async def create_question(
                 file_bytes=raw,
             )
         except ValueError as exc:
-            push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+            push_flash(request, _teacher_error_message(request, exc), "danger")
             db.rollback()
             return _redirect(f"/teacher/assignments/{assignment.id}")
 
@@ -1060,7 +1075,7 @@ async def update_question(
             )
             uploaded_ref = True
         except ValueError as exc:
-            push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+            push_flash(request, _teacher_error_message(request, exc), "danger")
             return _redirect(f"/teacher/questions/{question.id}")
 
     if question.question_type == QuestionType.SHORT_ANSWER and question.short_answer_config:

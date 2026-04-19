@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -34,12 +34,39 @@ from app.services.submissions import (
     is_submission_pending_teacher_review,
     list_submissions_for_question,
     read_student_safe_submission_artifact_text,
-    resolve_submission_artifact_path,
 )
 from app.web import render_template
 
 
 router = APIRouter(prefix="/student", tags=["student"])
+
+
+_SUBMISSION_ERROR_ZH = {
+    "File type": "文件类型不符合该题要求。",
+    "The uploaded PDF is empty.": "上传的 PDF 是空文件。",
+    "The uploaded PDF could not be rendered into images.": "上传的 PDF 无法渲染为页面图片。",
+    "Notebook submissions for this question must include executed outputs before upload.": "该题要求上传前已执行过的 Notebook，并保留输出结果。",
+    "The uploaded notebook is empty.": "上传的 Notebook 没有可读取内容。",
+    "Answer cannot be empty.": "作答内容不能为空。",
+    "Unsupported code language.": "不支持所选代码语言。",
+    "Code question configuration is missing for this question.": "该代码题配置不完整，请联系教师。",
+    "This language is not allowed for the question.": "该题不允许使用所选语言。",
+    "Uploaded code file is empty.": "上传的代码文件为空。",
+    "File question configuration is missing for this question.": "该文件题配置不完整，请联系教师。",
+    "The uploaded file does not contain any extractable content.": "上传文件没有可读取内容。",
+    "Submission window has not opened yet.": "提交尚未开放。",
+    "Submission window is closed.": "提交已关闭。",
+    "Late submissions are not allowed for this assignment.": "该作业不允许迟交。",
+    "Submission limit reached.": "已达到提交次数限制。",
+}
+
+
+def _submission_error_message(request: Request, exc: Exception) -> str:
+    text = str(exc)
+    zh = _SUBMISSION_ERROR_ZH.get(text)
+    if zh is None:
+        zh = next((message for prefix, message in _SUBMISSION_ERROR_ZH.items() if text.startswith(prefix)), text)
+    return choose_text(request, text, zh)
 
 
 @router.get("/courses")
@@ -202,11 +229,11 @@ async def submit_notebook(
             "success",
         )
     except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+        push_flash(request, _submission_error_message(request, exc), "danger")
     except Exception as exc:
         push_flash(
             request,
-            choose_text(request, f"Notebook upload failed: {exc}", f"Notebook 上传失败：{exc}"),
+            choose_text(request, f"Notebook upload failed: {exc}", "Notebook 上传失败，请稍后重试或联系教师。"),
             "danger",
         )
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
@@ -266,14 +293,14 @@ async def submit_code(
             "success",
         )
     except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+        push_flash(request, _submission_error_message(request, exc), "danger")
     except Exception as exc:
         push_flash(
             request,
             choose_text(
                 request,
                 f"Failed to submit code: {exc}",
-                f"提交代码失败：{exc}",
+                "提交代码失败，请稍后重试或联系教师。",
             ),
             "danger",
         )
@@ -325,7 +352,13 @@ def submit_short_answer(
                 "success",
             )
     except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+        push_flash(request, _submission_error_message(request, exc), "danger")
+    except Exception as exc:
+        push_flash(
+            request,
+            choose_text(request, f"Failed to submit answer: {exc}", "提交答案失败，请稍后重试或联系教师。"),
+            "danger",
+        )
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
 
 
@@ -374,11 +407,11 @@ async def submit_file_question(
             "success",
         )
     except ValueError as exc:
-        push_flash(request, choose_text(request, str(exc), str(exc)), "danger")
+        push_flash(request, _submission_error_message(request, exc), "danger")
     except Exception as exc:
         push_flash(
             request,
-            choose_text(request, f"Failed to upload file submission: {exc}", f"文件提交上传失败：{exc}"),
+            choose_text(request, f"Failed to upload file submission: {exc}", "文件提交上传失败，请稍后重试或联系教师。"),
             "danger",
         )
     return RedirectResponse(url=f"/student/questions/{question_id}", status_code=303)
@@ -441,31 +474,17 @@ def student_submission_artifact(
         )
         return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
 
-    if artifact_name in {"stdout", "stderr"}:
-        content = read_student_safe_submission_artifact_text(latest_result, artifact_name)
-        filename = f"submission-{submission_id}-{artifact_name}.txt"
-        return PlainTextResponse(
-            content,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-
-    try:
-        artifact_path = resolve_submission_artifact_path(latest_result, artifact_name)
-    except FileNotFoundError:
+    if artifact_name not in {"stdout", "stderr"}:
         push_flash(
             request,
-            choose_text(request, "The requested artifact is not available yet.", "所请求的产物暂时还不可用。"),
+            choose_text(request, "This artifact is only visible to course staff.", "该产物仅课程教师与助教可见。"),
             "warning",
         )
         return RedirectResponse(url=f"/student/submissions/{submission_id}", status_code=303)
 
-    media_type = "text/plain"
-    filename = artifact_path.name
-    if artifact_name == "html":
-        media_type = "text/html"
-        filename = f"submission-{submission_id}.html"
-    elif artifact_name == "executed_notebook":
-        media_type = "application/x-ipynb+json"
-        filename = f"submission-{submission_id}.ipynb"
-
-    return FileResponse(path=artifact_path, media_type=media_type, filename=filename)
+    content = read_student_safe_submission_artifact_text(latest_result, artifact_name)
+    filename = f"submission-{submission_id}-{artifact_name}.txt"
+    return PlainTextResponse(
+        content,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

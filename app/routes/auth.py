@@ -281,7 +281,7 @@ def register_user(
             email_verification_token=None,
             email_verification_sent_at=None,
         )
-        if not has_super_admin(db, require_verified=True):
+        if not has_super_admin(db, require_verified=False):
             assign_user_role(user, UserRole.SUPER_ADMIN)
         db.add(user)
         db.commit()
@@ -302,6 +302,8 @@ def register_user(
         platform_role=PlatformRole.USER,
         **initial_email_verification_state(verification_token),
     )
+    if not has_super_admin(db, require_verified=False):
+        assign_user_role(user, UserRole.SUPER_ADMIN)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -375,8 +377,9 @@ def verify_email(
         push_flash(request, t(request, "flash.email_verification_expired"), "warning")
         return RedirectResponse(url=f"/login?email={user.email}", status_code=303)
 
+    should_bootstrap_super_admin = not has_super_admin(db, require_verified=False)
     mark_email_verified(user)
-    if not has_super_admin(db, require_verified=True):
+    if should_bootstrap_super_admin:
         assign_user_role(user, UserRole.SUPER_ADMIN)
     bootstrap_sample_data(db, user)
     db.commit()

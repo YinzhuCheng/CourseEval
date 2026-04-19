@@ -65,7 +65,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
             "running": "运行中",
             "completed": "已完成",
             "failed_system": "失败（系统）",
-            "failed_answer": "失败（作答）",
+            "failed_answer": "未通过评测",
         },
         "course_role": {"student": "学生", "teacher": "教师", "ta": "助教"},
         "course_status": {"active": "进行中", "archived": "已归档"},

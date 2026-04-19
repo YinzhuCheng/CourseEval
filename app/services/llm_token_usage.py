@@ -6,7 +6,8 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants import LLMProvider
@@ -129,15 +130,14 @@ def assert_room_for_llm_call(
     remaining = max(0, limit - consumed)
     if consumed >= limit:
         raise ValueError(
-            f"Daily LLM token quota exceeded (actual_usage_today={consumed}/{limit} for Beijing date {day}). "
+            f"Daily LLM token quota exceeded ({consumed}/{limit} tokens used for Beijing date {day}). "
             "Try again tomorrow or ask an administrator to raise your limit."
         )
     if consumed + reserve > limit:
         raise ValueError(
-            f"Estimated token budget for this call (~{reserve}) exceeds your remaining daily quota "
-            f"(remaining={remaining}, limit={limit}, actual_usage_today={consumed}, Beijing date {day}). "
-            "This is a pre-call budget check, not how many tokens you have already used today. "
-            "Try again tomorrow, shorten inputs, or ask an administrator to raise your limit."
+            f"This LLM review may need about {reserve} tokens, but only {remaining} remain today "
+            f"(daily limit {limit}, Beijing date {day}). Try again tomorrow, shorten the input, "
+            "or ask an administrator to raise your limit."
         )
     return limit, day, consumed
 
@@ -153,25 +153,42 @@ def record_llm_usage(db: Session, user_id: int, config: LLMConfig, raw_response:
         return
     limit = effective_daily_token_limit(user, platform_default)
 
+    now = utcnow()
+    capped_tokens = min(tokens, limit)
     row = db.scalar(select(UserLlmTokenDaily).where(UserLlmTokenDaily.user_id == user_id, UserLlmTokenDaily.usage_date == day))
     if row is None:
-        row = UserLlmTokenDaily(user_id=user_id, usage_date=day, consumed_tokens=0, updated_at=utcnow())
-        db.add(row)
-        db.flush()
-
-    new_total = int(row.consumed_tokens) + tokens
-    if new_total > limit:
-        logger.warning(
-            "LLM usage exceeds daily cap after call (user=%s day=%s %s+%s>%s); capping at limit.",
-            user_id,
-            day,
-            row.consumed_tokens,
-            tokens,
-            limit,
+        db.add(
+            UserLlmTokenDaily(
+                user_id=user_id,
+                usage_date=day,
+                consumed_tokens=capped_tokens,
+                updated_at=now,
+            )
         )
-        new_total = limit
-    row.consumed_tokens = new_total
-    row.updated_at = utcnow()
+        try:
+            db.commit()
+            if tokens > limit:
+                logger.warning(
+                    "LLM usage exceeds daily cap after call (user=%s day=%s 0+%s>%s); capping at limit.",
+                    user_id,
+                    day,
+                    tokens,
+                    limit,
+                )
+            return
+        except IntegrityError:
+            db.rollback()
+
+    old_total = UserLlmTokenDaily.consumed_tokens
+    capped_total = case(
+        (old_total + tokens > limit, limit),
+        else_=old_total + tokens,
+    )
+    db.execute(
+        update(UserLlmTokenDaily)
+        .where(UserLlmTokenDaily.user_id == user_id, UserLlmTokenDaily.usage_date == day)
+        .values(consumed_tokens=capped_total, updated_at=now)
+    )
     db.commit()
 
 

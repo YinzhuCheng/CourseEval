@@ -42,10 +42,10 @@
           <dt class="col-sm-5">{{ lx("Late", "是否迟交") }}</dt>
           <dd class="col-sm-7">{{ lx("Yes", "是") if submission.is_late else lx("No", "否") }}</dd>
 
-          <dt class="col-sm-5">{{ lx("Counts toward limit", "是否计入次数限制") }}</dt>
+          <dt class="col-sm-5">{{ lx("Uses an attempt", "是否消耗提交机会") }}</dt>
           <dd class="col-sm-7">{{ lx("Yes", "是") if submission.counts_toward_limit else lx("No", "否") }}</dd>
 
-          <dt class="col-sm-5">{{ lx("Effective", "是否已生效") }}</dt>
+          <dt class="col-sm-5">{{ lx("Counts toward grade", "是否计入当前成绩") }}</dt>
           <dd class="col-sm-7">{{ lx("Yes", "是") if submission.is_effective_submission else lx("No", "否") }}</dd>
         </dl>
         {% if pending_teacher_review %}
@@ -82,7 +82,7 @@
           <dt class="col-sm-6">{{ lx("Score source", "分数来源") }}</dt>
           <dd class="col-sm-6">{{ elabel("feedback_source", result_view.score_source) if result_view.score_source else "-" }}</dd>
           {% if result_view.run_success is not none %}
-          <dt class="col-sm-6">{{ lx("Run success", "运行是否成功") }}</dt>
+          <dt class="col-sm-6">{{ lx("Program finished normally", "程序是否正常结束") }}</dt>
           <dd class="col-sm-6">{{ lx("Yes", "是") if result_view.run_success else lx("No", "否") }}</dd>
           {% endif %}
           {% if result_view.visible_score is not none %}
@@ -99,10 +99,10 @@
         <h3 class="h6 mb-2">{{ lx("Evaluation summary", "评测摘要") }}</h3>
         <ul class="small text-muted mb-0">
           {% if result_view.message %}
-          <li>{{ result_view.message }}</li>
+          <li>{{ lx(result_view.message, result_view.message_zh) }}</li>
           {% endif %}
           {% if result_view.visible_message %}
-          <li>{{ lx("Visible checks", "可见测试") }}: {{ result_view.visible_message }}</li>
+          <li>{{ lx("Visible checks", "可见测试") }}: {{ lx(result_view.visible_message, result_view.visible_message_zh) }}</li>
           {% endif %}
           {% if result_view.hidden_checks_applied %}
           <li>{{ lx("Additional hidden checks were run, but their detailed breakdown is only visible to course staff.", "系统还运行了隐藏测试，但详细结果仅对课程教师与助教可见。") }}</li>

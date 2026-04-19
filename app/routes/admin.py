@@ -286,10 +286,16 @@ def admin_create_llm_config(
     except PermissionError:
         return _redirect("/login")
 
+    try:
+        provider = LLMProvider(provider_type)
+    except ValueError:
+        push_flash(request, t(request, "flash.invalid_llm_provider"), "danger")
+        return _redirect("/admin/llm-configs")
+
     config = LLMConfig(
         scope=LLMScope.PLATFORM,
         name=name.strip(),
-        provider_type=LLMProvider(provider_type),
+        provider_type=provider,
         base_url=base_url.strip() or None,
         api_key=api_key.strip() or None,
         model_name=model_name.strip(),
