@@ -40,7 +40,7 @@
             {% endif %}
           </ul>
           <div class="d-flex align-items-center gap-2 text-white flex-wrap">
-            <div class="btn-group btn-group-sm" role="group" aria-label="Language switch">
+            <div class="btn-group btn-group-sm" role="group" aria-label="{{ t('nav.locale_switch_aria') }}">
               <a class="btn btn-outline-light {% if current_locale == 'en' %}active{% endif %}" href="/locale/en">{{ t("locale.switch_to_en") }}</a>
               <a class="btn btn-outline-light {% if current_locale == 'zh' %}active{% endif %}" href="/locale/zh">{{ t("locale.switch_to_zh") }}</a>
             </div>
@@ -53,11 +53,11 @@
               {% endif %}
               <span class="small text-white-50 d-none d-sm-inline">{{ current_user.username }}</span>
               {% if current_user_role == "super_admin" %}
-              <span class="badge bg-danger">super</span>
+              <span class="badge bg-danger">{{ t("nav.role_super_admin") }}</span>
               {% elif current_user_role == "admin" %}
-              <span class="badge bg-warning text-dark">admin</span>
+              <span class="badge bg-warning text-dark">{{ t("nav.role_admin") }}</span>
               {% elif current_user_role == "teacher" %}
-              <span class="badge bg-info text-dark">teacher</span>
+              <span class="badge bg-info text-dark">{{ t("nav.role_teacher") }}</span>
               {% endif %}
             </a>
             <form method="post" action="/logout" class="m-0">

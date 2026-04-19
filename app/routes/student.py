@@ -6,7 +6,7 @@ from starlette.requests import Request
 from app.auth import push_flash
 from app.constants import CodeLanguage, CourseRole, QuestionType
 from app.db import get_db
-from app.i18n import choose_text
+from app.i18n import choose_text, get_locale
 from app.runtime_support import (
     SUPPORTED_PYTHON_PACKAGES,
     SUPPORTED_PYTHON_VERSION,
@@ -497,7 +497,7 @@ def student_submission_detail(submission_id: int, request: Request, db: Session 
         {
             "submission": submission,
             "latest_result": latest_result,
-            "result_view": build_student_result_view(submission),
+            "result_view": build_student_result_view(submission, locale=get_locale(request)),
             "feedback_items": feedback,
             "pending_teacher_review": pending_teacher_review,
             "stdout_text": read_student_safe_submission_artifact_text(latest_result, "stdout") if latest_result else "",

@@ -92,15 +92,30 @@
             </div>
           </div>
           {% if question.code_config %}
+          {% set visible_samples = question.code_config.visible_tests() %}
+          {% set hidden_samples = question.code_config.hidden_tests() %}
+          {% set visible_pts = visible_samples | sum(attribute="points") %}
+          {% set hidden_pts = hidden_samples | sum(attribute="points") %}
+          {% set total_pts = visible_pts + hidden_pts %}
+          {% set total_tests = (visible_samples | length) + (hidden_samples | length) %}
+          {% if (hidden_samples | length) > 0 %}
+            {% set hidden_part = t("student.code_question.tests_hidden_part", hidden_count=hidden_samples|length, hidden_points=hidden_pts) %}
+          {% else %}
+            {% set hidden_part = t("student.code_question.tests_no_hidden") %}
+          {% endif %}
           <div class="col-12">
             <div class="alert alert-info mb-0">
               <div><strong>{{ lx("Input format", "输入格式") }}:</strong> {{ question.code_config.input_spec }}</div>
               <div class="mt-2"><strong>{{ lx("Output format", "输出格式") }}:</strong> {{ question.code_config.output_spec }}</div>
               <div class="mt-2"><strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong> {{ question.code_config.allowed_libraries_note }}</div>
               <div class="mt-2 small text-muted">
-                {{ lx(
-                  "This question uses 5 tests worth 20 points each. Three sample tests are visible below and two hidden tests are staff-only.",
-                  "该题共有 5 个测试点，每个 20 分。其中 3 个示例测试对学生可见，2 个隐藏测试仅课程教师可见。"
+                {{ t(
+                  "student.code_question.tests_overview",
+                  test_count=total_tests,
+                  total_points=total_pts,
+                  visible_count=visible_samples|length,
+                  visible_points=visible_pts,
+                  hidden_part=hidden_part,
                 ) }}
               </div>
             </div>
@@ -108,9 +123,9 @@
           <div class="col-12">
             <div class="border rounded-4 p-3 bg-light-subtle">
               <div class="fw-semibold mb-2">{{ lx("Visible test cases", "可见测试样例") }}</div>
-              {% for sample in question.code_config.visible_tests() %}
+              {% for sample in visible_samples %}
               <div class="mb-3 {% if not loop.last %}border-bottom pb-3{% endif %}">
-                <div class="small text-muted">{{ lx("Visible test", "可见测试") }} {{ loop.index }} · 20 {{ lx("points", "分") }}</div>
+                <div class="small text-muted">{{ lx("Visible test", "可见测试") }} {{ loop.index }} · {{ "%g"|format(sample.points) }} {{ lx("points", "分") }}</div>
                 <div><strong>{{ lx("Input", "输入") }}</strong></div>
                 <pre class="artifact-block mb-2">{{ sample.input }}</pre>
                 <div><strong>{{ lx("Expected output", "期望输出") }}</strong></div>
@@ -130,8 +145,8 @@
             <div class="section-note">
               {% if question.question_type.value in ["formatted_text_llm", "file_llm"] %}
               {{ lx(
-                "Use this route for open-ended files such as .txt, .tex, or .ipynb. ipynb files are reviewed through the file / LLM workflow instead of the retired notebook runner.",
-                "开放式文件题请走这里提交，例如 .txt、.tex 或 .ipynb。ipynb 会通过文件 / LLM 评测流程处理，不再走旧版 Notebook 执行链路。"
+                "For open-ended files such as .txt, .tex, or .ipynb, submit here. .ipynb files are reviewed through the file / LLM grading workflow.",
+                "开放式文件题请在此提交，例如 .txt、.tex 或 .ipynb。ipynb 会通过文件 / LLM 评阅流程完成批改。"
               ) }}
               {% else %}
               {{ lx(
