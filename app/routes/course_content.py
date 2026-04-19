@@ -19,18 +19,23 @@ from app.services.course_materials import (
 )
 from app.services.courses import get_course_for_staff, get_course_for_student
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply
+from app.services.discussion_attachments import attach_discussion_images_to_post, delete_discussion_attachment_files
+from app.services.discussion_forms import extract_discussion_images
 from app.services.discussions import (
-    attach_avatar_and_role_badges,
+    build_discussion_view_context,
     can_post_on_material_topic,
-    display_label_for_post,
     get_or_create_material_topic,
-    list_posts_for_topic,
-    flat_thread_for_template,
 )
 from app.services.permissions import RedirectRequired, get_course_role, require_teacher_account, require_user
+from app.services.redirects import safe_local_redirect
 from app.web import render_template
 
 router = APIRouter(tags=["course_content"])
+
+
+def _discussion_return_url(request: Request) -> str:
+    q = getattr(request.url, "query", "") or ""
+    return f"{request.url.path}?{q}" if q else request.url.path
 
 
 def _redirect(url: str) -> RedirectResponse:
@@ -179,12 +184,7 @@ def teacher_material_detail(course_id: int, material_id: int, request: Request, 
         return _redirect(f"/teacher/courses/{course_id}")
     topic = get_or_create_material_topic(db, material.id, course_id)
     db.commit()
-    posts = list_posts_for_topic(db, topic.id)
-    decorated = []
-    for p in posts:
-        label, hint = display_label_for_post(p, user, db, course_id)
-        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
+    disc_ctx = build_discussion_view_context(db, topic_id=topic.id, course_id=course_id, viewer=user, request=request)
     can_post = can_post_on_material_topic(db, course_id, user)
     from app.services.markdown_sanitize import render_material_markdown
 
@@ -198,17 +198,19 @@ def teacher_material_detail(course_id: int, material_id: int, request: Request, 
             "material": material,
             "body_html": body_html,
             "topic_id": topic.id,
-            "discussion_thread": threaded,
+            **disc_ctx,
             "can_post_discussion": can_post,
             "is_teacher_view": True,
             "discussion_post_url": f"/teacher/courses/{course_id}/materials/{material_id}/discuss",
             "discussion_notice": "",
+            "discussion_redirect_to": _discussion_return_url(request),
+            "discussion_delete_action": f"/teacher/courses/{course_id}/discussion/delete-post",
         },
     )
 
 
 @router.post("/teacher/courses/{course_id}/materials/{material_id}/discuss")
-def teacher_material_discuss(
+async def teacher_material_discuss(
     course_id: int,
     material_id: int,
     request: Request,
@@ -216,6 +218,8 @@ def teacher_material_discuss(
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    ai_group_id: str = Form(""),
+    redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -234,6 +238,10 @@ def teacher_material_discuss(
     topic = get_or_create_material_topic(db, material.id, course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    selected_group_id = int(ai_group_id) if ai_group_id.strip().isdigit() else None
+    image_files = await extract_discussion_images(request)
+    attachment_paths: list[str] = []
+    default_dest = f"/teacher/courses/{course_id}/materials/{material_id}"
     try:
         _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -243,16 +251,51 @@ def teacher_material_discuss(
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
+            pending_image_uploads=bool(image_files),
+            selected_llm_group_id=selected_group_id,
         )
+        if _u is not None and image_files:
+            try:
+                attachment_paths = attach_discussion_images_to_post(db, _u, course_id, image_files)
+            except ValueError as att_err:
+                if str(att_err) == "too_many_images":
+                    raise ValueError("too_many_images") from att_err
+                raise
         db.commit()
-    except ValueError:
+    except ValueError as exc:
         db.rollback()
-        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
-        return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}")
+        delete_discussion_attachment_files(attachment_paths)
+        key = str(exc) if exc else ""
+        if key == "user_muted":
+            msg = choose_text(
+                request,
+                "You are muted from posting in this course discussion.",
+                "你已被禁止在本课程讨论区发言。",
+            )
+        elif key == "body_too_large":
+            msg = choose_text(request, "Message is too long.", "内容过长。")
+        elif key == "remote_images_not_allowed":
+            msg = choose_text(
+                request,
+                "Remote images in markdown are not allowed; use uploads instead.",
+                "不允许在 Markdown 中嵌入外链图片，请使用上传图片。",
+            )
+        elif key == "too_many_images":
+            msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        else:
+            msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
+        push_flash(request, msg, "danger")
+        dest = safe_local_redirect(redirect_to, default_dest)
+        return _redirect(dest)
+    except Exception:
+        db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
+        raise
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    return _redirect(f"/teacher/courses/{course_id}/materials/{material_id}")
+    dest = safe_local_redirect(redirect_to, default_dest)
+    return _redirect(dest)
 
 
 @router.get("/student/courses/{course_id}/materials/{material_id}")
@@ -269,12 +312,7 @@ def student_material_detail(course_id: int, material_id: int, request: Request, 
         return _redirect(f"/student/courses/{course_id}")
     topic = get_or_create_material_topic(db, material.id, course_id)
     db.commit()
-    posts = list_posts_for_topic(db, topic.id)
-    decorated = []
-    for p in posts:
-        label, hint = display_label_for_post(p, user, db, course_id)
-        decorated.append({"post": p, "display_name": label, "staff_hint": hint})
-    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
+    disc_ctx = build_discussion_view_context(db, topic_id=topic.id, course_id=course_id, viewer=user, request=request)
     can_post = can_post_on_material_topic(db, course_id, user)
     from app.services.markdown_sanitize import render_material_markdown
 
@@ -288,17 +326,18 @@ def student_material_detail(course_id: int, material_id: int, request: Request, 
             "material": material,
             "body_html": body_html,
             "topic_id": topic.id,
-            "discussion_thread": threaded,
+            **disc_ctx,
             "can_post_discussion": can_post,
             "is_teacher_view": False,
             "discussion_post_url": f"/student/courses/{course_id}/materials/{material_id}/discuss",
             "discussion_notice": "",
+            "discussion_redirect_to": _discussion_return_url(request),
         },
     )
 
 
 @router.post("/student/courses/{course_id}/materials/{material_id}/discuss")
-def student_material_discuss(
+async def student_material_discuss(
     course_id: int,
     material_id: int,
     request: Request,
@@ -306,6 +345,8 @@ def student_material_discuss(
     parent_post_id: str = Form(""),
     anonymous: str = Form(""),
     request_ai: str = Form(""),
+    ai_group_id: str = Form(""),
+    redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -324,6 +365,10 @@ def student_material_discuss(
     topic = get_or_create_material_topic(db, material.id, course_id)
     db.commit()
     pid = int(parent_post_id) if parent_post_id.strip().isdigit() else None
+    selected_group_id = int(ai_group_id) if ai_group_id.strip().isdigit() else None
+    image_files = await extract_discussion_images(request)
+    attachment_paths = []
+    default_dest = f"/student/courses/{course_id}/materials/{material_id}"
     try:
         _u, ai_err = create_user_post_and_maybe_ai_reply(
             db,
@@ -333,14 +378,48 @@ def student_material_discuss(
             parent_post_id=pid,
             is_anonymous=(anonymous == "on" or anonymous == "true"),
             request_ai=(request_ai == "on" or request_ai == "true"),
+            pending_image_uploads=bool(image_files),
+            selected_llm_group_id=selected_group_id,
         )
+        if _u is not None and image_files:
+            try:
+                attachment_paths = attach_discussion_images_to_post(db, _u, course_id, image_files)
+            except ValueError as att_err:
+                if str(att_err) == "too_many_images":
+                    raise ValueError("too_many_images") from att_err
+                raise
         db.commit()
-    except ValueError:
+    except ValueError as exc:
         db.rollback()
-        push_flash(request, choose_text(request, "Message cannot be empty.", "内容不能为空。"), "danger")
-        return _redirect(f"/student/courses/{course_id}/materials/{material_id}")
+        delete_discussion_attachment_files(attachment_paths)
+        key = str(exc) if exc else ""
+        if key == "user_muted":
+            msg = choose_text(
+                request,
+                "You are muted from posting in this course discussion.",
+                "你已被禁止在本课程讨论区发言。",
+            )
+        elif key == "body_too_large":
+            msg = choose_text(request, "Message is too long.", "内容过长。")
+        elif key == "remote_images_not_allowed":
+            msg = choose_text(
+                request,
+                "Remote images in markdown are not allowed; use uploads instead.",
+                "不允许在 Markdown 中嵌入外链图片，请使用上传图片。",
+            )
+        elif key == "too_many_images":
+            msg = choose_text(request, "Too many images for one post.", "单条帖子图片数量超过上限。")
+        else:
+            msg = choose_text(request, "Message cannot be empty.", "内容不能为空。")
+        push_flash(request, msg, "danger")
+        dest = safe_local_redirect(redirect_to, default_dest)
+        return _redirect(dest)
+    except Exception:
+        db.rollback()
+        delete_discussion_attachment_files(attachment_paths)
+        raise
     push_flash(request, choose_text(request, "Posted.", "已发布。"), "success")
     if ai_err:
         push_flash(request, choose_text(request, f"AI: {ai_err}", f"AI：{ai_err}"), "warning")
-    return _redirect(f"/student/courses/{course_id}/materials/{material_id}")
-
+    dest = safe_local_redirect(redirect_to, default_dest)
+    return _redirect(dest)

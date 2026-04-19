@@ -11,7 +11,8 @@ from app.config import get_settings
 from app.db import utcnow
 from app.models import Course, CourseMaterial, User
 from app.services.discussions import get_or_create_material_topic
-from app.services.storage_paths import absolute_data_path, relative_to_data
+from app.services.image_uploads import normalize_uploaded_image
+from app.services.storage_paths import relative_to_data
 
 settings = get_settings()
 
@@ -79,13 +80,9 @@ def update_material(
 
 
 def store_material_image(course_id: int, material_id: int, file_bytes: bytes, original_filename: str) -> str:
-    ext = Path(original_filename).suffix.lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        raise ValueError("unsupported_image_type")
-    if len(file_bytes) > settings.upload_max_bytes:
-        raise ValueError("file_too_large")
+    ext, cleaned = normalize_uploaded_image(file_bytes, original_filename)
     upload_dir = settings.uploads_dir / "course-materials" / f"course-{course_id}" / f"material-{material_id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
     stored = upload_dir / f"{uuid4().hex}{ext}"
-    stored.write_bytes(file_bytes)
+    stored.write_bytes(cleaned)
     return relative_to_data(stored)

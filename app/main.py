@@ -47,11 +47,11 @@ def startup() -> None:
 
 
 @app.get("/healthz")
-def healthz():
+async def healthz():
     return JSONResponse({"status": "ok"})
 
 
 @app.get("/")
-def home(request: Request, db: Session = Depends(get_db)):
+async def home(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     return RedirectResponse(url=landing_path_for_user(user), status_code=303)

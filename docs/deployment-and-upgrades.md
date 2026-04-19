@@ -35,8 +35,8 @@ Minimum production-like values:
 - `DATABASE_URL`: database location
 - `DATA_DIR`: persistent directory
 - `REDIS_URL`: Redis reachable from web and worker processes
-- `PYTHON_QUEUE_NAME`: code-evaluation queue name
-- `LLM_QUEUE_PREFIX`: prefix for per-LLM-config queues
+- `CODE_QUEUE_NAME`: code-evaluation queue name
+- `LLM_QUEUE_PREFIX`: prefix for per-LLM-group queues
 - `RUNNER_IMAGE`: default Docker image tag for code evaluation
 - `RUNNER_MEMORY_LIMIT`, `RUNNER_CPUS`, `EXECUTION_TIMEOUT_SECONDS`: sandbox limits
 - `DOCKER_NETWORK_DISABLED=true` unless a reviewed runner image requires network access
@@ -65,12 +65,12 @@ Then rebuild and redeploy the runner image.
 
 `worker.py` starts:
 
-- one worker for `PYTHON_QUEUE_NAME`
-- one or more workers per enabled `LLMConfig`, using `LLM_QUEUE_PREFIX-<config_id>`
+- one worker for `CODE_QUEUE_NAME`
+- one or more workers per enabled LLM group, using `LLM_QUEUE_PREFIX-<group_id>`
 
-Each enabled LLM config's `queue_concurrency` controls how many worker processes are created for that config.
+Each enabled LLM group's `queue_concurrency` controls how many worker processes are created for that group. Inside a group, the worker tries priority #1 first and only uses later LLM members after earlier members fail; the next task starts from #1 again.
 
-If LLM config rows change while the worker is running, the worker manager periodically reconciles the desired queue layout.
+If LLM group rows change while the worker is running, the worker manager periodically reconciles the desired queue layout.
 
 ## PDF and LLM deployment
 
@@ -88,7 +88,7 @@ Current behavior:
 2. `init_database()` runs `Base.metadata.create_all(bind=engine)`.
 3. `init_database()` seeds the open community course.
 
-There is no Alembic migration directory. The current code is a clean v0 baseline and does not preserve retired notebook/job tables or old question enum values.
+There is no Alembic migration directory. The current code is a clean v0 baseline and does not preserve removed workflow tables, removed compatibility aliases, or old enum values.
 
 Before production upgrades:
 

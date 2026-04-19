@@ -70,6 +70,20 @@ def serve_data_file(relative_path: str, request: Request, db: Session = Depends(
             return _redirect("/student/courses")
         if get_course_for_student(db, course_id, viewer.id) is None and get_course_for_staff(db, course_id, viewer.id) is None:
             return _redirect("/student/courses")
+    # discussion-images/course-{id}/post-{id}/...
+    elif (
+        len(rel_parts) >= 4
+        and rel_parts[0] == "uploads"
+        and rel_parts[1] == "discussion-images"
+        and rel_parts[2].startswith("course-")
+        and rel_parts[3].startswith("post-")
+    ):
+        try:
+            course_id = int(rel_parts[2].split("-", 1)[1])
+        except (IndexError, ValueError):
+            return _redirect("/student/courses")
+        if get_course_for_student(db, course_id, viewer.id) is None and get_course_for_staff(db, course_id, viewer.id) is None:
+            return _redirect("/student/courses")
     else:
         return _redirect("/student/courses")
 

@@ -18,7 +18,7 @@ This repository includes **layered documentation for AI coding agents** (and for
 - **[AGENTS.md](AGENTS.md)** is the top-level map for agents: stack, subsystems, workflows, traps, validation commands.
 - **[docs/file-map.md](docs/file-map.md)** groups important files by responsibility (where to look first).
 - **[docs/change-guide.md](docs/change-guide.md)** explains common change couplings and failure modes.
-- **[docs/known-issues.md](docs/known-issues.md)** records confirmed technical debt, historical compatibility traps, and review notes.
+- **[docs/known-issues.md](docs/known-issues.md)** records confirmed technical debt and review notes.
 - **[docs/deployment-and-upgrades.md](docs/deployment-and-upgrades.md)** summarizes deployment, persistence, queue, and migration/upgrade expectations.
 - **[docs/architecture/](docs/architecture/)** holds deeper, retrieval-friendly notes on submission flow, scoring, permissions, and the code runner.
 
@@ -52,7 +52,7 @@ Please read **AGENTS.md** and the relevant `docs/` pages **before making non-tri
 
 - Manage user roles
 - Manage runtime image records
-- Manage LLM configuration records
+- Manage LLM groups and fallback members
 - Review system overview data
 
 ## Supported code runtime
@@ -153,7 +153,7 @@ Typical flow:
 - `app/routes/auth.py`: registration, login, locale switching
 - `app/routes/student.py`: student pages and submission entrypoints
 - `app/routes/teacher.py`: teacher course, assignment, question, and grading pages
-- `app/routes/admin.py`: admin pages and runtime / LLM configuration pages
+- `app/routes/admin.py`: admin pages and runtime / LLM group pages
 - `app/services/submissions.py`: submission orchestration and background evaluation logic
 - `app/services/scoring.py`: effective score resolution and teacher-confirmation gating
 - `app/services/storage_paths.py`: shared data-directory path safety helpers
@@ -355,12 +355,12 @@ If SMTP is missing or delivery fails, email-based registrations stay pending unt
 The platform now separates evaluation traffic into:
 
 - a dedicated code evaluation queue
-- per-LLM-config queues for LLM review tasks
+- per-LLM-group queues for LLM review tasks
 
 Relevant environment variables:
 
 ```bash
-PYTHON_QUEUE_NAME=python-evaluations
+CODE_QUEUE_NAME=code-evaluations
 LLM_QUEUE_PREFIX=llm-evaluations
 PDF_REVIEW_MAX_PAGES=8
 ```
@@ -368,16 +368,18 @@ PDF_REVIEW_MAX_PAGES=8
 ### Worker behavior
 
 - Docker code grading runs on its own queue
-- Each enabled LLM config has its own queue
-- `queue_concurrency` is configured per LLM config record in the admin UI
+- Each enabled LLM group with at least one connectivity-tested member has its own queue
+- `queue_concurrency` is configured per LLM group in the admin UI
+- Within a group, calls start with priority #1 and fall through to later members only when earlier members fail; the next task starts again from #1
 - `worker.py` now works as a lightweight worker manager and starts:
-  - 1 Python worker process
-  - N LLM worker processes per enabled config, where N is that config's concurrency
+  - 1 code-evaluation worker process
+  - N LLM worker processes per enabled group, where N is that group's concurrency
 
 ### Global default LLM behavior
 
-- The latest **platform** LLM config that has passed connectivity testing becomes the default for all courses still following the global platform default
-- Teachers can override a specific course to use a chosen enabled LLM config from the course detail page
+- The latest **platform** LLM group with at least one connectivity-tested member becomes the default for all courses still following the global platform default
+- Teachers can override a specific course to use a chosen enabled LLM group from the course detail page
+- Discussion `@AI` requests can select from available LLM groups; leaving the selection empty uses the discussion/course/platform default precedence
 
 ### PDF review behavior
 
@@ -395,7 +397,7 @@ High-level deployment requirements:
 
 - Persist `DATA_DIR` and the database; default SQLite lives under `DATA_DIR/app.db`
 - Run web, Redis, worker, Docker, and the runner image together
-- Set `SECRET_KEY`, `APP_BASE_URL`, `DATABASE_URL`, `REDIS_URL`, `PYTHON_QUEUE_NAME`, `LLM_QUEUE_PREFIX`, and runner limits explicitly for production
+- Set `SECRET_KEY`, `APP_BASE_URL`, `DATABASE_URL`, `REDIS_URL`, `CODE_QUEUE_NAME`, `LLM_QUEUE_PREFIX`, and runner limits explicitly for production
 - Configure SMTP if email verification or password reset should work
 - Back up the database and `DATA_DIR` before upgrades
 
@@ -420,6 +422,7 @@ Main teaching-domain tables include:
 - `short_answer_question_configs`
 - `runtime_images`
 - `llm_configs`
+- `llm_config_members`
 - `submissions`
 - `evaluation_tasks`
 - `evaluation_results`
@@ -437,8 +440,8 @@ Depending on question type, artifacts may include:
 - `stdout.txt`
 - `stderr.txt`
 - `summary.json`
-- `executed.ipynb`
-- `executed.html`
+
+Code-question artifacts come from the Docker runner. File / LLM-reviewed questions may also create derived files under `DATA_DIR`, such as rendered PDF page images used for multimodal grading.
 
 ## Language behavior
 
@@ -488,7 +491,7 @@ Check:
 
 ## Upgrade and migration policy
 
-CourseEval is currently treated as a clean v0 baseline. Startup creates the current schema with SQLAlchemy metadata and seeds the open community course. It does not preserve retired notebook/job tables or legacy question enum values.
+CourseEval is currently treated as a clean v0 baseline. Startup creates the current schema with SQLAlchemy metadata and seeds the open community course. It does not preserve removed workflow tables, removed compatibility aliases, or old enum values.
 
 For future schema changes:
 

@@ -245,7 +245,7 @@ class Phase1AlignmentTests(unittest.TestCase):
 
     def test_hidden_test_output_is_removed_from_student_logs(self) -> None:
         raw_output = (
-            "Notebook stdout\n"
+            "Runner stdout\n"
             "=== Visible Tests ===\n"
             "visible result\n"
             "=== Hidden Tests ===\n"
@@ -412,20 +412,6 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertEqual(user.account_role, AccountRole.STUDENT)
         self.assertEqual(user.platform_role, PlatformRole.USER)
         self.assertEqual(user.effective_role, UserRole.STUDENT)
-
-    def test_legacy_administrator_account_remains_admin_effective_role(self) -> None:
-        legacy_admin = User(
-            username="legacy-admin",
-            email="legacy-admin@example.com",
-            password_hash="x",
-            account_role=AccountRole.ADMINISTRATOR,
-            platform_role=PlatformRole.ADMIN,
-            email_verified=True,
-            is_active=True,
-        )
-        self.assertEqual(legacy_admin.effective_role, UserRole.ADMIN)
-        self.assertTrue(is_platform_admin(legacy_admin))
-
 
 if __name__ == "__main__":
     unittest.main()

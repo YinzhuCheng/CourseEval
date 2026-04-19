@@ -30,7 +30,7 @@ from app.constants import (
 from app.db import Base, utcnow
 
 
-def _normalize_python_test_case(item: dict, index: int) -> dict:
+def _normalize_code_test_case(item: dict, index: int) -> dict:
     expected_output = item.get("expected_output")
     if expected_output is None:
         expected_output = item.get("output", "")
@@ -45,8 +45,6 @@ def _normalize_python_test_case(item: dict, index: int) -> dict:
         "name": item.get("name") or f"Test {index}",
         "input": item.get("input", ""),
         "expected_output": expected_output,
-        # Preserve the legacy key so templates and older call sites keep working.
-        "output": expected_output,
         "points": points,
     }
 
@@ -111,7 +109,16 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="CourseMember.user_id",
     )
-    discussion_posts: Mapped[list["DiscussionPost"]] = relationship(back_populates="author", cascade="all, delete-orphan")
+    discussion_posts: Mapped[list["DiscussionPost"]] = relationship(
+        back_populates="author",
+        cascade="all, delete-orphan",
+        foreign_keys="DiscussionPost.author_id",
+    )
+    discussion_mutes_received: Mapped[list["CourseDiscussionMute"]] = relationship(
+        back_populates="user",
+        foreign_keys="CourseDiscussionMute.user_id",
+        cascade="all, delete-orphan",
+    )
     created_courses: Mapped[list["Course"]] = relationship(
         back_populates="creator",
         foreign_keys="Course.created_by",
@@ -123,6 +130,10 @@ class User(Base):
     created_llm_configs: Mapped[list["LLMConfig"]] = relationship(
         back_populates="creator",
         foreign_keys="LLMConfig.created_by",
+    )
+    created_llm_config_members: Mapped[list["LLMConfigMember"]] = relationship(
+        back_populates="creator",
+        foreign_keys="LLMConfigMember.created_by",
     )
     created_feedback: Mapped[list["Feedback"]] = relationship(
         back_populates="author",
@@ -211,6 +222,10 @@ class Course(Base):
         foreign_keys="LLMConfig.course_id",
     )
     materials: Mapped[list["CourseMaterial"]] = relationship(back_populates="course", cascade="all, delete-orphan")
+    discussion_mutes: Mapped[list["CourseDiscussionMute"]] = relationship(
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
 
 
 class CourseMember(Base):
@@ -286,6 +301,7 @@ class PlatformLlmTokenPolicy(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     default_user_daily_llm_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=100000)
+    discussion_posts_page_size: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     discussion_ai_default_llm_config_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_configs.id", ondelete="SET NULL"),
         nullable=True,
@@ -341,6 +357,7 @@ class LLMConfig(Base):
     )
     course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_type: Mapped[LLMProvider] = mapped_column(
         Enum(LLMProvider, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         nullable=False,
@@ -379,6 +396,49 @@ class LLMConfig(Base):
     questions_using_as_override: Mapped[list["Question"]] = relationship(
         back_populates="llm_config",
         foreign_keys="Question.llm_config_id",
+    )
+    members: Mapped[list["LLMConfigMember"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+        order_by="LLMConfigMember.priority_order",
+    )
+
+
+class LLMConfigMember(Base):
+    __tablename__ = "llm_config_members"
+    __table_args__ = (Index("ix_llm_config_members_group_priority", "group_id", "priority_order", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("llm_configs.id", ondelete="CASCADE"), nullable=False, index=True)
+    priority_order: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    provider_type: Mapped[LLMProvider] = mapped_column(
+        Enum(LLMProvider, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+    )
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
+    temperature: Mapped[str] = mapped_column(String(16), default="0.2", nullable=False)
+    max_llm_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    llm_retry_initial_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_test_status: Mapped[LLMTestStatus] = mapped_column(
+        Enum(LLMTestStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        default=LLMTestStatus.NEVER,
+        nullable=False,
+    )
+    last_test_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_tested_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    group: Mapped[LLMConfig] = relationship(back_populates="members", foreign_keys=[group_id])
+    creator: Mapped[User | None] = relationship(
+        back_populates="created_llm_config_members",
+        foreign_keys=[created_by],
     )
 
 
@@ -509,11 +569,6 @@ class Question(Base):
         uselist=False,
     )
 
-    @property
-    def python_code_config(self) -> "CodeQuestionConfig | None":
-        return self.code_config
-
-
 Index("ix_questions_assignment_order", Question.assignment_id, Question.order_index)
 
 
@@ -580,7 +635,7 @@ class CodeQuestionConfig(Base):
             return []
         if not isinstance(payload, list):
             return []
-        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
+        return [_normalize_code_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
     def hidden_tests(self) -> list[dict]:
         try:
@@ -589,12 +644,7 @@ class CodeQuestionConfig(Base):
             return []
         if not isinstance(payload, list):
             return []
-        return [_normalize_python_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
-
-
-# Backward-compatible import alias while the codebase migrates away from Python-only naming.
-PythonCodeQuestionConfig = CodeQuestionConfig
-
+        return [_normalize_code_test_case(item, index) for index, item in enumerate(payload, start=1) if isinstance(item, dict)]
 
 class ShortAnswerQuestionConfig(Base):
     __tablename__ = "short_answer_question_configs"
@@ -895,11 +945,64 @@ class DiscussionPost(Base):
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     topic: Mapped[DiscussionTopic] = relationship(back_populates="posts")
-    author: Mapped[User] = relationship(back_populates="discussion_posts")
+    author: Mapped[User] = relationship(
+        back_populates="discussion_posts",
+        foreign_keys=[author_id],
+    )
+    deleted_by: Mapped["User | None"] = relationship(foreign_keys=[deleted_by_id])
     parent: Mapped["DiscussionPost | None"] = relationship(remote_side="DiscussionPost.id", back_populates="replies")
     replies: Mapped[list["DiscussionPost"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
+    attachments: Mapped[list["DiscussionPostAttachment"]] = relationship(
+        back_populates="post",
+        cascade="all, delete-orphan",
+        order_by="DiscussionPostAttachment.id.asc()",
+    )
 
 
 Index("ix_discussion_posts_topic_created", DiscussionPost.topic_id, DiscussionPost.created_at)
+
+
+class DiscussionPostAttachment(Base):
+    __tablename__ = "discussion_post_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("discussion_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    relative_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    post: Mapped[DiscussionPost] = relationship(back_populates="attachments")
+
+
+class CourseDiscussionMute(Base):
+    __tablename__ = "course_discussion_mutes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    muted_until: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    course: Mapped[Course] = relationship(back_populates="discussion_mutes", foreign_keys=[course_id])
+    user: Mapped[User] = relationship(back_populates="discussion_mutes_received", foreign_keys=[user_id])
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+
+
+Index("ix_course_discussion_mutes_course_user", CourseDiscussionMute.course_id, CourseDiscussionMute.user_id, unique=True)
+
+
+class DiscussionModerationLog(Base):
+    __tablename__ = "discussion_moderation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    post_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)

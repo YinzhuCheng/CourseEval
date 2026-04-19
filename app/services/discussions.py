@@ -1,17 +1,32 @@
-"""Discussion topics, posts, and visibility rules."""
+"""Discussion topics, posts, visibility rules, pagination helpers, and moderation."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import is_admin, is_super_admin
 from app.constants import AccountRole, AssignmentStatus, CourseRole, DiscussionTopicKind, MembershipStatus
 from app.db import utcnow
-from app.models import Assignment, CourseMember, DiscussionPost, DiscussionTopic, Question, User
+from app.models import (
+    Assignment,
+    CourseDiscussionMute,
+    CourseMember,
+    DiscussionModerationLog,
+    DiscussionPost,
+    DiscussionPostAttachment,
+    DiscussionTopic,
+    PlatformLlmTokenPolicy,
+    Question,
+    User,
+)
+from app.services.discussion_markdown import (
+    DISCUSSION_BODY_MAX_CHARS,
+    has_disallowed_remote_image_markdown,
+)
 
 
 def course_member_roles_map(db: Session, course_id: int) -> dict[int, CourseRole]:
@@ -38,6 +53,14 @@ def assignment_past_close_for_discussion(assignment: Assignment) -> bool:
     if close_at is None:
         return False
     return utcnow() >= close_at
+
+
+def get_discussion_posts_page_size(db: Session) -> int:
+    row = db.get(PlatformLlmTokenPolicy, 1)
+    if row is None:
+        return 50
+    v = int(row.discussion_posts_page_size)
+    return max(10, min(200, v))
 
 
 def get_or_create_material_topic(db: Session, material_id: int, course_id: int) -> DiscussionTopic:
@@ -115,14 +138,42 @@ def viewer_course_role(db: Session, course_id: int, user_id: int) -> CourseRole 
     return m.role if m else None
 
 
+def is_user_muted_for_course(db: Session, course_id: int, user_id: int) -> bool:
+    row = db.scalar(
+        select(CourseDiscussionMute).where(
+            CourseDiscussionMute.course_id == course_id,
+            CourseDiscussionMute.user_id == user_id,
+        )
+    )
+    if row is None:
+        return False
+    until = _as_utc(row.muted_until)
+    if until is None:
+        return True
+    return until > utcnow()
+
+
+def can_moderate_discussion(db: Session, course_id: int, user: User) -> bool:
+    if is_super_admin(user) or is_admin(user):
+        return True
+    role = viewer_course_role(db, course_id, user.id)
+    return role in (CourseRole.TEACHER, CourseRole.TA)
+
+
 def can_post_on_material_topic(db: Session, course_id: int, user: User) -> bool:
     role = viewer_course_role(db, course_id, user.id)
-    return role in (CourseRole.STUDENT, CourseRole.TEACHER, CourseRole.TA)
+    if role not in (CourseRole.STUDENT, CourseRole.TEACHER, CourseRole.TA):
+        return False
+    if is_user_muted_for_course(db, course_id, user.id):
+        return False
+    return True
 
 
 def can_post_on_question_topic(db: Session, question: Question, user: User) -> bool:
     role = viewer_course_role(db, question.assignment.course_id, user.id)
     if role not in (CourseRole.STUDENT, CourseRole.TEACHER, CourseRole.TA):
+        return False
+    if is_user_muted_for_course(db, question.assignment.course_id, user.id):
         return False
     asn = question.assignment
     if asn.status == AssignmentStatus.DRAFT and role == CourseRole.STUDENT:
@@ -134,43 +185,59 @@ def can_post_on_question_topic(db: Session, question: Question, user: User) -> b
     return True
 
 
-def list_posts_for_topic(db: Session, topic_id: int) -> list[DiscussionPost]:
-    return list(
-        db.scalars(
-            select(DiscussionPost)
-            .options(joinedload(DiscussionPost.author))
-            .where(DiscussionPost.topic_id == topic_id)
-            .order_by(DiscussionPost.created_at.asc())
-        ).all()
+def count_posts_for_topic(db: Session, topic_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(DiscussionPost)
+            .where(DiscussionPost.topic_id == topic_id, DiscussionPost.deleted_at.is_(None))
+        )
+        or 0
     )
 
 
+def list_posts_for_topic(
+    db: Session, topic_id: int, *, offset: int = 0, limit: int | None = None
+) -> list[DiscussionPost]:
+    stmt = (
+        select(DiscussionPost)
+        .options(joinedload(DiscussionPost.author))
+        .where(DiscussionPost.topic_id == topic_id, DiscussionPost.deleted_at.is_(None))
+        .order_by(DiscussionPost.created_at.asc())
+    )
+    if limit is not None:
+        stmt = stmt.offset(max(0, offset)).limit(limit)
+    return list(db.scalars(stmt).all())
+
+
 def attach_avatar_and_role_badges(db: Session, course_id: int, flat_rows: list[dict]) -> list[dict]:
-    """Add avatar_url and role_badges keys for template (badges: platform + course role)."""
+    """Add avatar_url, role_badges, body_html for template."""
+    from app.services.discussion_markdown import render_discussion_markdown
     from app.services.user_media import user_avatar_public_url
 
     roles = course_member_roles_map(db, course_id)
     for r in flat_rows:
         u = r["post"].author
-        if getattr(r["post"], "is_ai", False):
+        is_ai = getattr(r["post"], "is_ai", False)
+        if is_ai:
             r["avatar_url"] = None
             r["role_badges"] = ["ai_assistant"]
-            continue
-        # Anonymous posts must not show the real user's photo (would de-anonymize).
-        r["avatar_url"] = None if r["post"].is_anonymous else user_avatar_public_url(u)
-        badges: list[str] = []
-        if is_super_admin(u):
-            badges.append("super_admin")
-        elif is_admin(u):
-            badges.append("admin")
-        cr = roles.get(u.id)
-        if cr == CourseRole.TEACHER:
-            badges.append("course_teacher")
-        elif cr == CourseRole.TA:
-            badges.append("course_ta")
-        elif u.account_role == AccountRole.TEACHER and not badges:
-            badges.append("account_teacher")
-        r["role_badges"] = badges
+        else:
+            r["avatar_url"] = None if r["post"].is_anonymous else user_avatar_public_url(u)
+            badges: list[str] = []
+            if is_super_admin(u):
+                badges.append("super_admin")
+            elif is_admin(u):
+                badges.append("admin")
+            cr = roles.get(u.id)
+            if cr == CourseRole.TEACHER:
+                badges.append("course_teacher")
+            elif cr == CourseRole.TA:
+                badges.append("course_ta")
+            elif u.account_role == AccountRole.TEACHER and not badges:
+                badges.append("account_teacher")
+            r["role_badges"] = badges
+        r["body_html"] = render_discussion_markdown(r["post"].body_text, for_ai=is_ai)
     return flat_rows
 
 
@@ -213,12 +280,214 @@ def display_label_for_post(post: DiscussionPost, viewer: User | None, db: Sessio
     if role == CourseRole.STUDENT:
         return ("匿名", None)
 
-    # Staff: see students' and TAs' real identity when they post anonymously
     if post.author.account_role != AccountRole.TEACHER:
         return (post.author.username, "staff_student_anon")
     if post.author_id == viewer.id:
         return (post.author.username, "self_anon")
     return ("匿名教师", None)
+
+
+def _log_moderation(
+    db: Session,
+    *,
+    course_id: int,
+    actor: User | None,
+    action: str,
+    target_user_id: int | None = None,
+    post_id: int | None = None,
+    detail: str | None = None,
+) -> None:
+    db.add(
+        DiscussionModerationLog(
+            course_id=course_id,
+            actor_id=actor.id if actor else None,
+            action=action,
+            target_user_id=target_user_id,
+            post_id=post_id,
+            detail=detail,
+        )
+    )
+
+
+def mute_user_in_course(
+    db: Session,
+    *,
+    course_id: int,
+    target_user_id: int,
+    actor: User,
+    muted_until: datetime | None,
+) -> None:
+    row = db.scalar(
+        select(CourseDiscussionMute).where(
+            CourseDiscussionMute.course_id == course_id,
+            CourseDiscussionMute.user_id == target_user_id,
+        )
+    )
+    if row is None:
+        row = CourseDiscussionMute(
+            course_id=course_id,
+            user_id=target_user_id,
+            muted_until=muted_until,
+            created_by_id=actor.id,
+        )
+        db.add(row)
+    else:
+        row.muted_until = muted_until
+        row.created_by_id = actor.id
+    db.flush()
+    _log_moderation(
+        db,
+        course_id=course_id,
+        actor=actor,
+        action="mute",
+        target_user_id=target_user_id,
+        detail=None if muted_until is None else muted_until.isoformat(),
+    )
+
+
+def unmute_user_in_course(db: Session, *, course_id: int, target_user_id: int, actor: User) -> None:
+    row = db.scalar(
+        select(CourseDiscussionMute).where(
+            CourseDiscussionMute.course_id == course_id,
+            CourseDiscussionMute.user_id == target_user_id,
+        )
+    )
+    if row:
+        db.delete(row)
+    _log_moderation(db, course_id=course_id, actor=actor, action="unmute", target_user_id=target_user_id)
+
+
+def hard_delete_post(db: Session, post: DiscussionPost, *, actor: User, course_id: int) -> None:
+    from app.services.discussion_attachments import delete_attachment_file
+
+    for att in list(post.attachments or []):
+        delete_attachment_file(att.relative_path)
+        db.delete(att)
+    _log_moderation(db, course_id=course_id, actor=actor, action="delete_post", post_id=post.id)
+    db.delete(post)
+
+
+def can_delete_discussion_post(db: Session, user: User, post: DiscussionPost, course_id: int) -> bool:
+    if getattr(post, "deleted_at", None) is not None:
+        return False
+    return can_moderate_discussion(db, course_id, user)
+
+
+def build_discussion_view_context(
+    db: Session,
+    *,
+    topic_id: int,
+    course_id: int,
+    viewer: User,
+    request: object,
+) -> dict:
+    """Thread rows, pagination dict, moderation flag for discussion partial."""
+    from app.services.discussion_ai import discussion_ai_group_options
+
+    page_size = get_discussion_posts_page_size(db)
+    page, anchor = parse_discussion_query(request)
+    pag = discussion_pagination_state(
+        db,
+        topic_id=topic_id,
+        page_size=page_size,
+        page=page,
+        anchor_post_id=anchor,
+    )
+    posts = list_posts_for_topic(
+        db, topic_id, offset=pag["offset"], limit=pag["page_size"]
+    )
+    decorated = []
+    for p in posts:
+        label, hint = display_label_for_post(p, viewer, db, course_id)
+        decorated.append(
+            {
+                "post": p,
+                "display_name": label,
+                "staff_hint": hint,
+                "can_delete": can_delete_discussion_post(db, viewer, p, course_id),
+            }
+        )
+    threaded = attach_avatar_and_role_badges(db, course_id, flat_thread_for_template(posts, decorated))
+    staff = can_moderate_discussion(db, course_id, viewer)
+    topic = db.get(DiscussionTopic, topic_id)
+    return {
+        "discussion_thread": threaded,
+        "discussion_pagination": pag,
+        "can_moderate_discussion": staff,
+        "discussion_ai_groups": discussion_ai_group_options(db, topic) if topic else [],
+    }
+
+
+def parse_discussion_query(request: object) -> tuple[int | None, int | None]:
+    """Parse ?page= and ?post= from a Starlette/FastAPI request."""
+    qp = getattr(request, "query_params", None)
+    if qp is None:
+        return (None, None)
+    page_s = qp.get("page")
+    post_s = qp.get("post")
+    page_p: int | None = None
+    post_p: int | None = None
+    if page_s and str(page_s).isdigit():
+        page_p = int(page_s)
+    if post_s and str(post_s).isdigit():
+        post_p = int(post_s)
+    return (page_p, post_p)
+
+
+def discussion_pagination_state(
+    db: Session,
+    *,
+    topic_id: int,
+    page_size: int,
+    page: int | None,
+    anchor_post_id: int | None,
+) -> dict:
+    """Compute offset/limit/total/page for a discussion topic (stable created_at order)."""
+    total = count_posts_for_topic(db, topic_id)
+    ps = max(10, min(200, int(page_size)))
+    if total == 0:
+        return {
+            "total": 0,
+            "page_size": ps,
+            "page": 1,
+            "total_pages": 1,
+            "offset": 0,
+            "has_older": False,
+            "has_newer": False,
+        }
+    total_pages = max(1, (total + ps - 1) // ps)
+    offset = 0
+    current_page = 1
+    if anchor_post_id is not None:
+        rank = db.scalar(
+            select(func.count())
+            .select_from(DiscussionPost)
+            .where(
+                DiscussionPost.topic_id == topic_id,
+                DiscussionPost.deleted_at.is_(None),
+                DiscussionPost.id < anchor_post_id,
+            )
+        )
+        r = int(rank or 0)
+        current_page = min(total_pages, max(1, r // ps + 1))
+        offset = (current_page - 1) * ps
+    elif page is not None:
+        current_page = min(total_pages, max(1, int(page)))
+        offset = (current_page - 1) * ps
+    else:
+        current_page = total_pages
+        offset = max(0, total - ps)
+    has_newer = offset + ps < total
+    has_older = offset > 0
+    return {
+        "total": total,
+        "page_size": ps,
+        "page": current_page,
+        "total_pages": total_pages,
+        "offset": offset,
+        "has_older": has_older,
+        "has_newer": has_newer,
+    }
 
 
 def create_post(
@@ -230,19 +499,34 @@ def create_post(
     parent_post_id: int | None,
     is_anonymous: bool,
     is_ai: bool = False,
+    has_pending_image_uploads: bool = False,
 ) -> DiscussionPost:
     body = (body or "").strip()
-    if not body:
+    if not body and not has_pending_image_uploads:
         raise ValueError("empty_body")
+    if not body and has_pending_image_uploads:
+        body = "(image)"
+    if len(body) > DISCUSSION_BODY_MAX_CHARS:
+        raise ValueError("body_too_large")
+    if has_disallowed_remote_image_markdown(body):
+        raise ValueError("remote_images_not_allowed")
+
+    topic = db.get(DiscussionTopic, topic_id)
+    if topic is None:
+        raise ValueError("invalid_topic")
+    if not is_ai and is_user_muted_for_course(db, topic.course_id, author.id):
+        raise ValueError("user_muted")
+
     if parent_post_id is not None:
         parent = db.get(DiscussionPost, parent_post_id)
-        if parent is None or parent.topic_id != topic_id:
+        if parent is None or parent.topic_id != topic_id or parent.deleted_at is not None:
             raise ValueError("invalid_parent_post")
+
     post = DiscussionPost(
         topic_id=topic_id,
         author_id=author.id,
         parent_post_id=parent_post_id,
-        body_text=body[:20000],
+        body_text=body,
         is_anonymous=bool(is_anonymous),
         is_ai=bool(is_ai),
     )

@@ -8,13 +8,9 @@ from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 
 from app.constants import LLMProvider, LLMResponseLanguage
-from app.models import LLMConfig
+from app.models import LLMConfig, LLMConfigMember
 from app.services.llm_grading_prompts import language_and_quality_block, truncation_notice_block
 from app.services.llm_retry import strip_json_fence
-
-
-class LLMConnectionTestError(Exception):
-    """Raised when a configured LLM provider cannot be reached successfully."""
 
 
 @dataclass
@@ -35,13 +31,10 @@ class ImageInput:
     data: bytes
 
 
-def mask_api_key(api_key: str | None) -> str:
-    if not api_key:
-        return ""
-    return "•" * 12
+LLMTarget = LLMConfig | LLMConfigMember
 
 
-def test_llm_connectivity(config: LLMConfig) -> LLMTestResult:
+def test_llm_connectivity(config: LLMTarget) -> LLMTestResult:
     if not config.enabled:
         return LLMTestResult(False, "Configuration is disabled.")
     if not config.model_name:
@@ -56,15 +49,8 @@ def test_llm_connectivity(config: LLMConfig) -> LLMTestResult:
     return LLMTestResult(True, "Provider connectivity test succeeded.")
 
 
-def test_llm_config_connection(config: LLMConfig) -> str:
-    result = test_llm_connectivity(config)
-    if not result.success:
-        raise LLMConnectionTestError(result.message)
-    return result.message
-
-
 def generate_text(
-    config: LLMConfig,
+    config: LLMTarget,
     prompt: str,
     system_prompt: str | None = None,
     *,
@@ -103,7 +89,7 @@ def generate_text(
 
 
 def generate_multimodal(
-    config: LLMConfig,
+    config: LLMTarget,
     *,
     prompt: str,
     system_prompt: str | None = None,
@@ -171,7 +157,7 @@ def _grading_system_preamble() -> str:
 
 
 def generate_short_answer_evaluation(
-    config: LLMConfig,
+    config: LLMTarget,
     *,
     question_title: str,
     question_description: str,
@@ -242,7 +228,7 @@ def generate_short_answer_evaluation(
 
 
 def generate_file_evaluation_from_images(
-    config: LLMConfig,
+    config: LLMTarget,
     *,
     question_title: str,
     question_description: str,
@@ -298,7 +284,7 @@ def generate_file_evaluation_from_images(
 
 
 def _generate_openai_compatible(
-    config: LLMConfig,
+    config: LLMTarget,
     prompt: str,
     system_prompt: str | None,
     images: list[ImageInput] | None = None,
@@ -354,7 +340,7 @@ def _generate_openai_compatible(
 
 
 def _generate_gemini(
-    config: LLMConfig,
+    config: LLMTarget,
     prompt: str,
     system_prompt: str | None,
     images: list[ImageInput] | None = None,
@@ -394,7 +380,7 @@ def _generate_gemini(
 
 
 def _generate_claude(
-    config: LLMConfig,
+    config: LLMTarget,
     prompt: str,
     system_prompt: str | None,
     images: list[ImageInput] | None = None,

@@ -1,9 +1,13 @@
 import unittest
+import tempfile
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from PIL import Image
 
 from app.constants import (
     AccountRole,
@@ -16,10 +20,14 @@ from app.constants import (
     QuestionType,
     ScoringRule,
 )
+from app.config import get_settings
 from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Question, User
+from app.services.discussion_attachments import attach_discussion_images_to_post
 from app.services.discussions import assignment_past_close_for_discussion, create_post, flat_thread_for_template
+from app.services.image_uploads import normalize_uploaded_image
 from app.services.post_close_reveal import reveal_bundle_for_question
+from app.services.redirects import safe_local_redirect
 
 
 class DiscussionsAndMaterialsTests(unittest.TestCase):
@@ -185,6 +193,66 @@ class DiscussionsAndMaterialsTests(unittest.TestCase):
                 parent_post_id=parent.id,
                 is_anonymous=False,
             )
+
+    def test_safe_local_redirect_rejects_external_targets(self) -> None:
+        self.assertEqual(safe_local_redirect("https://evil.example/path", "/fallback"), "/fallback")
+        self.assertEqual(safe_local_redirect("//evil.example/path", "/fallback"), "/fallback")
+        self.assertEqual(safe_local_redirect("/student/questions/1?page=2", "/fallback"), "/student/questions/1?page=2")
+
+    def test_uploaded_image_validation_rejects_fake_or_mismatched_images(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_uploaded_image(b"not an image", "avatar.png")
+
+        png = _png_bytes()
+        with self.assertRaises(ValueError):
+            normalize_uploaded_image(png, "avatar.jpg")
+
+    def test_discussion_attachment_cleans_files_when_later_image_fails(self) -> None:
+        from app.constants import DiscussionTopicKind
+        from app.models import DiscussionPost, DiscussionTopic
+
+        settings = get_settings()
+        old_data_dir = settings.data_dir
+        old_uploads_dir = settings.uploads_dir
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            object.__setattr__(settings, "data_dir", data_dir)
+            object.__setattr__(settings, "uploads_dir", data_dir / "uploads")
+            try:
+                topic = DiscussionTopic(
+                    course_id=self.course.id,
+                    kind=DiscussionTopicKind.QUESTION,
+                    question_id=self.q.id,
+                    course_material_id=None,
+                )
+                self.db.add(topic)
+                self.db.flush()
+                post = DiscussionPost(
+                    topic_id=topic.id,
+                    author_id=self.student.id,
+                    body_text="see attached",
+                    is_anonymous=False,
+                )
+                self.db.add(post)
+                self.db.flush()
+
+                with self.assertRaises(ValueError):
+                    attach_discussion_images_to_post(
+                        self.db,
+                        post,
+                        self.course.id,
+                        [(_png_bytes(), "ok.png"), (b"not an image", "bad.png")],
+                    )
+                self.assertEqual(list((data_dir / "uploads").rglob("*.*")), [])
+            finally:
+                object.__setattr__(settings, "data_dir", old_data_dir)
+                object.__setattr__(settings, "uploads_dir", old_uploads_dir)
+
+
+def _png_bytes() -> bytes:
+    out = BytesIO()
+    Image.new("RGB", (1, 1), color=(255, 0, 0)).save(out, format="PNG")
+    return out.getvalue()
 
 
 if __name__ == "__main__":

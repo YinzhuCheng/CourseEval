@@ -69,4 +69,71 @@
     </div>
   </div>
 </div>
+
+<div class="card shadow-sm mt-4">
+  <div class="card-body">
+    <h2 class="h5 mb-2">{{ lx("Course discussion moderation", "课程讨论区管理（应急）") }}</h2>
+    <p class="text-muted small mb-3">
+      {{ lx("Mute a user from posting in a course, or delete a post by ID. Requires the user to be an active course member for mute.", "禁言需该用户为课程活跃成员；删除帖子需知道帖子 ID。") }}
+    </p>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <h3 class="h6">{{ lx("Mute user in course", "课程内禁言") }}</h3>
+        <form method="post" action="/admin/courses/0/discussion/mute-user" id="admin-mute-form" class="row g-2">
+          <input type="hidden" name="redirect_to" value="/admin/users" />
+          <div class="col-12">
+            <label class="form-label small">{{ lx("Course ID", "课程 ID") }}</label>
+            <input class="form-control form-control-sm" type="number" name="course_id_field" min="1" required id="mute-course-id" />
+          </div>
+          <div class="col-12">
+            <label class="form-label small">{{ lx("User ID", "用户 ID") }}</label>
+            <input class="form-control form-control-sm" type="number" name="user_id" min="1" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label small">{{ lx("Mute until (optional, UTC)", "禁言至（可选，UTC）") }}</label>
+            <input class="form-control form-control-sm" type="datetime-local" name="muted_until" />
+          </div>
+          <div class="col-12">
+            <button class="btn btn-sm btn-outline-warning" type="submit">{{ lx("Mute", "禁言") }}</button>
+          </div>
+        </form>
+      </div>
+      <div class="col-md-6">
+        <h3 class="h6">{{ lx("Unmute user", "解除禁言") }}</h3>
+        <form method="post" action="/admin/courses/0/discussion/unmute-user" id="admin-unmute-form" class="row g-2">
+          <input type="hidden" name="redirect_to" value="/admin/users" />
+          <div class="col-12">
+            <label class="form-label small">{{ lx("Course ID", "课程 ID") }}</label>
+            <input class="form-control form-control-sm" type="number" name="course_id_field2" min="1" required id="unmute-course-id" />
+          </div>
+          <div class="col-12">
+            <label class="form-label small">{{ lx("User ID", "用户 ID") }}</label>
+            <input class="form-control form-control-sm" type="number" name="user_id" min="1" required />
+          </div>
+          <div class="col-12">
+            <button class="btn btn-sm btn-outline-secondary" type="submit">{{ lx("Unmute", "解除") }}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var m = document.getElementById("admin-mute-form");
+        if (m) {
+          m.addEventListener("submit", function (e) {
+            var cid = document.getElementById("mute-course-id").value;
+            m.action = "/admin/courses/" + encodeURIComponent(cid) + "/discussion/mute-user";
+          });
+        }
+        var u = document.getElementById("admin-unmute-form");
+        if (u) {
+          u.addEventListener("submit", function (e) {
+            var cid = document.getElementById("unmute-course-id").value;
+            u.action = "/admin/courses/" + encodeURIComponent(cid) + "/discussion/unmute-user";
+          });
+        }
+      })();
+    </script>
+  </div>
+</div>
 {% endblock %}

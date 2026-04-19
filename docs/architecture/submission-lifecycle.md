@@ -38,9 +38,9 @@ Representative functions (grep for full list):
 | Component | Role |
 |-----------|------|
 | `enqueue_*` | Pushes RQ jobs, sets `EvaluationTask.backend_job_id`, updates submission to `queued` where applicable. |
-| `worker.py` | Spawns worker processes for Python queue + per-`LLMConfig` LLM queues (`llm_queue_name_for_config`). |
+| `worker.py` | Spawns worker processes for the code queue + per-LLM-group queues (`llm_queue_name_for_config`). |
 
-**Invariant:** `enqueue_submission_evaluation` is for `CODE_EVALUATION` only. LLM tasks use their specific enqueue functions and per-config LLM queues.
+**Invariant:** `enqueue_submission_evaluation` is for `CODE_EVALUATION` only. LLM tasks use their specific enqueue functions and per-group LLM queues. Each group call starts at priority #1 and falls through to later group members only after failures.
 
 ## Status transitions (high level)
 

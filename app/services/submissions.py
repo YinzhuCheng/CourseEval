@@ -22,8 +22,6 @@ from app.constants import (
     FeedbackSource,
     CodeLanguage,
     CodeSubmissionMode,
-    LLMScope,
-    LLMTestStatus,
     MembershipStatus,
     QuestionType,
     ScoringRule,
@@ -36,7 +34,7 @@ from app.services.llm import (
     generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
 )
-from app.services.llm_retry import retry_llm_grading_call
+from app.services.llm_groups import call_llm_group, group_has_callable_target, latest_platform_llm_group
 from app.services.notebook_multimodal import notebook_placeholder_alignment_block, sanitize_notebook_for_llm
 from app.services.scoring import (
     is_submission_pending_teacher_review,
@@ -59,8 +57,8 @@ from app.models import (
     FileQuestionConfig,
     Feedback,
     FinalGradeSnapshot,
-    LLMConfig,
     CodeQuestionConfig,
+    LLMConfig,
     Question,
     QuestionVersion,
     RuntimeImage,
@@ -70,7 +68,7 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-PYTHON_EVALUATION_QUEUE = "python-evaluation"
+CODE_EVALUATION_QUEUE = "code-evaluations"
 LLM_EVALUATION_QUEUE_PREFIX = "llm-evaluation"
 
 
@@ -81,37 +79,24 @@ class RunnerResult:
     summary_json: dict | None = None
 
 
-def _latest_platform_llm_config(db: Session) -> LLMConfig | None:
-    statement = (
-        select(LLMConfig)
-        .where(
-            LLMConfig.scope == LLMScope.PLATFORM,
-            LLMConfig.enabled.is_(True),
-            LLMConfig.last_test_status == LLMTestStatus.SUCCESS,
-        )
-        .order_by(LLMConfig.last_tested_at.desc(), LLMConfig.created_at.desc())
-    )
-    return db.scalar(statement)
-
-
 def _resolve_llm_config_for_question(question: Question, db: Session | None = None) -> LLMConfig | None:
     question_level = question.llm_config
-    if question_level is not None and question_level.enabled:
+    if question_level is not None and group_has_callable_target(question_level):
         return question_level
 
     assignment_level = question.assignment.llm_config
-    if assignment_level is not None and assignment_level.enabled:
+    if assignment_level is not None and group_has_callable_target(assignment_level):
         return assignment_level
 
     course = question.assignment.course
     if not course.use_global_llm_default:
         course_level = course.default_llm_config
-        if course_level is not None and course_level.enabled:
+        if course_level is not None and group_has_callable_target(course_level):
             return course_level
 
     if db is None:
         return None
-    return _latest_platform_llm_config(db)
+    return latest_platform_llm_group(db)
 
 
 _HIDDEN_STDOUT_MARKER = "=== Hidden Tests ==="
@@ -133,10 +118,6 @@ def _file_question_config(question: Question | None) -> FileQuestionConfig | Non
 
 def _code_config(question: Question | None) -> CodeQuestionConfig | None:
     return question.code_config if question is not None else None
-
-
-def _python_code_config(question: Question | None) -> CodeQuestionConfig | None:
-    return _code_config(question)
 
 
 def _resolve_runtime_image_for_question(question: Question) -> RuntimeImage | None:
@@ -232,34 +213,12 @@ def get_queue(queue_name: str) -> Queue:
     return Queue(queue_name, connection=redis_connection())
 
 
-def get_python_queue_name() -> str:
-    return settings.python_queue_name or PYTHON_EVALUATION_QUEUE
+def get_code_queue_name() -> str:
+    return settings.code_queue_name or CODE_EVALUATION_QUEUE
 
 
 def llm_queue_name_for_config(config: LLMConfig) -> str:
     return f"{settings.llm_queue_prefix or LLM_EVALUATION_QUEUE_PREFIX}-{config.id}"
-
-
-def active_llm_queue_names(db: Session) -> list[str]:
-    configs = list(
-        db.scalars(
-            select(LLMConfig)
-            .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
-            .order_by(LLMConfig.id.asc())
-        ).all()
-    )
-    return [llm_queue_name_for_config(config) for config in configs]
-
-
-def active_llm_worker_specs(db: Session) -> list[tuple[str, int]]:
-    configs = list(
-        db.scalars(
-            select(LLMConfig)
-            .where(LLMConfig.enabled.is_(True), LLMConfig.queue_concurrency > 0)
-            .order_by(LLMConfig.id.asc())
-        ).all()
-    )
-    return [(llm_queue_name_for_config(config), max(int(config.queue_concurrency or 1), 1)) for config in configs]
 
 
 def _existing_backend_job_id(task: EvaluationTask) -> str | None:
@@ -518,28 +477,6 @@ def _parse_test_cases_json(raw_json: str) -> list[dict]:
     return normalized
 
 
-def list_student_courses(db: Session, user_id: int) -> list:
-    statement = (
-        select(CourseMember)
-        .options(joinedload(CourseMember.course))
-        .where(
-            CourseMember.user_id == user_id,
-            CourseMember.status == MembershipStatus.ACTIVE,
-        )
-        .order_by(CourseMember.joined_at.desc())
-    )
-    return list(db.scalars(statement).unique())
-
-
-def list_course_assignments_for_student(db: Session, course_id: int) -> list[Assignment]:
-    statement = (
-        select(Assignment)
-        .where(Assignment.course_id == course_id)
-        .order_by(Assignment.created_at.desc())
-    )
-    return list(db.scalars(statement))
-
-
 def get_question_for_student(db: Session, question_id: int, user_id: int) -> Question | None:
     statement = (
         select(Question)
@@ -615,10 +552,6 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
         .where(Submission.id == submission_id, CourseMember.status == MembershipStatus.ACTIVE)
     )
     return db.scalar(statement)
-
-
-def list_submissions_for_student_question(db: Session, user_id: int, question_id: int) -> list[Submission]:
-    return list_submissions_for_question(db, question_id, user_id)
 
 
 def read_submission_artifact_text(
@@ -787,24 +720,6 @@ def create_short_answer_submission(
     if config and config.llm_suggestion_enabled:
         enqueue_short_answer_llm(db, submission.id)
     return submission
-
-
-def create_python_code_submission(
-    db: Session,
-    *,
-    user_id: int,
-    question: Question,
-    original_filename: str,
-    submission_bytes: bytes,
-) -> Submission:
-    return create_code_submission(
-        db,
-        user_id=user_id,
-        question=question,
-        original_filename=original_filename,
-        submission_bytes=submission_bytes,
-        language=CodeLanguage.PYTHON,
-    )
 
 
 def _code_language_from_value(value: str | CodeLanguage) -> CodeLanguage:
@@ -1011,11 +926,11 @@ def enqueue_submission_evaluation(db: Session, submission_id: int) -> str:
         return existing_job_id
 
     if task.task_type != EvaluationTaskType.CODE_EVALUATION:
-        raise ValueError("Only code evaluation tasks use the Python runner queue.")
+        raise ValueError("Only code evaluation tasks use the code runner queue.")
     target_func = process_code_evaluation
     timeout_seconds = settings.execution_timeout_seconds + 60
 
-    rq_job = get_queue(get_python_queue_name()).enqueue(
+    rq_job = get_queue(get_code_queue_name()).enqueue(
         target_func,
         submission_id,
         task.id,
@@ -1050,10 +965,10 @@ def enqueue_short_answer_llm(db: Session, submission_id: int) -> str:
     if existing_job_id:
         return existing_job_id
 
-    llm_config = _resolve_llm_config_for_question(submission.question, db)
-    if llm_config is None:
-        raise ValueError("No enabled LLM config available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+    llm_group = _resolve_llm_config_for_question(submission.question, db)
+    if llm_group is None:
+        raise ValueError("No enabled LLM group available.")
+    rq_job = get_queue(llm_queue_name_for_config(llm_group)).enqueue(
         process_short_answer_llm_evaluation,
         submission_id,
         task.id,
@@ -1086,10 +1001,10 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
     if existing_job_id:
         return existing_job_id
 
-    llm_config = _resolve_llm_config_for_question(submission.question, db)
-    if llm_config is None:
-        raise ValueError("No enabled LLM config available.")
-    rq_job = get_queue(llm_queue_name_for_config(llm_config)).enqueue(
+    llm_group = _resolve_llm_config_for_question(submission.question, db)
+    if llm_group is None:
+        raise ValueError("No enabled LLM group available.")
+    rq_job = get_queue(llm_queue_name_for_config(llm_group)).enqueue(
         process_file_llm_evaluation,
         submission_id,
         task.id,
@@ -1396,12 +1311,6 @@ def run_code_in_docker(
     return RunnerResult(exit_code=0, summary_json=summary_json)
 
 
-def run_python_code_in_docker(**kwargs) -> RunnerResult:
-    kwargs.setdefault("language", CodeLanguage.PYTHON.value)
-    kwargs.setdefault("submission_mode", CodeSubmissionMode.SINGLE_FILE.value)
-    return run_code_in_docker(**kwargs)
-
-
 def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> None:
     db = SessionLocal()
     try:
@@ -1417,9 +1326,9 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
             logger.info("Skipping short-answer LLM task %s because it is already %s.", task_id, task.status.value)
             return
 
-        llm_config = _resolve_llm_config_for_question(submission.question, db)
-        if llm_config is None or not llm_config.enabled:
-            _mark_submission_system_failed(db, submission, task, "No enabled LLM config available.")
+        llm_group = _resolve_llm_config_for_question(submission.question, db)
+        if llm_group is None or not group_has_callable_target(llm_group):
+            _mark_submission_system_failed(db, submission, task, "No enabled LLM group available.")
             return
 
         task.status = EvaluationTaskStatus.RUNNING
@@ -1436,9 +1345,9 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
         if notices:
             trunc_notice = " ".join(notices)
 
-        def _run_sa() -> dict:
+        def _run_sa(llm_target) -> dict:
             return generate_short_answer_evaluation(
-                llm_config,
+                llm_target,
                 question_title=submission.question.title,
                 question_description=submission.question.description or "",
                 rubric_text=submission.question.short_answer_config.rubric_text
@@ -1457,7 +1366,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
                 bill_db=db,
             )
 
-        result = retry_llm_grading_call(llm_config, _run_sa, label="short_answer_llm")
+        result = call_llm_group(llm_group, _run_sa, label="short_answer_llm")
         comment = result.get("comment_text") or ""
         if notices:
             comment = (
@@ -1509,10 +1418,10 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             logger.info("Skipping file LLM task %s because it is already %s.", task_id, task.status.value)
             return
 
-        llm_config = _resolve_llm_config_for_question(submission.question, db)
+        llm_group = _resolve_llm_config_for_question(submission.question, db)
         question_config = _file_question_config(submission.question)
-        if llm_config is None or not llm_config.enabled or question_config is None:
-            _mark_submission_system_failed(db, submission, task, "No enabled LLM config or file question config available.")
+        if llm_group is None or not group_has_callable_target(llm_group) or question_config is None:
+            _mark_submission_system_failed(db, submission, task, "No enabled LLM group or file question config available.")
             return
 
         task.status = EvaluationTaskStatus.RUNNING
@@ -1544,9 +1453,9 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
             if not page_paths:
                 page_paths = _render_pdf_pages_to_images(pdf_path)
 
-            def _run_pdf() -> dict:
+            def _run_pdf(llm_target) -> dict:
                 return generate_file_evaluation_from_images(
-                    llm_config,
+                    llm_target,
                     question_title=submission.question.title,
                     question_description=submission.question.description or "",
                     rubric_text=question_config.rubric_text,
@@ -1562,7 +1471,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     bill_db=db,
                 )
 
-            result = retry_llm_grading_call(llm_config, _run_pdf, label="file_llm_pdf")
+            result = call_llm_group(llm_group, _run_pdf, label="file_llm_pdf")
         else:
             ans = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
             if notices and not trunc_notice:
@@ -1577,9 +1486,9 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                 notebook_images = nb_mm.images or None
                 notebook_instructions = notebook_placeholder_alignment_block(nb_mm.registry, len(nb_mm.images))
 
-            def _run_text() -> dict:
+            def _run_text(llm_target) -> dict:
                 return generate_short_answer_evaluation(
-                    llm_config,
+                    llm_target,
                     question_title=submission.question.title,
                     question_description=submission.question.description or "",
                     rubric_text=question_config.rubric_text,
@@ -1598,7 +1507,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                     multimodal_instructions=notebook_instructions,
                 )
 
-            result = retry_llm_grading_call(llm_config, _run_text, label="file_llm_text")
+            result = call_llm_group(llm_group, _run_text, label="file_llm_text")
 
         comment = result.get("comment_text") or ""
         if notices:

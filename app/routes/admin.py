@@ -1,10 +1,11 @@
 import json
+from datetime import datetime
 
 from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, Form
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 
 from app.auth import push_flash
@@ -12,11 +13,22 @@ from app.constants import (
     LLMProvider,
     LLMScope,
     LLMTestStatus,
+    MembershipStatus,
     RuntimeScope,
     UserRole,
 )
 from app.db import get_db, utcnow
-from app.models import LLMConfig, PlatformLlmTokenPolicy, RuntimeImage, User
+from app.models import (
+    Course,
+    CourseMember,
+    DiscussionPost,
+    DiscussionTopic,
+    LLMConfig,
+    LLMConfigMember,
+    PlatformLlmTokenPolicy,
+    RuntimeImage,
+    User,
+)
 from app.auth import assign_user_role
 from app.i18n import choose_text, t
 from app.runtime_support import (
@@ -34,6 +46,7 @@ from app.services.llm_token_usage import (
     get_platform_default_daily_limit,
 )
 from app.services.discussion_ai import parse_optional_tested_llm_config_id
+from app.services.discussions import hard_delete_post, mute_user_in_course, unmute_user_in_course
 from app.services.email import send_smtp_test_email
 from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
@@ -227,9 +240,14 @@ def admin_llm_configs(request: Request, db: Session = Depends(get_db)):
     except PermissionError:
         return _redirect("/login")
 
-    configs = list(db.scalars(select(LLMConfig).order_by(LLMConfig.created_at.desc())).all())
+    configs = list(
+        db.scalars(
+            select(LLMConfig).options(selectinload(LLMConfig.members)).order_by(LLMConfig.created_at.desc())
+        ).all()
+    )
     platform_default = get_platform_default_daily_limit(db)
     policy = db.get(PlatformLlmTokenPolicy, 1)
+    dpp = int(policy.discussion_posts_page_size) if policy else 50
     return render_template(
         request,
         db,
@@ -241,6 +259,7 @@ def admin_llm_configs(request: Request, db: Session = Depends(get_db)):
             "token_usage_rows": admin_usage_rows(db),
             "total_llm_tokens_recorded": admin_total_usage_all_time(db),
             "discussion_ai_policy": policy,
+            "discussion_posts_page_size": max(10, min(200, dpp)),
         },
     )
 
@@ -285,6 +304,36 @@ def admin_discussion_ai_llm_overrides(
     row.updated_at = utcnow()
     db.commit()
     push_flash(request, choose_text(request, "Discussion AI defaults were saved.", "讨论区 AI 默认配置已保存。"), "success")
+    return _redirect("/admin/llm-configs")
+
+
+@router.post("/llm-configs/discussion-pagination")
+def admin_update_discussion_pagination(
+    request: Request,
+    discussion_posts_page_size: int = Form(50),
+    db: Session = Depends(get_db),
+):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    value = max(10, min(200, int(discussion_posts_page_size)))
+    row = db.get(PlatformLlmTokenPolicy, 1)
+    if row is None:
+        row = PlatformLlmTokenPolicy(id=1, default_user_daily_llm_tokens=100000, discussion_posts_page_size=value)
+        db.add(row)
+    else:
+        row.discussion_posts_page_size = value
+        row.updated_at = utcnow()
+    db.commit()
+    push_flash(
+        request,
+        choose_text(request, "Discussion page size updated.", "讨论区分页大小已更新。"),
+        "success",
+    )
     return _redirect("/admin/llm-configs")
 
 
@@ -352,6 +401,7 @@ def admin_update_user_llm_token_limit(
 def admin_create_llm_config(
     request: Request,
     name: str = Form(...),
+    description: str = Form(""),
     provider_type: str = Form(...),
     base_url: str = Form(""),
     api_key: str = Form(""),
@@ -374,6 +424,7 @@ def admin_create_llm_config(
     config = LLMConfig(
         scope=LLMScope.PLATFORM,
         name=name.strip(),
+        description=description.strip() or None,
         provider_type=LLMProvider(provider_type),
         base_url=base_url.strip() or None,
         api_key=api_key.strip() or None,
@@ -389,6 +440,59 @@ def admin_create_llm_config(
     db.add(config)
     db.commit()
     push_flash(request, t(request, "flash.llm_config_created"), "success")
+    return _redirect("/admin/llm-configs")
+
+
+@router.post("/llm-configs/{group_id}/members")
+def admin_create_llm_config_member(
+    group_id: int,
+    request: Request,
+    priority_order: int = Form(2),
+    provider_type: str = Form(...),
+    base_url: str = Form(""),
+    api_key: str = Form(""),
+    model_name: str = Form(...),
+    timeout_seconds: int = Form(30),
+    max_tokens: int = Form(512),
+    temperature: str = Form("0.2"),
+    max_llm_retries: int = Form(3),
+    llm_retry_initial_seconds: int = Form(5),
+    db: Session = Depends(get_db),
+):
+    try:
+        admin_user = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    group = db.get(LLMConfig, group_id)
+    if group is None:
+        push_flash(request, t(request, "flash.llm_config_not_found"), "danger")
+        return _redirect("/admin/llm-configs")
+
+    member = LLMConfigMember(
+        group_id=group.id,
+        priority_order=max(2, int(priority_order)),
+        provider_type=LLMProvider(provider_type),
+        base_url=base_url.strip() or None,
+        api_key=api_key.strip() or None,
+        model_name=model_name.strip(),
+        timeout_seconds=timeout_seconds,
+        max_tokens=max_tokens,
+        temperature=temperature.strip(),
+        max_llm_retries=max(1, max_llm_retries),
+        llm_retry_initial_seconds=max(1, llm_retry_initial_seconds),
+        created_by=admin_user.id,
+    )
+    db.add(member)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        push_flash(request, choose_text(request, "Priority number already exists in this group.", "该组内已存在相同序号。"), "danger")
+        return _redirect("/admin/llm-configs")
+    push_flash(request, choose_text(request, "LLM group member added.", "已添加 LLM 组成员。"), "success")
     return _redirect("/admin/llm-configs")
 
 
@@ -418,6 +522,33 @@ def admin_test_llm_config(config_id: int, request: Request, db: Session = Depend
     config.last_tested_at = utcnow()
     db.commit()
     push_flash(request, flash_message, flash_category)
+    return _redirect("/admin/llm-configs")
+
+
+@router.post("/llm-config-members/{member_id}/test")
+def admin_test_llm_config_member(member_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+
+    member = db.get(LLMConfigMember, member_id)
+    if member is None:
+        push_flash(request, choose_text(request, "LLM group member not found.", "未找到 LLM 组成员。"), "danger")
+        return _redirect("/admin/llm-configs")
+
+    result = test_llm_connectivity(member)
+    member.last_test_status = LLMTestStatus.SUCCESS if result.success else LLMTestStatus.FAILED
+    member.last_test_message = result.message
+    member.last_tested_at = utcnow()
+    db.commit()
+    push_flash(
+        request,
+        t(request, "flash.llm_test_success") if result.success else t(request, "flash.llm_test_failed", message=result.message),
+        "success" if result.success else "danger",
+    )
     return _redirect("/admin/llm-configs")
 
 
@@ -473,3 +604,108 @@ def admin_system(request: Request, db: Session = Depends(get_db)):
         "admin_system.html",
         {"stats": stats, "raw_stats_json": json.dumps(stats, indent=2)},
     )
+
+
+@router.post("/discussion/delete-post")
+def admin_delete_discussion_post(
+    request: Request,
+    post_id: int = Form(...),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        admin_user = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    post = db.get(DiscussionPost, post_id)
+    if post is None or getattr(post, "deleted_at", None) is not None:
+        push_flash(request, choose_text(request, "Post not found.", "未找到帖子。"), "danger")
+        return _redirect(redirect_to or "/admin/system")
+    topic = db.get(DiscussionTopic, post.topic_id)
+    if topic is None:
+        return _redirect(redirect_to or "/admin/system")
+    hard_delete_post(db, post, actor=admin_user, course_id=topic.course_id)
+    db.commit()
+    push_flash(request, choose_text(request, "Post deleted.", "帖子已删除。"), "success")
+    return _redirect(redirect_to or "/admin/system")
+
+
+@router.post("/courses/{course_id}/discussion/mute-user")
+def admin_mute_discussion_user(
+    course_id: int,
+    request: Request,
+    user_id: int = Form(...),
+    muted_until: str = Form(""),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        admin_user = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    course = db.get(Course, course_id)
+    if course is None:
+        push_flash(request, choose_text(request, "Course not found.", "课程不存在。"), "danger")
+        return _redirect(redirect_to or "/admin/users")
+    target = db.get(User, user_id)
+    if target is None:
+        push_flash(request, choose_text(request, "User not found.", "用户不存在。"), "danger")
+        return _redirect(redirect_to or "/admin/users")
+    member = db.scalar(
+        select(CourseMember).where(
+            CourseMember.course_id == course_id,
+            CourseMember.user_id == user_id,
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    )
+    if member is None:
+        push_flash(
+            request,
+            choose_text(request, "User is not an active member of this course.", "该用户不是此课程的活跃成员。"),
+            "danger",
+        )
+        return _redirect(redirect_to or "/admin/users")
+    until_dt = None
+    raw = (muted_until or "").strip()
+    if raw:
+        try:
+            until_dt = datetime.fromisoformat(raw)
+            if until_dt.tzinfo is None:
+                from datetime import timezone
+
+                until_dt = until_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            push_flash(request, choose_text(request, "Invalid end time.", "结束时间无效。"), "danger")
+            return _redirect(redirect_to or "/admin/users")
+    mute_user_in_course(db, course_id=course_id, target_user_id=target.id, actor=admin_user, muted_until=until_dt)
+    db.commit()
+    push_flash(
+        request,
+        choose_text(request, "User muted from course discussions.", "已禁止该用户在此课程讨论区发言。"),
+        "success",
+    )
+    return _redirect(redirect_to or "/admin/users")
+
+
+@router.post("/courses/{course_id}/discussion/unmute-user")
+def admin_unmute_discussion_user(
+    course_id: int,
+    request: Request,
+    user_id: int = Form(...),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        admin_user = require_admin(request, db)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    except PermissionError:
+        return _redirect("/login")
+    unmute_user_in_course(db, course_id=course_id, target_user_id=user_id, actor=admin_user)
+    db.commit()
+    push_flash(request, choose_text(request, "Mute removed.", "已解除禁言。"), "success")
+    return _redirect(redirect_to or "/admin/users")

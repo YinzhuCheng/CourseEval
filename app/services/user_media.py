@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import User
+from app.services.image_uploads import normalize_uploaded_image
 
 settings = get_settings()
 
@@ -18,24 +19,16 @@ def _relative_upload(path: Path) -> str:
 
 
 def store_user_avatar(user_id: int, file_bytes: bytes, original_filename: str) -> str:
-    ext = Path(original_filename).suffix.lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        raise ValueError("unsupported_image_type")
-    if len(file_bytes) > settings.upload_max_bytes:
-        raise ValueError("file_too_large")
+    ext, cleaned = normalize_uploaded_image(file_bytes, original_filename)
     upload_dir = settings.uploads_dir / "avatars" / f"user-{user_id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
     stored = upload_dir / f"{uuid4().hex}{ext}"
-    stored.write_bytes(file_bytes)
+    stored.write_bytes(cleaned)
     return _relative_upload(stored)
 
 
 def store_course_cover_image(course_id: int, file_bytes: bytes, original_filename: str) -> str:
-    ext = Path(original_filename).suffix.lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        raise ValueError("unsupported_image_type")
-    if len(file_bytes) > settings.upload_max_bytes:
-        raise ValueError("file_too_large")
+    ext, cleaned = normalize_uploaded_image(file_bytes, original_filename)
     upload_dir = settings.uploads_dir / "courses" / f"course-{course_id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
     for old in upload_dir.glob("cover.*"):
@@ -44,7 +37,7 @@ def store_course_cover_image(course_id: int, file_bytes: bytes, original_filenam
         except OSError:
             pass
     stored = upload_dir / f"cover{ext}"
-    stored.write_bytes(file_bytes)
+    stored.write_bytes(cleaned)
     return _relative_upload(stored)
 
 

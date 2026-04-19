@@ -105,10 +105,10 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 - **Owns:** `Feedback` rows, `EvaluationResult` scores, **effective** score resolution, `FinalGradeSnapshot` updates for analytics and reveal.
 - **Source of truth:** `app/services/scoring.py` for effective score and teacher-confirmation rules; `app/services/submissions.py` for `update_final_grade_snapshot`; teacher grading in `app/routes/teacher.py`.
 
-### LLM config / usage / quota
+### LLM groups / usage / quota
 
-- **Owns:** `LLMConfig` records, per-user token limits, billing/usage aggregation (Beijing day), LLM queue names.
-- **Source of truth:** `app/models.py` (`LLMConfig`, usage tables), `app/services/llm_token_usage.py`, `app/services/llm.py`, admin routes in `app/routes/admin.py`, student usage in `app/routes/student.py`.
+- **Owns:** `LLMConfig` group records, `LLMConfigMember` fallback members, per-user token limits, billing/usage aggregation (Beijing day), LLM group queue names.
+- **Source of truth:** `app/models.py` (`LLMConfig`, `LLMConfigMember`, usage tables), `app/services/llm_groups.py`, `app/services/llm_token_usage.py`, `app/services/llm.py`, admin routes in `app/routes/admin.py`, discussion selection in `app/services/discussion_ai.py`.
 - **Tests:** `tests/test_llm_token_usage.py`, `tests/test_llm_retry.py`, etc.
 
 ### Runner / sandbox / artifacts
@@ -181,7 +181,7 @@ There is **no separate SPA**; “frontend” is templates + Bootstrap CDN in `ap
 
 ## 7. Common traps (do-not-assume)
 
-- **Do not** reintroduce retired compatibility paths unless a migration plan explicitly calls for them.
+- **Do not** reintroduce removed workflows or compatibility paths unless a migration plan explicitly calls for them.
 - **Do not** assume a FastAPI route owns all business rules—large pieces live in `app/services/submissions.py`.
 - **Do not** change a template’s variables without checking the route in `app/routes/*` and `app/web.py` context.
 - **Do not** assume renaming an enum value in `constants.py` is safe without DB migration / existing row values.
@@ -224,9 +224,8 @@ There is **no dedicated lint script** in-repo; rely on the verification script u
 |----------|-----------|
 | `docs/file-map.md` | You need “which file owns X?” grouped by responsibility |
 | `docs/change-guide.md` | You are modifying behavior and need coupling / failure-mode hints |
-| `docs/known-issues.md` | You are reviewing technical debt, historical compatibility traps, or doc/code inconsistencies |
+| `docs/known-issues.md` | You are reviewing technical debt, maintenance traps, or doc/code inconsistencies |
 | `docs/deployment-and-upgrades.md` | You need deployment, persistence, queue, or migration/upgrade expectations |
-| `docs/spec-discussion-forum.md` | Planned product spec for discussion Markdown, images, pagination (admin setting), moderation |
 | `docs/architecture/submission-lifecycle.md` | Submission + task + worker state flow |
 | `docs/architecture/scoring-pipeline.md` | Scores, feedback, snapshots, teacher confirmation |
 | `docs/architecture/roles-and-permissions.md` | Access control |

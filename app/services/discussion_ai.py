@@ -8,10 +8,18 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from app.constants import DiscussionTopicKind, LLMScope, LLMTestStatus
+from app.constants import DiscussionTopicKind
 from app.models import Course, CourseMaterial, DiscussionPost, DiscussionTopic, LLMConfig, PlatformLlmTokenPolicy, Question, User
 from app.services.discussions import create_post
 from app.services.llm import generate_text
+from app.services.llm_groups import (
+    available_llm_groups_for_course,
+    first_valid_group,
+    group_has_callable_target,
+    latest_platform_llm_group,
+    ordered_group_targets,
+    parse_optional_tested_llm_group_id,
+)
 
 if TYPE_CHECKING:
     pass
@@ -29,19 +37,6 @@ def message_requests_discussion_ai(body: str, request_ai_flag: bool) -> bool:
     return bool(_AI_AT_RE.search(body or ""))
 
 
-def _latest_platform_llm_config(db: Session) -> LLMConfig | None:
-    statement = (
-        select(LLMConfig)
-        .where(
-            LLMConfig.scope == LLMScope.PLATFORM,
-            LLMConfig.enabled.is_(True),
-            LLMConfig.last_test_status == LLMTestStatus.SUCCESS,
-        )
-        .order_by(LLMConfig.last_tested_at.desc(), LLMConfig.created_at.desc())
-    )
-    return db.scalar(statement)
-
-
 def _policy_row(db: Session) -> PlatformLlmTokenPolicy:
     row = db.get(PlatformLlmTokenPolicy, 1)
     if row is None:
@@ -52,26 +47,11 @@ def _policy_row(db: Session) -> PlatformLlmTokenPolicy:
 
 
 def parse_optional_tested_llm_config_id(db: Session, raw: str) -> int | None:
-    s = (raw or "").strip()
-    if not s:
-        return None
-    try:
-        cid = int(s)
-    except ValueError:
-        return None
-    cfg = db.get(LLMConfig, cid)
-    if cfg is None or not cfg.enabled or cfg.last_test_status != LLMTestStatus.SUCCESS:
-        return None
-    return cid
+    return parse_optional_tested_llm_group_id(db, raw)
 
 
 def _first_valid_config(db: Session, config_id: int | None) -> LLMConfig | None:
-    if not config_id:
-        return None
-    cfg = db.get(LLMConfig, config_id)
-    if cfg is None or not cfg.enabled or cfg.last_test_status != LLMTestStatus.SUCCESS:
-        return None
-    return cfg
+    return first_valid_group(db, config_id)
 
 
 def resolve_discussion_ai_llm_config(db: Session, topic: DiscussionTopic) -> LLMConfig | None:
@@ -99,7 +79,23 @@ def resolve_discussion_ai_llm_config(db: Session, topic: DiscussionTopic) -> LLM
     c = _first_valid_config(db, policy.discussion_ai_default_llm_config_id)
     if c:
         return c
-    return _latest_platform_llm_config(db)
+    return latest_platform_llm_group(db)
+
+
+def resolve_selected_discussion_ai_llm_config(
+    db: Session,
+    topic: DiscussionTopic,
+    selected_group_id: int | None,
+) -> LLMConfig | None:
+    if selected_group_id:
+        group = first_valid_group(db, selected_group_id)
+        if group and (group.course_id in (None, topic.course_id)):
+            return group
+    return resolve_discussion_ai_llm_config(db, topic)
+
+
+def discussion_ai_group_options(db: Session, topic: DiscussionTopic) -> list[dict[str, object]]:
+    return available_llm_groups_for_course(db, topic.course_id)
 
 
 def get_or_create_ai_assistant_user(db: Session) -> User:
@@ -161,7 +157,9 @@ def build_discussion_ai_prompts(db: Session, topic: DiscussionTopic, user_messag
     system = (
         "You are a helpful teaching assistant in a course discussion. "
         "Answer clearly and concisely. If the question is outside the provided course context, say so briefly. "
-        "Do not fabricate private information about students."
+        "Do not fabricate private information about students. "
+        "Do not include markdown images, raw URLs, or links in your reply (plain text and simple markdown only: "
+        "bold, italic, lists, code fences)."
     )
     user_block = f"Course context (for this thread):\n{ctx}\n\nStudent message:\n{user_message}"
     return system, user_block
@@ -174,44 +172,53 @@ def run_discussion_ai_reply(
     requester: User,
     user_message: str,
     parent_post_id: int | None,
+    selected_group_id: int | None = None,
 ) -> DiscussionPost | None:
     """Create AI reply post; charges requester's daily LLM quota. Returns None if no config or empty message."""
     user_message = (user_message or "").strip()
     if not user_message:
         return None
-    cfg = resolve_discussion_ai_llm_config(db, topic)
-    if cfg is None:
+    group = resolve_selected_discussion_ai_llm_config(db, topic, selected_group_id)
+    if group is None or not group_has_callable_target(group):
         raise ValueError(
-            "No discussion AI model is available. An administrator must pin a connectivity-tested LLM "
+            "No discussion AI group is available. An administrator must pin a connectivity-tested LLM group "
             "under Admin → LLM (Discussion AI defaults) or course-level overrides."
         )
 
     system_prompt, prompt = build_discussion_ai_prompts(db, topic, user_message)
-    result = generate_text(
-        cfg,
-        prompt,
-        system_prompt,
-        bill_user_id=requester.id,
-        bill_db=db,
-        bill_user_prompt=prompt,
-        bill_system_prompt=system_prompt,
-    )
+    result = None
+    last_exc: Exception | None = None
+    for target in ordered_group_targets(group, tested_only=True):
+        try:
+            result = generate_text(
+                target,
+                prompt,
+                system_prompt,
+                bill_user_id=requester.id,
+                bill_db=db,
+                bill_user_prompt=prompt,
+                bill_system_prompt=system_prompt,
+            )
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+    if result is None:
+        raise ValueError(f"All LLMs in group '{group.name}' failed.") from last_exc
     text = (result.content or "").strip()
     if not text:
         text = "(AI produced an empty response.)"
 
     ai_user = get_or_create_ai_assistant_user(db)
     body = f"[AI]\n{text}"
-    post = DiscussionPost(
+    post = create_post(
+        db,
         topic_id=topic.id,
-        author_id=ai_user.id,
+        author=ai_user,
+        body=body,
         parent_post_id=parent_post_id,
-        body_text=body[:20000],
         is_anonymous=False,
         is_ai=True,
     )
-    db.add(post)
-    db.flush()
     return post
 
 
@@ -224,6 +231,8 @@ def create_user_post_and_maybe_ai_reply(
     parent_post_id: int | None,
     is_anonymous: bool,
     request_ai: bool,
+    pending_image_uploads: bool = False,
+    selected_llm_group_id: int | None = None,
 ) -> tuple[DiscussionPost | None, str | None]:
     """Create user post when there is body; AI-only button with parent skips user post. Returns (user_post_or_none, ai_error_message)."""
     raw = (body or "").strip()
@@ -231,7 +240,7 @@ def create_user_post_and_maybe_ai_reply(
     user_body = strip_ai_prefix(raw) if wants_ai else raw
 
     ai_err: str | None = None
-    if wants_ai and not user_body and parent_post_id:
+    if wants_ai and not user_body and not pending_image_uploads and parent_post_id:
         parent = db.get(DiscussionPost, parent_post_id)
         if parent is None or parent.topic_id != topic.id:
             raise ValueError("empty_body")
@@ -243,6 +252,7 @@ def create_user_post_and_maybe_ai_reply(
                 requester=user,
                 user_message=prompt,
                 parent_post_id=parent_post_id,
+                selected_group_id=selected_llm_group_id,
             )
         except ValueError as e:
             ai_err = str(e)
@@ -250,7 +260,7 @@ def create_user_post_and_maybe_ai_reply(
             ai_err = str(e) or "AI request failed."
         return None, ai_err
 
-    if not user_body:
+    if not user_body and not pending_image_uploads:
         raise ValueError("empty_body")
 
     user_post = create_post(
@@ -261,6 +271,7 @@ def create_user_post_and_maybe_ai_reply(
         parent_post_id=parent_post_id,
         is_anonymous=is_anonymous,
         is_ai=False,
+        has_pending_image_uploads=pending_image_uploads and not user_body,
     )
     if wants_ai:
         prompt = strip_ai_prefix(raw)
@@ -271,6 +282,7 @@ def create_user_post_and_maybe_ai_reply(
                 requester=user,
                 user_message=prompt,
                 parent_post_id=user_post.id,
+                selected_group_id=selected_llm_group_id,
             )
         except ValueError as e:
             ai_err = str(e)

@@ -306,22 +306,22 @@
         <h2 class="h5 mb-3">{{ lx("Course LLM default", "课程默认 LLM") }}</h2>
         <p class="small text-muted">
           {{ lx(
-            "By default, courses follow the latest platform LLM configuration that has passed connectivity testing. You can also pin this course to a specific configuration below.",
-            "默认情况下，课程会跟随平台最新测试成功的 LLM 配置。你也可以在下方将本课程固定到某个指定配置。"
+            "By default, courses follow the latest platform LLM group with at least one tested model. You can also pin this course to a specific group below.",
+            "默认情况下，课程会跟随平台最新至少有一个测试成功模型的 LLM 组。你也可以在下方将本课程固定到某个指定组。"
           ) }}
         </p>
         {% if can_manage_course %}
         <form method="post" action="/teacher/courses/{{ course.id }}/llm-config" class="row g-3">
           <div class="col-12">
-            <label class="form-label">{{ lx("LLM config", "LLM 配置") }}</label>
+            <label class="form-label">{{ lx("LLM group", "LLM 组") }}</label>
             <select class="form-select" name="llm_config_id">
-              <option value="">{{ lx("Follow latest platform-tested default", "跟随平台最新测试成功默认配置") }}</option>
+              <option value="">{{ lx("Follow latest platform-tested default group", "跟随平台最新测试成功默认组") }}</option>
               {% for config in available_llm_configs %}
               <option
                 value="{{ config.id }}"
                 {% if not course.use_global_llm_default and course.default_llm_config_id == config.id %}selected{% endif %}
               >
-                {{ config.name }} · {{ config.model_name }}
+                {{ config.name }} · {{ config.description or (config.model_name ~ " @ " ~ (config.base_url or "-")) }}
               </option>
               {% endfor %}
             </select>
@@ -350,12 +350,29 @@
         {% if members %}
         <ul class="list-group mb-4">
           {% for member in members %}
-          <li class="list-group-item d-flex justify-content-between align-items-center">
+          <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
               <strong>{{ member.user.username }}</strong>
               <div class="small text-muted">{{ member.user.email }}</div>
             </div>
-            <span class="badge bg-secondary">{{ elabel("course_role", member.role) }}</span>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="badge bg-secondary">{{ elabel("course_role", member.role) }}</span>
+              {% if can_moderate_discussion and member.user_id != current_user.id %}
+                {% if discussion_mute_by_user and discussion_mute_by_user.get(member.user_id) %}
+                <form method="post" action="/teacher/courses/{{ course.id }}/discussion/unmute-user" class="d-inline">
+                  <input type="hidden" name="user_id" value="{{ member.user_id }}" />
+                  <input type="hidden" name="redirect_to" value="/teacher/courses/{{ course.id }}" />
+                  <button type="submit" class="btn btn-sm btn-outline-secondary">{{ lx("Unmute discussion", "解除讨论禁言") }}</button>
+                </form>
+                {% else %}
+                <form method="post" action="/teacher/courses/{{ course.id }}/discussion/mute-user" class="d-inline">
+                  <input type="hidden" name="user_id" value="{{ member.user_id }}" />
+                  <input type="hidden" name="redirect_to" value="/teacher/courses/{{ course.id }}" />
+                  <button type="submit" class="btn btn-sm btn-outline-warning">{{ lx("Mute discussion", "禁止讨论发言") }}</button>
+                </form>
+                {% endif %}
+              {% endif %}
+            </div>
           </li>
           {% endfor %}
         </ul>
