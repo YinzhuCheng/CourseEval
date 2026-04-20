@@ -25,7 +25,7 @@ from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSnapshot, LLMConfig, Question, ShortAnswerQuestionConfig, Submission, User
 from app.auth import assign_user_role, has_super_admin, resolve_registration_roles
 from app.services.courses import bootstrap_sample_data, get_assignment_for_student, get_question_for_student
-from app.services.permissions import can_manage_course, can_staff_course, is_platform_admin
+from app.services.permissions import can_manage_course, can_staff_course
 from app.services.submissions import (
     _resolve_llm_config_for_question,
     _strip_hidden_output_sections,
@@ -36,7 +36,7 @@ from app.services.submissions import (
 )
 
 
-class Phase1AlignmentTests(unittest.TestCase):
+class CoreInvariantTests(unittest.TestCase):
     def setUp(self) -> None:
         engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
         Base.metadata.create_all(engine)
@@ -465,6 +465,7 @@ class Phase1AlignmentTests(unittest.TestCase):
         self.assertEqual(user.account_role, AccountRole.STUDENT)
         self.assertEqual(user.platform_role, PlatformRole.USER)
         self.assertEqual(user.effective_role, UserRole.STUDENT)
+
 
 if __name__ == "__main__":
     unittest.main()

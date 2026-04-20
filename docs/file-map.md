@@ -74,7 +74,7 @@ Grouped by **responsibility**, not directory listing. Use this to answer: *where
 
 **Orchestration:** `teacher.py` coordinates uploads + DB writes; configs are source of truth in `models.py`.
 
-**Tests:** `tests/test_assignment_visibility.py`, `tests/test_phase1_alignment.py`, grep `create_question` / `update_question`.
+**Tests:** `tests/test_assignment_visibility.py`, `tests/test_core_invariants.py`, grep `create_question` / `update_question`.
 
 ---
 

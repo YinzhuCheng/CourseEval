@@ -18,7 +18,7 @@ Supported workflows (see `README.md` for user-facing detail):
 - File / LLM paths: PDF, text/Markdown/TeX, `.ipynb` as file upload with LLM pipelines in `app/services/llm.py` and related services.
 - Gradebook snapshots and teacher analytics built on `FinalGradeSnapshot` and submission history.
 
-**v0 baseline:** Active question types are `code`, `short_answer`, and `file_llm`. Standalone notebook execution routes, `Job`/`Notebook` ORM models, and split file-question enum values have been removed.
+**v0 baseline:** Active question types are `code`, `short_answer`, and `file_llm`. Standalone notebook execution routes, legacy **SQLAlchemy** `Job`/`Notebook` models for that workflow, and split file-question enum values have been removed. Redis Queue still uses **`rq.job.Job`** handles for RQ bookkeeping—do not confuse that Python class with removed ORM tables.
 
 ---
 

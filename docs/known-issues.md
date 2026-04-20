@@ -26,7 +26,7 @@ When reviewing permission changes, grep for `require_`, `can_`, route handlers, 
 
 ### Notebook wording means file/LLM notebook uploads
 
-Standalone notebook execution UI and job models are not part of v0. Remaining notebook wording refers to `.ipynb` files handled by `file_llm` and `app/services/notebook_multimodal.py`.
+Standalone notebook execution UI and legacy **ORM** models for that workflow are not part of v0. Redis Queue still uses **`rq.job.Job`** objects for backend job ids—do not confuse them with removed tables. Remaining notebook wording refers to `.ipynb` files handled by `file_llm` and `app/services/notebook_multimodal.py`.
 
 Do not reintroduce a notebook question type unless the product is explicitly adding a new active workflow with tests and migration notes.
 

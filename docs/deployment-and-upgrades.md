@@ -80,10 +80,10 @@ Then rebuild and redeploy the runner image.
 
 ## Worker queues
 
-`worker.py` starts:
+`worker.py` runs a **manager loop** that spawns and reconciles worker **processes** (each process runs one RQ `Worker` for a single queue name):
 
-- one worker for `CODE_QUEUE_NAME`
-- one or more workers per enabled LLM group, using `LLM_QUEUE_PREFIX-<group_id>`
+- one worker **process** for `CODE_QUEUE_NAME`
+- one or more worker **processes** per enabled LLM group, using `LLM_QUEUE_PREFIX-<group_id>`
 
 Each enabled LLM group's `queue_concurrency` controls how many worker processes are created for that group. Inside a group, the worker tries priority #1 first and only uses later LLM members after earlier members fail; the next task starts from #1 again.
 
