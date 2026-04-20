@@ -1,21 +1,50 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-lg-3 mb-3">
-    <div class="list-group shadow-sm">
+<div class="row g-4">
+  <aside class="col-lg-3">
+    <div class="list-group mb-3">
       <a
         href="/me/profile"
         class="list-group-item list-group-item-action {% if profile_section == 'overview' %}active{% endif %}"
       >{{ t("profile.nav.overview") }}</a>
       <a
+        href="/me/notifications"
+        class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {% if profile_section == 'notifications' %}active{% endif %}"
+      >
+        <span>{{ lx("Messages", "消息") }}</span>
+        {% if unread_notification_count %}
+        <span class="badge {% if profile_section == 'notifications' %}text-bg-light{% else %}text-bg-danger{% endif %}">{{ unread_notification_count }}</span>
+        {% endif %}
+      </a>
+      <a
+        href="/me/friends"
+        class="list-group-item list-group-item-action {% if profile_section == 'friends' %}active{% endif %}"
+      >{{ lx("Friends", "好友") }}</a>
+      <a
+        href="/me/messages"
+        class="list-group-item list-group-item-action {% if profile_section == 'messages' %}active{% endif %}"
+      >{{ lx("Private messages", "私信") }}</a>
+      <a
+        href="/me/invites"
+        class="list-group-item list-group-item-action {% if profile_section == 'invites' %}active{% endif %}"
+      >{{ lx("Invitations", "邀请") }}</a>
+      <a
         href="/me/profile/llm-usage"
         class="list-group-item list-group-item-action {% if profile_section == 'llm' %}active{% endif %}"
       >{{ t("student.llm_usage.title") }}</a>
+      <a
+        href="/me/reports"
+        class="list-group-item list-group-item-action {% if profile_section == 'reports' %}active{% endif %}"
+      >{{ lx("My reports", "我的举报") }}</a>
+      <a
+        href="/me/settings"
+        class="list-group-item list-group-item-action {% if profile_section == 'settings' %}active{% endif %}"
+      >{{ lx("Settings", "设置") }}</a>
     </div>
-  </div>
-  <div class="col-lg-8">
+  </aside>
+  <section class="col-lg-9">
     {% block profile_body %}{% endblock %}
-  </div>
+  </section>
 </div>
 {% endblock %}

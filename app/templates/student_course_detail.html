@@ -19,9 +19,28 @@
   </div>
 </div>
 
+{% if not course.is_open_community %}
+<section class="mb-4">
+  <h2 class="h6 mb-2">{{ lx("Invite a friend", "邀请好友") }}</h2>
+  <form method="post" action="/student/courses/{{ course.id }}/invite" class="row g-2">
+    <input type="hidden" name="redirect_to" value="{{ request.url.path }}" />
+    <div class="col-md-4">
+      <input class="form-control" name="username" placeholder="{{ lx('Friend username', '好友用户名') }}" required />
+    </div>
+    <div class="col-md-5">
+      <input class="form-control" name="message" maxlength="500" placeholder="{{ lx('Optional note', '可选留言') }}" />
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary w-100" type="submit">{{ lx("Invite", "邀请") }}</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
 <div class="card shadow-sm">
   <div class="card-body">
     {% if not course.is_open_community %}
+    {% set published_assignments = course.assignments|selectattr("status.value", "equalto", "published")|list %}
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
       <div>
         <h2 class="h5 mb-1">{{ lx("Assignments", "作业列表") }}</h2>
@@ -30,7 +49,7 @@
         </p>
       </div>
     </div>
-    {% if course.assignments %}
+    {% if published_assignments %}
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
@@ -43,7 +62,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for assignment in course.assignments %}
+            {% for assignment in published_assignments %}
           <tr>
             <td>
               <div class="fw-semibold">{{ assignment.title }}</div>

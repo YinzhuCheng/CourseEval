@@ -2,13 +2,40 @@
 
 CourseEval is a lightweight course-assignment evaluation platform for teaching teams.
 
-The current product direction is:
+It is designed for small to medium teaching deployments where one web app should cover:
 
 - **Code evaluation** for executable Python, C, and C++ programming questions
 - **File / LLM-reviewed evaluation** for `.pdf`, `.txt`, `.tex`, `.md`, and `.ipynb` submissions
 - **Teacher-confirmed grading** for workflows where automatic suggestions should not directly become final grades
 
 The v0 baseline keeps only three active question types: code, short answer, and file / LLM-reviewed upload.
+
+## Quick orientation
+
+CourseEval is not a general LMS. It focuses on the assignment loop:
+
+1. A teacher creates a course and shares a join code.
+2. Students join the course, open assignments, and submit code, text, or files.
+3. The system runs Docker-based code tests or prepares LLM-assisted feedback.
+4. Students monitor evaluation status and read feedback.
+5. Teachers review submissions, confirm grades when needed, and track progress.
+6. Admins manage users, runtime images, LLM groups, token budgets, and deployment health.
+
+### Role guide
+
+| Role | Main entry | What they do |
+| --- | --- | --- |
+| Student | `/student/courses` | Join courses, open assignments, submit work, view status and feedback |
+| Teacher | `/teacher/courses` | Create courses, assignments, questions, review submissions, confirm grades |
+| Admin | `/admin` | Manage users, runtime images, LLM provider groups, quotas, and SMTP tests |
+
+### Question type guide
+
+| Use case | Question type |
+| --- | --- |
+| Programs that should read stdin and write stdout | Code question |
+| Short manual/LLM-assisted answer | Short answer |
+| Reports, PDFs, TeX, Markdown, notebooks as submitted files | File upload / LLM review |
 
 ## Repository map for coding agents
 
@@ -258,27 +285,68 @@ Or with Docker:
 docker run --rm -p 6379:6379 redis:7-alpine
 ```
 
-### 7. Build the default runner image
+### 7. Build the code runner image
+
+Code questions require Docker and the runner image:
 
 ```bash
 docker build -t courseeval-runner:latest runner
 ```
 
-This image contains the default Docker-isolated code runtime used for Python, C, and C++ evaluation. To add Python packages to the default runtime, update both `app/runtime_support.py` and `runner/requirements.txt`, then rebuild this image.
+### 8. Start the app and workers
 
-### 8. Start the web service
+Use one terminal for the web app:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 9. Start the worker
-
-In another shell:
+Use another terminal for background jobs:
 
 ```bash
 python worker.py
 ```
+
+Then open `http://localhost:8000`.
+
+## Deployment checklist
+
+Before using CourseEval with real students:
+
+- Set a non-default `SECRET_KEY` and keep it stable.
+- Set `APP_BASE_URL` to the public HTTPS origin so verification and reset links work.
+- Put `DATA_DIR` and the SQLite database on persistent storage.
+- Run Redis where both the web app and worker can reach it.
+- Build and deploy the configured `RUNNER_IMAGE`.
+- Keep `DOCKER_NETWORK_DISABLED=true` unless you have reviewed the runner image and assignment needs.
+- Configure SMTP if email verification or password reset should work.
+- Configure at least one tested LLM group before enabling LLM-reviewed questions.
+- Create the first super admin with `scripts/init_super_admin.py` or your deployment bootstrap process.
+
+See [docs/deployment-and-upgrades.md](docs/deployment-and-upgrades.md) for operational details and upgrade notes.
+
+## Teacher quick start
+
+1. Sign in with a teacher account.
+2. Open **Teacher** and create a course.
+3. Share the course join code with students.
+4. Create an assignment with open/due/close times and a scoring rule.
+5. Open the assignment and create questions.
+6. For code questions, provide visible and hidden tests.
+7. For file / LLM-reviewed questions, provide a rubric and reference guidance.
+8. Review submissions from the question or assignment page.
+9. Confirm or adjust scores where teacher confirmation is required.
+
+## Common operational issues
+
+| Symptom | First checks |
+| --- | --- |
+| Verification email does not arrive | SMTP settings, spam folder, `APP_BASE_URL` |
+| Code submissions stay queued | Redis is running, `worker.py` is running, `CODE_QUEUE_NAME` matches |
+| Code evaluation fails immediately | Docker daemon, runner image tag, bind-mounted data directory permissions |
+| LLM review is blocked | LLM group test status, user token quota, provider API key |
+| PDF review misses pages | `PDF_REVIEW_MAX_PAGES` and provider multimodal support |
+| Data disappears after restart | `DATA_DIR` or SQLite database was not persisted |
 
 ## Runtime and operational defaults
 

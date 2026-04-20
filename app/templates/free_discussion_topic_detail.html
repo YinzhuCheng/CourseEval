@@ -20,12 +20,29 @@
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-outline-secondary" href="/free-discussion">{{ lx("All topics", "全部话题") }}</a>
+    <a class="btn btn-outline-warning" href="/reports/new?target_type=free_discussion_card&target_id={{ free_topic.id }}&redirect_to=/free-discussion/topics/{{ free_topic.id }}">{{ lx("Report", "举报") }}</a>
     {% if can_manage_free_topic %}
     <a class="btn btn-outline-primary" href="/free-discussion/topics/{{ free_topic.id }}/edit">{{ lx("Edit topic", "编辑话题") }}</a>
     <a class="btn btn-primary" href="/free-discussion/topics/{{ free_topic.id }}/chapters/new">{{ lx("New chapter", "新建章节") }}</a>
     {% endif %}
   </div>
 </div>
+
+<section class="mb-4">
+  <h2 class="h6 mb-2">{{ lx("Invite a friend", "邀请好友") }}</h2>
+  <form method="post" action="/free-discussion/topics/{{ free_topic.id }}/invite" class="row g-2">
+    <input type="hidden" name="redirect_to" value="{{ request.url.path }}" />
+    <div class="col-md-4">
+      <input class="form-control" name="username" placeholder="{{ lx('Friend username', '好友用户名') }}" required />
+    </div>
+    <div class="col-md-5">
+      <input class="form-control" name="message" maxlength="500" placeholder="{{ lx('Optional note', '可选留言') }}" />
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary w-100" type="submit">{{ lx("Invite", "邀请") }}</button>
+    </div>
+  </form>
+</section>
 
 {% if root_body_html %}
 <div class="card shadow-sm mb-4">

@@ -10,7 +10,7 @@
   </div>
   <div class="d-flex flex-wrap gap-2">
     {% if can_manage_course %}
-    <form method="post" action="/teacher/questions/{{ question.id }}/historical-highest" onsubmit="return confirm('Enable historical highest scoring for all students on this question?');">
+    <form method="post" action="/teacher/questions/{{ question.id }}/historical-highest" onsubmit="return confirm('{{ lx('Use historical highest scoring for all students on this question?', '确定将本题所有学生改为按历史最高分计分吗？') }}');">
       <button class="btn btn-outline-warning" type="submit">{{ lx("Use historical highest", "按历史最高分计分") }}</button>
     </form>
     {% endif %}
@@ -27,34 +27,34 @@
     <p class="small text-muted mb-3">
       {{ lx("Scores are effective snapshot grades for active students in this course.", "分数为当前课程活跃学生的生效成绩快照。") }}
     </p>
-    <div class="row g-3 small mb-3">
-      <div class="col-6 col-md-3">
-        <div class="text-muted">{{ lx("Active students", "活跃学生") }}</div>
-        <div class="fw-semibold">{{ question_class_stats.active_student_count }}</div>
+    <div class="metric-grid mb-3">
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Active students", "活跃学生") }}</span>
+        <span class="metric-value">{{ question_class_stats.active_student_count }}</span>
       </div>
-      <div class="col-6 col-md-3">
-        <div class="text-muted">{{ lx("Submitted (any)", "已提交人数") }}</div>
-        <div class="fw-semibold">{{ question_class_stats.submitted_any_count }} / {{ question_class_stats.active_student_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Submitted", "已提交") }}</span>
+        <span class="metric-value">{{ question_class_stats.submitted_any_count }} / {{ question_class_stats.active_student_count }}</span>
       </div>
-      <div class="col-6 col-md-3">
-        <div class="text-muted">{{ lx("Missing", "缺交人数") }}</div>
-        <div class="fw-semibold">{{ question_class_stats.missing_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Missing", "缺交") }}</span>
+        <span class="metric-value">{{ question_class_stats.missing_count }}</span>
       </div>
-      <div class="col-6 col-md-3">
-        <div class="text-muted">{{ lx("Graded count", "有分人数") }}</div>
-        <div class="fw-semibold">{{ question_class_stats.score_stats.count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Graded count", "有分人数") }}</span>
+        <span class="metric-value">{{ question_class_stats.score_stats.count }}</span>
       </div>
     </div>
     {% set st = question_class_stats.score_stats %}
     {% if st.count %}
     <div class="row g-3 small mb-3">
-      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Mean", "均分") }}</div><div>{{ "%.2f"|format(st.mean) }}</div></div>
-      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Median", "中位数") }}</div><div>{{ "%.2f"|format(st.median) }}</div></div>
-      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Min", "最低") }}</div><div>{{ "%.2f"|format(st.min) }}</div></div>
-      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Max", "最高") }}</div><div>{{ "%.2f"|format(st.max) }}</div></div>
-      <div class="col-6 col-md-2"><div class="text-muted">P25</div><div>{{ "%.2f"|format(st.p25) }}</div></div>
-      <div class="col-6 col-md-2"><div class="text-muted">P75</div><div>{{ "%.2f"|format(st.p75) }}</div></div>
-      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Zeros", "零分人数") }}</div><div>{{ st.zero_count }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Mean", "均分") }}</div><div class="fw-semibold">{{ "%.2f"|format(st.mean) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Median", "中位数") }}</div><div class="fw-semibold">{{ "%.2f"|format(st.median) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Min", "最低") }}</div><div class="fw-semibold">{{ "%.2f"|format(st.min) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Max", "最高") }}</div><div class="fw-semibold">{{ "%.2f"|format(st.max) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">P25</div><div class="fw-semibold">{{ "%.2f"|format(st.p25) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">P75</div><div class="fw-semibold">{{ "%.2f"|format(st.p75) }}</div></div>
+      <div class="col-6 col-md-2"><div class="text-muted">{{ lx("Zeros", "零分人数") }}</div><div class="fw-semibold">{{ st.zero_count }}</div></div>
     </div>
     {% endif %}
     {% if question_class_stats.feedback_source_counts %}
@@ -117,18 +117,18 @@
     </div>
     {% endif %}
 
-    <div class="card shadow-sm mt-3">
-      <div class="card-body">
-        <h2 class="h5 mb-3">{{ lx("Active grade snapshots", "当前生效成绩快照") }}</h2>
+    <details class="ux-disclosure mt-3">
+      <summary>{{ lx("Current grade records", "当前成绩记录") }}</summary>
+      <div class="ux-disclosure-body">
         {% if snapshots %}
         <div class="list-group list-group-flush">
           {% for snapshot in snapshots %}
           <div class="list-group-item px-0">
-            <div class="fw-semibold">{{ lx("Student", "学生") }} #{{ snapshot.student_id }}</div>
+            <div class="fw-semibold">{{ snapshot.student.username if snapshot.student else (lx("Student", "学生") ~ " #" ~ snapshot.student_id) }}</div>
             <div class="small text-muted">
-              {{ lx("score", "分数") }}={{ snapshot.score if snapshot.score is not none else "-" }},
-              {{ lx("rule", "规则") }}={{ elabel("scoring_rule", snapshot.grading_rule_applied) }},
-              {{ lx("source", "来源") }}={{ elabel("feedback_source", snapshot.feedback_source) if snapshot.feedback_source else "-" }},
+              {{ lx("Score", "分数") }}: {{ snapshot.score if snapshot.score is not none else "-" }} ·
+              {{ lx("Rule", "规则") }}: {{ elabel("scoring_rule", snapshot.grading_rule_applied) }} ·
+              {{ lx("Source", "来源") }}: {{ elabel("feedback_source", snapshot.feedback_source) if snapshot.feedback_source else "-" }}
               {% if snapshot.use_historical_highest %}<span class="badge text-bg-warning">{{ lx("Historical highest", "历史最高分") }}</span>{% endif %}
             </div>
           </div>
@@ -138,7 +138,7 @@
         <p class="text-muted mb-0">{{ lx("No effective grades yet.", "当前还没有生效成绩。") }}</p>
         {% endif %}
       </div>
-    </div>
+    </details>
   </div>
 
   <div class="col-lg-7">
@@ -166,6 +166,24 @@
               <option value="" {% if not question.scoring_rule_override %}selected{% endif %}>{{ lx("Use assignment default", "使用作业默认规则") }}</option>
               <option value="latest" {% if question.scoring_rule_override and question.scoring_rule_override.value == 'latest' %}selected{% endif %}>{{ elabel("scoring_rule", "latest") }}</option>
               <option value="highest" {% if question.scoring_rule_override and question.scoring_rule_override.value == 'highest' %}selected{% endif %}>{{ elabel("scoring_rule", "highest") }}</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Runtime image override", "运行镜像覆盖") }}</label>
+            <select class="form-select" name="runtime_image_id">
+              <option value="">{{ lx("Use assignment/course default", "使用作业/课程默认") }}</option>
+              {% for image in available_runtime_images %}
+              <option value="{{ image.id }}" {% if question.runtime_image_id == image.id %}selected{% endif %}>{{ image.name }} · {{ image.image_tag }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("LLM group override", "LLM 组覆盖") }}</label>
+            <select class="form-select" name="llm_config_id">
+              <option value="">{{ lx("Use assignment/course default", "使用作业/课程默认") }}</option>
+              {% for config in available_llm_configs %}
+              <option value="{{ config.id }}" {% if question.llm_config_id == config.id %}selected{% endif %}>{{ config.name }} · {{ config.description or config.model_name }}</option>
+              {% endfor %}
             </select>
           </div>
 
@@ -384,7 +402,7 @@
               <tr>
                 <td>#{{ submission.id }}</td>
                 <td>{{ submission.user.username }}</td>
-                <td><span class="badge status-badge status-{{ submission.status.value }}">{{ elabel("submission_status", submission.status) }}</span></td>
+                <td><span class="badge status-badge status-{{ submission.status.value|replace('_', '-') }}">{{ elabel("submission_status", submission.status) }}</span></td>
                 <td>{{ latest_result.visible_score if latest_result and latest_result.visible_score is not none else "-" }}</td>
                 <td>{{ latest_result.hidden_score if latest_result and latest_result.hidden_score is not none else "-" }}</td>
                 <td>{{ latest_result.auto_score if latest_result and latest_result.auto_score is not none else "-" }}</td>

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lx("Reports", "举报中心") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-4">{{ lx("Reports", "举报中心") }}</h1>
+{% if reports %}
+<div class="vstack gap-3">
+  {% for r in reports %}
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+        <div>
+          <h2 class="h5 mb-1">#{{ r.id }} · {{ r.target_type.value }} · {{ r.reason_code }}</h2>
+          <div class="small text-muted">{{ lx("Reporter", "举报人") }} {{ r.reporter.username if r.reporter else "—" }} · {{ format_datetime(r.created_at) }}</div>
+        </div>
+        <span class="badge bg-secondary">{{ r.status.value }}</span>
+      </div>
+      {% if r.reason_text %}<p class="mt-3">{{ r.reason_text }}</p>{% endif %}
+      {% if r.attachments %}
+      <div class="mt-3">
+        <div class="small fw-semibold mb-1">{{ lx("Evidence", "证据附件") }}</div>
+        {% for att in r.attachments %}
+        <a class="btn btn-sm btn-outline-secondary me-1 mb-1" href="/data-files/{{ att.relative_path }}" target="_blank" rel="noopener noreferrer">{{ att.original_filename or att.id }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <details class="mt-2">
+        <summary>{{ lx("Snapshot", "快照") }}</summary>
+        <pre class="artifact-block mt-2">{{ r.snapshot_json }}</pre>
+      </details>
+      {% if r.private_discussion_group_id %}
+      <a class="btn btn-sm btn-outline-warning mt-3" href="/discussion-groups/{{ r.private_discussion_group_id }}?report_id={{ r.id }}">{{ lx("Review private group", "查看私密讨论组") }}</a>
+      {% endif %}
+      <form method="post" action="/admin/reports/{{ r.id }}" class="row g-2 mt-3">
+        <div class="col-md-3">
+          <select class="form-select form-select-sm" name="status">
+            {% for st in ["pending", "reviewing", "resolved", "rejected", "duplicate"] %}
+            <option value="{{ st }}" {% if r.status.value == st %}selected{% endif %}>{{ st }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-7"><input class="form-control form-control-sm" name="note" value="{{ r.resolution_note or '' }}" placeholder="{{ lx('Internal note', '内部备注') }}" /></div>
+        <div class="col-md-2"><button class="btn btn-sm btn-primary w-100" type="submit">{{ lx("Save", "保存") }}</button></div>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">{{ lx("No reports visible to you.", "没有你可查看的举报。") }}</p>
+{% endif %}
+{% endblock %}

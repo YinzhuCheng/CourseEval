@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from app.constants import FeedbackSource, QuestionType
@@ -16,6 +17,18 @@ def latest_feedback(submission: Submission, source: FeedbackSource) -> Feedback 
 
 
 def submission_requires_teacher_confirmation(submission: Submission) -> bool:
+    if submission.question_version is not None and submission.question_version.snapshot_json:
+        try:
+            payload = json.loads(submission.question_version.snapshot_json)
+        except json.JSONDecodeError:
+            payload = {}
+        if submission.submission_type == QuestionType.SHORT_ANSWER:
+            cfg = payload.get("short_answer_config") or {}
+            return bool(cfg.get("teacher_confirmation_required"))
+        if submission.submission_type == QuestionType.FILE_LLM:
+            cfg = payload.get("file_question_config") or {}
+            return bool(cfg.get("teacher_confirmation_required"))
+
     question = submission.question
     if submission.submission_type == QuestionType.SHORT_ANSWER:
         config = question.short_answer_config if question is not None else None
@@ -34,9 +47,9 @@ def submission_has_llm_score(submission: Submission) -> bool:
 
 
 def submission_eligible_for_gradebook(submission: Submission) -> bool:
+    if submission_requires_teacher_confirmation(submission) and not submission_has_teacher_feedback(submission):
+        return False
     if submission.counts_toward_limit or submission.is_effective_submission:
-        return True
-    if submission_requires_teacher_confirmation(submission) and submission_has_llm_score(submission):
         return True
     return False
 

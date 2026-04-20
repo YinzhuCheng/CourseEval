@@ -24,8 +24,14 @@ from app.config import get_settings
 from app.db import Base, utcnow
 from app.models import Assignment, Course, CourseMember, Question, User
 from app.services.discussion_attachments import attach_discussion_images_to_post
-from app.services.discussions import assignment_past_close_for_discussion, create_post, flat_thread_for_template
+from app.services.discussions import (
+    assignment_past_close_for_discussion,
+    create_post,
+    discussion_pagination_state,
+    flat_thread_for_template,
+)
 from app.services.image_uploads import normalize_uploaded_image
+from app.services.course_materials import create_material, list_materials_for_free_topic, remove_material_image_references
 from app.services.post_close_reveal import reveal_bundle_for_question
 from app.services.redirects import safe_local_redirect
 
@@ -194,10 +200,106 @@ class DiscussionsAndMaterialsTests(unittest.TestCase):
                 is_anonymous=False,
             )
 
+    def test_discussion_anchor_uses_created_at_order(self) -> None:
+        from datetime import timedelta
+
+        from app.constants import DiscussionTopicKind
+        from app.models import DiscussionPost, DiscussionTopic
+
+        topic = DiscussionTopic(
+            course_id=self.course.id,
+            kind=DiscussionTopicKind.QUESTION,
+            question_id=self.q.id,
+            course_material_id=None,
+        )
+        self.db.add(topic)
+        self.db.flush()
+        later = DiscussionPost(topic_id=topic.id, author_id=self.student.id, body_text="later", is_anonymous=False)
+        earlier_posts = [
+            DiscussionPost(topic_id=topic.id, author_id=self.student.id, body_text=f"earlier {i}", is_anonymous=False)
+            for i in range(10)
+        ]
+        self.db.add_all([later, *earlier_posts])
+        self.db.flush()
+        later.created_at = utcnow()
+        for index, post in enumerate(earlier_posts, start=1):
+            post.created_at = later.created_at - timedelta(minutes=20 - index)
+        self.db.commit()
+
+        state = discussion_pagination_state(
+            self.db,
+            topic_id=topic.id,
+            page_size=10,
+            page=None,
+            anchor_post_id=later.id,
+        )
+
+        self.assertEqual(state["page"], 2)
+        self.assertEqual(state["offset"], 10)
+
     def test_safe_local_redirect_rejects_external_targets(self) -> None:
         self.assertEqual(safe_local_redirect("https://evil.example/path", "/fallback"), "/fallback")
         self.assertEqual(safe_local_redirect("//evil.example/path", "/fallback"), "/fallback")
         self.assertEqual(safe_local_redirect("/student/questions/1?page=2", "/fallback"), "/student/questions/1?page=2")
+
+    def test_course_material_external_url_allows_only_http_urls(self) -> None:
+        with self.assertRaises(ValueError):
+            create_material(
+                self.db,
+                course=self.course,
+                title="Bad URL",
+                body_markdown="",
+                external_url="javascript:alert(1)",
+                creator=self.teacher,
+            )
+
+        material = create_material(
+            self.db,
+            course=self.course,
+            title="Good URL",
+            body_markdown="",
+            external_url="https://example.com/resource",
+            creator=self.teacher,
+        )
+        self.assertEqual(material.external_url, "https://example.com/resource")
+
+    def test_free_discussion_materials_use_explicit_topic_ownership(self) -> None:
+        from app.models import FreeDiscussionTopic
+
+        ft1 = FreeDiscussionTopic(course_id=self.course.id, created_by=self.teacher.id, title="T1")
+        ft2 = FreeDiscussionTopic(course_id=self.course.id, created_by=self.teacher.id, title="T2")
+        self.db.add_all([ft1, ft2])
+        self.db.flush()
+        m1 = create_material(
+            self.db,
+            course=self.course,
+            title="Chapter 1",
+            body_markdown="",
+            external_url="",
+            creator=self.teacher,
+            free_discussion_topic_id=ft1.id,
+        )
+        m1.sort_order = ft2.id * 100000 + m1.id
+        self.db.commit()
+
+        self.assertEqual([m.id for m in list_materials_for_free_topic(self.db, self.course.id, ft1.id)], [m1.id])
+        self.assertEqual(list_materials_for_free_topic(self.db, self.course.id, ft2.id), [])
+
+    def test_remove_material_image_references_cleans_markdown(self) -> None:
+        material = create_material(
+            self.db,
+            course=self.course,
+            title="With image",
+            body_markdown="Intro\n\n![diagram](/data-files/uploads/course-materials/course-1/material-2/img.png)\n\nOutro",
+            external_url="",
+            creator=self.teacher,
+        )
+
+        remove_material_image_references(material, "uploads/course-materials/course-1/material-2/img.png")
+
+        self.assertNotIn("/data-files/uploads/course-materials/course-1/material-2/img.png", material.body_markdown or "")
+        self.assertIn("Intro", material.body_markdown or "")
+        self.assertIn("Outro", material.body_markdown or "")
 
     def test_uploaded_image_validation_rejects_fake_or_mismatched_images(self) -> None:
         with self.assertRaises(ValueError):

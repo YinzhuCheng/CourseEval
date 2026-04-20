@@ -40,6 +40,7 @@ from app.services.courses import bootstrap_sample_data, ensure_user_in_open_comm
 from app.services.email import send_password_reset_email, send_verification_email
 from app.services.permissions import RedirectRequired, require_user
 from app.services.storage_paths import absolute_data_path
+from app.services.upload_limits import read_upload_file_limited
 from app.services.user_media import store_user_avatar
 from app.services.llm_token_usage import usage_summary_for_user
 from app.services.user_storage import (
@@ -533,8 +534,8 @@ async def profile_upload_avatar(request: Request, file: UploadFile = File(...), 
     if user.avatar_banned:
         push_flash(request, t(request, "flash.avatar_banned"), "danger")
         return RedirectResponse(url="/me/profile", status_code=303)
-    raw = await file.read()
     try:
+        raw = await read_upload_file_limited(file)
         remove_avatar_storage(db, user)
         rel = store_user_avatar(user.id, raw, file.filename or "avatar.png")
         sz = absolute_data_path(rel).stat().st_size

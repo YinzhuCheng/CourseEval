@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lx("Report", "举报") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h1 class="h4 mb-3">{{ lx("Submit a report", "提交举报") }}</h1>
+    <form method="post" action="/reports" enctype="multipart/form-data" class="row g-3">
+      <input type="hidden" name="target_type" value="{{ target_type }}" />
+      <input type="hidden" name="target_id" value="{{ target_id }}" />
+      <input type="hidden" name="redirect_to" value="{{ redirect_to }}" />
+      <div class="col-md-6">
+        <label class="form-label">{{ lx("Reason", "理由") }}</label>
+        <select class="form-select" name="reason_code">
+          {% for code, en, zh in report_reasons %}
+          <option value="{{ code }}">{{ lx(en, zh) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label">{{ lx("Details", "详细说明") }}</label>
+        <textarea class="form-control" name="reason_text" rows="4" placeholder="{{ lx('Add context, especially if you selected Other.', '请补充说明，尤其是选择“其他”时。') }}"></textarea>
+      </div>
+      <div class="col-12">
+        <label class="form-label">{{ lx("Evidence attachments", "证据附件") }}</label>
+        <input class="form-control" type="file" name="evidence" multiple />
+        <div class="form-text">{{ lx("System-visible target content is snapshotted automatically. You may attach images or files.", "系统可见的被举报内容会自动快照；你也可以上传图片或附件。") }}</div>
+      </div>
+      <div class="col-12 d-flex gap-2">
+        <button class="btn btn-warning" type="submit">{{ lx("Submit report", "提交举报") }}</button>
+        <a class="btn btn-outline-secondary" href="{{ redirect_to or '/student/courses' }}">{{ lx("Cancel", "取消") }}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

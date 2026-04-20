@@ -54,6 +54,8 @@ from app.services.courses import (
     get_course_for_teacher,
     get_question_for_staff,
     get_question_for_teacher,
+    list_llm_configs,
+    list_runtime_images,
     summarize_course_grade_matrix,
 )
 from app.services.permissions import (
@@ -91,7 +93,9 @@ from app.services.submissions import (
     refresh_final_grade_snapshot,
     store_reference_answer_file,
 )
-from app.services.user_storage import purge_submission_as_viewer
+from app.services.upload_limits import read_upload_file_limited
+from app.services.storage_paths import absolute_data_path
+from app.services.user_storage import record_stored_object, purge_submission_as_viewer
 from app.services.teacher_analytics import (
     active_student_ids,
     compute_assignment_staff_stats,
@@ -167,6 +171,33 @@ def _parse_optional_length(raw: str, field_label: str) -> int | None:
     if not (raw or "").strip():
         return None
     return _parse_int_input(raw, field_label, minimum=0, maximum=200000)
+
+
+def _parse_optional_resource_id(raw: str) -> int | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise ValueError("invalid_resource_id") from exc
+    if value <= 0:
+        raise ValueError("invalid_resource_id")
+    return value
+
+
+def _allowed_runtime_image_id(db: Session, raw: str, course_id: int) -> int | None:
+    image_id = _parse_optional_resource_id(raw)
+    if image_id is None:
+        return None
+    return image_id if any(item.id == image_id for item in list_runtime_images(db, course_id)) else None
+
+
+def _allowed_llm_config_id(db: Session, raw: str, course_id: int) -> int | None:
+    config_id = _parse_optional_resource_id(raw)
+    if config_id is None:
+        return None
+    return config_id if any(item.id == config_id and group_has_callable_target(item) for item in list_llm_configs(db, course_id)) else None
 
 
 @router.get("/courses")
@@ -263,11 +294,20 @@ async def upload_course_cover(
     if course is None:
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect("/teacher/courses")
-    raw = await file.read()
     from app.services.user_media import store_course_cover_image
 
     try:
+        raw = await read_upload_file_limited(file)
         course.cover_image_path = store_course_cover_image(course.id, raw, file.filename or "cover.png")
+        record_stored_object(
+            db,
+            user_id=user.id,
+            category="course_cover",
+            relative_path=course.cover_image_path,
+            size_bytes=absolute_data_path(course.cover_image_path).stat().st_size,
+            ref_type="course",
+            ref_id=course.id,
+        )
     except ValueError as exc:
         key = str(exc) if exc else ""
         if key in ("unsupported_image_type", "file_too_large"):
@@ -291,12 +331,46 @@ def remove_course_cover(course_id: int, request: Request, db: Session = Depends(
     if course is None:
         return _redirect("/teacher/courses")
     from app.services.user_media import clear_course_cover_files
+    from app.constants import StorageDeletionActor
+    from app.services.user_storage import find_active_object_by_path, soft_delete_stored_row
 
+    if course.cover_image_path:
+        row = find_active_object_by_path(db, course.cover_image_path)
+        if row:
+            soft_delete_stored_row(db, row, actor=StorageDeletionActor.TEACHER, unlink=False)
     clear_course_cover_files(course.id)
     course.cover_image_path = None
     course.updated_at = utcnow()
     db.commit()
     push_flash(request, choose_text(request, "Course image removed.", "已移除课程图片。"), "success")
+    return _redirect(f"/teacher/courses/{course_id}")
+
+
+@router.post("/courses/{course_id}/profile")
+def update_course_profile(
+    course_id: int,
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = require_teacher_account(request, db)
+        course = get_course_for_teacher(db, course_id, user.id)
+    except RedirectRequired as redirect:
+        return _redirect(redirect.location)
+    if course is None:
+        push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+        return _redirect("/teacher/courses")
+    new_title = (title or "").strip()
+    if not new_title:
+        push_flash(request, choose_text(request, "Course name is required.", "课程名称不能为空。"), "danger")
+        return _redirect(f"/teacher/courses/{course_id}")
+    course.title = new_title
+    course.description = description.strip() or None
+    course.updated_at = utcnow()
+    db.commit()
+    push_flash(request, choose_text(request, "Course profile updated.", "课程信息已更新。"), "success")
     return _redirect(f"/teacher/courses/{course_id}")
 
 
@@ -347,6 +421,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .all()
     )
     available_llm_configs = [group for group in available_llm_configs if group_has_callable_target(group)]
+    available_runtime_images = list_runtime_images(db, course.id)
     course_role = get_course_role(db, course.id, user.id)
     grade_matrix = None
     course_staff_overview = None
@@ -372,6 +447,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "available_llm_configs": available_llm_configs,
+            "available_runtime_images": available_runtime_images,
             "grade_matrix": grade_matrix,
             "course_staff_overview": course_staff_overview,
             "can_moderate_discussion": staff_can_mod,
@@ -573,6 +649,8 @@ def create_assignment(
     default_scoring_rule: str = Form(ScoringRule.LATEST.value),
     submission_limit_mode: str = Form(SubmissionLimitMode.UNLIMITED.value),
     submission_limit_value: str = Form(""),
+    runtime_image_id: str = Form(""),
+    llm_config_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -619,6 +697,18 @@ def create_assignment(
         limit_value = None
     elif limit_mode in {SubmissionLimitMode.DAILY, SubmissionLimitMode.TOTAL} and limit_value is None:
         limit_mode = SubmissionLimitMode.UNLIMITED
+    try:
+        parsed_runtime_image_id = _allowed_runtime_image_id(db, runtime_image_id, course.id)
+        parsed_llm_config_id = _allowed_llm_config_id(db, llm_config_id, course.id)
+    except ValueError:
+        push_flash(request, choose_text(request, "Assignment override settings are invalid.", "作业覆盖配置无效。"), "danger")
+        return _redirect(f"/teacher/courses/{course.id}")
+    if runtime_image_id.strip() and parsed_runtime_image_id is None:
+        push_flash(request, choose_text(request, "Runtime image is not available for this course.", "该运行镜像不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/courses/{course.id}")
+    if llm_config_id.strip() and parsed_llm_config_id is None:
+        push_flash(request, choose_text(request, "LLM group is not available for this course.", "该 LLM 组不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/courses/{course.id}")
 
     assignment = Assignment(
         course_id=course.id,
@@ -632,6 +722,8 @@ def create_assignment(
         default_scoring_rule=scoring_rule,
         submission_limit_mode=limit_mode,
         submission_limit_value=limit_value,
+        runtime_image_id=parsed_runtime_image_id,
+        llm_config_id=parsed_llm_config_id,
         published_at=utcnow() if assignment_status == AssignmentStatus.PUBLISHED else None,
     )
     db.add(assignment)
@@ -693,6 +785,10 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
             "assignment_staff_stats": assignment_staff_stats,
+            "available_runtime_images": list_runtime_images(db, assignment.course_id),
+            "available_llm_configs": [
+                group for group in list_llm_configs(db, assignment.course_id) if group_has_callable_target(group)
+            ],
         },
     )
 
@@ -733,6 +829,8 @@ async def create_question(
     require_teacher_confirmation: str = Form("false"),
     min_length: str = Form(""),
     max_length: str = Form(""),
+    runtime_image_id: str = Form(""),
+    llm_config_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -772,6 +870,18 @@ async def create_question(
         return _redirect(f"/teacher/assignments/{assignment.id}")
     order_index = len(assignment.questions) + 1
     teacher_confirmation_required = require_teacher_confirmation == "true"
+    try:
+        parsed_runtime_image_id = _allowed_runtime_image_id(db, runtime_image_id, assignment.course_id)
+        parsed_llm_config_id = _allowed_llm_config_id(db, llm_config_id, assignment.course_id)
+    except ValueError:
+        push_flash(request, choose_text(request, "Question override settings are invalid.", "题目覆盖配置无效。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
+    if runtime_image_id.strip() and parsed_runtime_image_id is None:
+        push_flash(request, choose_text(request, "Runtime image is not available for this course.", "该运行镜像不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
+    if llm_config_id.strip() and parsed_llm_config_id is None:
+        push_flash(request, choose_text(request, "LLM group is not available for this course.", "该 LLM 组不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
     question = Question(
         assignment_id=assignment.id,
         order_index=order_index,
@@ -780,6 +890,8 @@ async def create_question(
         question_type=q_type,
         max_score=max_score_decimal,
         scoring_rule_override=ScoringRule(scoring_rule_override) if scoring_rule_override else None,
+        runtime_image_id=parsed_runtime_image_id,
+        llm_config_id=parsed_llm_config_id,
     )
     db.add(question)
     db.flush()
@@ -787,7 +899,7 @@ async def create_question(
     ref_file_rel: str | None = None
     if reference_answer_file and reference_answer_file.filename:
         try:
-            raw = await reference_answer_file.read()
+            raw = await read_upload_file_limited(reference_answer_file)
             ref_file_rel = store_reference_answer_file(
                 user_id=user.id,
                 question_id=question.id,
@@ -1029,6 +1141,10 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
             "question_class_stats": question_class_stats,
+            "available_runtime_images": list_runtime_images(db, question.assignment.course_id),
+            "available_llm_configs": [
+                group for group in list_llm_configs(db, question.assignment.course_id) if group_has_callable_target(group)
+            ],
             "topic_id": topic.id,
             **disc_ctx,
             "can_post_discussion": can_discuss,
@@ -1050,6 +1166,8 @@ async def teacher_question_discuss(
     anonymous: str = Form(""),
     request_ai: str = Form(""),
     ai_group_id: str = Form(""),
+    ai_context_mode: str = Form("recent_k"),
+    ai_context_k: str = Form("1"),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -1081,6 +1199,8 @@ async def teacher_question_discuss(
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
             selected_llm_group_id=selected_group_id,
+            ai_context_mode=ai_context_mode,
+            ai_context_k=ai_context_k,
         )
         if _u is not None and image_files:
             try:
@@ -1404,6 +1524,8 @@ async def update_question(
     require_teacher_confirmation: str = Form("false"),
     min_length: str = Form(""),
     max_length: str = Form(""),
+    runtime_image_id: str = Form(""),
+    llm_config_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -1426,10 +1548,29 @@ async def update_question(
         push_flash(request, choose_text(request, "Question settings are invalid.", "题目配置无效，请检查后重试。"), "danger")
         return _redirect(f"/teacher/questions/{question.id}")
 
-    question.title = title.strip()
+    cleaned_title = title.strip()
+    if not cleaned_title:
+        push_flash(request, choose_text(request, "Question title is required.", "题目标题不能为空。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+
+    question.title = cleaned_title
     question.description = description.strip() or None
     question.max_score = max_score_decimal
     question.scoring_rule_override = scoring_rule_value
+    try:
+        parsed_runtime_image_id = _allowed_runtime_image_id(db, runtime_image_id, question.assignment.course_id)
+        parsed_llm_config_id = _allowed_llm_config_id(db, llm_config_id, question.assignment.course_id)
+    except ValueError:
+        push_flash(request, choose_text(request, "Question override settings are invalid.", "题目覆盖配置无效。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+    if runtime_image_id.strip() and parsed_runtime_image_id is None:
+        push_flash(request, choose_text(request, "Runtime image is not available for this course.", "该运行镜像不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+    if llm_config_id.strip() and parsed_llm_config_id is None:
+        push_flash(request, choose_text(request, "LLM group is not available for this course.", "该 LLM 组不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+    question.runtime_image_id = parsed_runtime_image_id
+    question.llm_config_id = parsed_llm_config_id
     question.updated_at = utcnow()
     teacher_confirmation_required = require_teacher_confirmation == "true"
 
@@ -1437,7 +1578,7 @@ async def update_question(
     uploaded_ref = False
     if reference_answer_file and reference_answer_file.filename:
         try:
-            raw = await reference_answer_file.read()
+            raw = await read_upload_file_limited(reference_answer_file)
             new_reference_file_path = store_reference_answer_file(
                 user_id=user.id,
                 question_id=question.id,
@@ -1484,6 +1625,39 @@ async def update_question(
             {"input": hidden_test_1_input.strip(), "expected_output": hidden_test_1_output.strip(), "points": 20},
             {"input": hidden_test_2_input.strip(), "expected_output": hidden_test_2_output.strip(), "points": 20},
         ]
+        if not input_spec.strip() or not output_spec.strip():
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Code questions must define both input and output specifications.",
+                    "代码题必须同时填写输入说明和输出说明。",
+                ),
+                "danger",
+            )
+            return _redirect(f"/teacher/questions/{question.id}")
+        if any(not sample["input"] or not sample["expected_output"] for sample in visible_samples + hidden_samples):
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Code questions require 5 complete test cases (3 visible, 2 hidden).",
+                    "代码题需要完整填写 5 个测试点（3 个可见测试，2 个隐藏测试）。",
+                ),
+                "danger",
+            )
+            return _redirect(f"/teacher/questions/{question.id}")
+        if max_score_decimal != Decimal("100"):
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Code questions currently use a fixed 100-point rubric (5 tests x 20 points).",
+                    "当前代码题固定按 100 分计分（5 个测试点，每个 20 分）。",
+                ),
+                "warning",
+            )
+            question.max_score = Decimal("100")
         cfg.input_spec = input_spec.strip()
         cfg.output_spec = output_spec.strip()
         cfg.visible_tests_json = json.dumps(visible_samples, ensure_ascii=True, indent=2)
@@ -1521,6 +1695,19 @@ async def update_question(
                 return _redirect(f"/teacher/questions/{question.id}")
             cfg.accepted_extensions = ",".join(normalized)
             cfg.notebook_outputs_required = ".ipynb" in set(normalized)
+        existing_ref_file = cfg.reference_answer_file_path if clear_reference_answer_file != "true" else None
+        next_ref_file = new_reference_file_path if uploaded_ref else existing_ref_file
+        if not rubric_text.strip() or (not reference_answer.strip() and not next_ref_file):
+            push_flash(
+                request,
+                choose_text(
+                    request,
+                    "Rubric is required, and you must provide a reference answer (text and/or upload).",
+                    "必须填写评分细则，并提供参考答案（文本和/或上传附件）。",
+                ),
+                "danger",
+            )
+            return _redirect(f"/teacher/questions/{question.id}")
         cfg.rubric_text = rubric_text.strip()
         cfg.reference_answer_text = reference_answer.strip()
         if clear_reference_answer_file == "true":
@@ -1672,7 +1859,7 @@ def grade_submission(
     except ValueError:
         push_flash(request, choose_text(request, "Score must be a valid number.", "分数必须是有效数字。"), "danger")
         return _redirect(f"/teacher/submissions/{submission.id}")
-    requires_teacher_score = submission.submission_type == QuestionType.SHORT_ANSWER
+    requires_teacher_score = submission.submission_type in {QuestionType.SHORT_ANSWER, QuestionType.FILE_LLM}
     if requires_teacher_score and score_value is None:
         push_flash(
             request,

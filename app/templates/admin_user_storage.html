@@ -13,10 +13,15 @@
 
 <div class="card shadow-sm mb-4">
   <div class="card-body">
+    {% set storage_pct = (storage.used_bytes * 100 / storage.quota_bytes)|round(0, 'floor') if storage.quota_bytes else 0 %}
+    {% if storage_pct > 100 %}{% set storage_pct = 100 %}{% endif %}
     <p class="mb-1">
       {{ lx("Used", "已用") }}: {{ (storage.used_bytes / (1024 * 1024))|round(2) }} MiB
       · {{ lx("Quota", "额度") }}: {{ (storage.quota_bytes / (1024 * 1024))|round(2) }} MiB
     </p>
+    <div class="progress quota-progress my-3" role="progressbar" aria-valuenow="{{ storage_pct }}" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar {% if storage_pct >= 90 %}bg-danger{% elif storage_pct >= 70 %}bg-warning{% else %}bg-success{% endif %}" style="width: {{ storage_pct }}%"></div>
+    </div>
     {% if storage.override_bytes is not none %}
     <p class="small text-muted mb-0">{{ lx("Per-user override active (bytes)", "已设置单用户覆盖（字节）") }}: {{ storage.override_bytes }}</p>
     {% endif %}
@@ -35,7 +40,7 @@
       {% endif %}
     </div>
     {% if a.can_delete %}
-    <form method="post" action="/admin/users/{{ target_user.id }}/storage/{{ a.id }}/delete" class="m-0" onsubmit="return confirm('Remove this file?');">
+    <form method="post" action="/admin/users/{{ target_user.id }}/storage/{{ a.id }}/delete" class="m-0" onsubmit="return confirm('{{ lx('Remove this file?', '确定删除这个文件吗？') }}');">
       <button class="btn btn-sm btn-outline-danger" type="submit">{{ lx("Delete", "删除") }}</button>
     </form>
     {% endif %}

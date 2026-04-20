@@ -5,12 +5,17 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.config import get_settings
+from app.constants import MembershipStatus
 from app.db import get_db
-from app.services.courses import get_course_for_staff, get_course_for_student
+from app.constants import DiscussionTopicKind
+from app.models import CourseMember, DiscussionPost
+from app.services.discussion_groups import can_super_admin_review_private_group, can_view_group, visible_posts_for_group
+from app.services.courses import get_course_for_staff
 from app.services.permissions import RedirectRequired, require_user
 from app.services.storage_paths import absolute_data_path
 from app.services.user_media import can_view_user_avatar_path
@@ -20,6 +25,16 @@ router = APIRouter(tags=["uploads"])
 
 def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
+
+
+def _active_course_member(db: Session, course_id: int, user_id: int) -> bool:
+    return db.scalar(
+        select(CourseMember.id).where(
+            CourseMember.course_id == course_id,
+            CourseMember.user_id == user_id,
+            CourseMember.status == MembershipStatus.ACTIVE,
+        )
+    ) is not None
 
 
 @router.get("/data-files/{relative_path:path}")
@@ -51,7 +66,7 @@ def serve_data_file(relative_path: str, request: Request, db: Session = Depends(
         except (IndexError, ValueError):
             course_id = -1
         if course_id < 0 or (
-            get_course_for_student(db, course_id, viewer.id) is None and get_course_for_staff(db, course_id, viewer.id) is None
+            not _active_course_member(db, course_id, viewer.id) and get_course_for_staff(db, course_id, viewer.id) is None
         ):
             return _redirect("/student/courses")
     # avatars/user-{id}/...
@@ -68,7 +83,21 @@ def serve_data_file(relative_path: str, request: Request, db: Session = Depends(
             course_id = int(rel_parts[2].split("-", 1)[1])
         except (IndexError, ValueError):
             return _redirect("/student/courses")
-        if get_course_for_student(db, course_id, viewer.id) is None and get_course_for_staff(db, course_id, viewer.id) is None:
+        if not _active_course_member(db, course_id, viewer.id) and get_course_for_staff(db, course_id, viewer.id) is None:
+            return _redirect("/student/courses")
+    # free-discussion/course-{id}/topic-{id}/...
+    elif (
+        len(rel_parts) >= 4
+        and rel_parts[0] == "uploads"
+        and rel_parts[1] == "free-discussion"
+        and rel_parts[2].startswith("course-")
+        and rel_parts[3].startswith("topic-")
+    ):
+        try:
+            course_id = int(rel_parts[2].split("-", 1)[1])
+        except (IndexError, ValueError):
+            return _redirect("/student/courses")
+        if not _active_course_member(db, course_id, viewer.id) and get_course_for_staff(db, course_id, viewer.id) is None:
             return _redirect("/student/courses")
     # discussion-images/course-{id}/post-{id}/...
     elif (
@@ -80,9 +109,56 @@ def serve_data_file(relative_path: str, request: Request, db: Session = Depends(
     ):
         try:
             course_id = int(rel_parts[2].split("-", 1)[1])
+            post_id = int(rel_parts[3].split("-", 1)[1])
         except (IndexError, ValueError):
             return _redirect("/student/courses")
-        if get_course_for_student(db, course_id, viewer.id) is None and get_course_for_staff(db, course_id, viewer.id) is None:
+        post = db.get(DiscussionPost, post_id)
+        if (
+            post
+            and post.topic
+            and post.topic.kind == DiscussionTopicKind.DISCUSSION_GROUP
+            and post.topic.discussion_group
+        ):
+            group = post.topic.discussion_group
+            via_private_review = can_super_admin_review_private_group(db, group, viewer)
+            if not can_view_group(db, group, viewer, via_report=via_private_review) or post not in visible_posts_for_group(
+                db, group, viewer, via_report=via_private_review
+            ):
+                return _redirect("/student/courses")
+        elif not _active_course_member(db, course_id, viewer.id) and get_course_for_staff(db, course_id, viewer.id) is None:
+            return _redirect("/student/courses")
+    # discussion-groups/group-{id}/cover.*
+    elif (
+        len(rel_parts) >= 3
+        and rel_parts[0] == "uploads"
+        and rel_parts[1] == "discussion-groups"
+        and rel_parts[2].startswith("group-")
+    ):
+        try:
+            group_id = int(rel_parts[2].split("-", 1)[1])
+        except (IndexError, ValueError):
+            return _redirect("/student/courses")
+        from app.models import DiscussionGroup
+
+        group = db.get(DiscussionGroup, group_id)
+        if group is None or not can_view_group(db, group, viewer):
+            return _redirect("/student/courses")
+    # report-evidence/report-{id}/...
+    elif (
+        len(rel_parts) >= 3
+        and rel_parts[0] == "uploads"
+        and rel_parts[1] == "report-evidence"
+        and rel_parts[2].startswith("report-")
+    ):
+        try:
+            report_id = int(rel_parts[2].split("-", 1)[1])
+        except (IndexError, ValueError):
+            return _redirect("/student/courses")
+        from app.models import Report
+        from app.services.reports import can_view_report
+
+        report = db.get(Report, report_id)
+        if report is None or not can_view_report(db, report, viewer):
             return _redirect("/student/courses")
     else:
         return _redirect("/student/courses")

@@ -2,6 +2,7 @@ import base64
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -139,11 +140,19 @@ def _response_language_instruction(course_override: str | None, student_submissi
     return "The student's submission appears to be primarily non-Chinese; use English (en)."
 
 
-def _parse_grading_json(raw: str) -> dict:
+def _parse_grading_json(raw: str, *, max_score: float) -> dict:
     cleaned = strip_json_fence(raw)
     parsed = json.loads(cleaned)
     if "score_suggestion" not in parsed or "comment_text" not in parsed:
         raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
+    try:
+        score = Decimal(str(parsed["score_suggestion"]))
+        max_score_decimal = Decimal(str(max_score))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("LLM score_suggestion must be a number.") from exc
+    if score < 0 or score > max_score_decimal:
+        raise ValueError(f"LLM score_suggestion must be between 0 and {max_score}.")
+    parsed["score_suggestion"] = str(score)
     return parsed
 
 
@@ -224,7 +233,7 @@ def generate_short_answer_evaluation(
             bill_user_prompt=prompt,
             bill_system_prompt=system_prompt,
         ).content
-    return _parse_grading_json(raw)
+    return _parse_grading_json(raw, max_score=max_score)
 
 
 def generate_file_evaluation_from_images(
@@ -280,7 +289,7 @@ def generate_file_evaluation_from_images(
         bill_user_id=bill_user_id,
         bill_db=bill_db,
     ).content
-    return _parse_grading_json(raw)
+    return _parse_grading_json(raw, max_score=max_score)
 
 
 def _generate_openai_compatible(

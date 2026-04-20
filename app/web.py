@@ -57,6 +57,17 @@ def render_template(
     status_code: int = 200,
 ):
     loc = get_locale(request)
+    path = request.url.path
+    if path.startswith("/teacher"):
+        current_section = "teacher"
+    elif path.startswith("/admin"):
+        current_section = "admin"
+    elif path.startswith("/free-discussion") or path.startswith("/discussion-groups"):
+        current_section = "discussion"
+    elif path.startswith("/student") or path.startswith("/me"):
+        current_section = "learning"
+    else:
+        current_section = ""
 
     def elabel(category: str, value) -> str:
         raw = value.value if hasattr(value, "value") else value
@@ -64,6 +75,7 @@ def render_template(
 
     base_context = {
         "request": request,
+        "current_section": current_section,
         "current_user": get_current_user(request, db),
         "flashes": pop_flashes(request),
         "current_locale": loc,
@@ -83,6 +95,11 @@ def render_template(
         base_context["current_user"].effective_role.value if base_context["current_user"] else None
     )
     base_context["current_user_avatar_url"] = user_avatar_public_url(base_context["current_user"])
+    base_context["unread_notification_count"] = 0
+    if base_context["current_user"] is not None:
+        from app.services.social import unread_notification_count
+
+        base_context["unread_notification_count"] = unread_notification_count(db, base_context["current_user"].id)
     if context:
         base_context.update(context)
     return templates.TemplateResponse(request, template_name, dict(base_context), status_code=status_code)

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lx("Discussion group help", "讨论组帮助") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h1 class="h4 mb-3">{{ lx("Discussion group privacy and moderation", "讨论组隐私与治理说明") }}</h1>
+    <ul class="mb-0">
+      <li>{{ lx("Members-only groups are visible only to active group members.", "仅组内可见的讨论组只对当前组员可见。") }}</li>
+      <li>{{ lx("Ordinary administrators cannot view members-only group content and cannot change group visibility.", "普通管理员不能查看仅组内可见内容，也不能修改讨论组可见性。") }}</li>
+      <li>{{ lx("If a group member files a report with system evidence or attachments, super administrators may review the full private group for safety handling.", "如果组内成员提交带有系统证据或附件的举报，超级管理员可以为安全处置查看该私密讨论组的完整内容。") }}</li>
+      <li>{{ lx("Super administrator private review is recorded in audit logs.", "超级管理员查看私密讨论组会记录审计日志。") }}</li>
+      <li>{{ lx("When a private group becomes public, older private posts remain private. New posts follow the current visibility.", "私密讨论组开放后，历史私密发言仍继续保密；新发言按当前可见性保存。") }}</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

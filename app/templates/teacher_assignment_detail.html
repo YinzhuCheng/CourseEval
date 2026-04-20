@@ -16,34 +16,34 @@
 {% if assignment_staff_stats %}
 <div class="card shadow-sm mb-4">
   <div class="card-body py-3">
-    <div class="row g-3 small align-items-center">
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Active students", "活跃学生") }}</div>
-        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.active_student_count }}</div>
+    <div class="metric-grid">
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Active students", "活跃学生") }}</span>
+        <span class="metric-value">{{ assignment_staff_stats.active_student_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Any submission", "至少一题已交") }}</div>
-        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.students_with_any_submission }} / {{ assignment_staff_stats.active_student_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Any submission", "至少一题已交") }}</span>
+        <span class="metric-value">{{ assignment_staff_stats.students_with_any_submission }} / {{ assignment_staff_stats.active_student_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("All questions done", "全题齐") }}</div>
-        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.students_fully_complete }} / {{ assignment_staff_stats.active_student_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("All questions done", "全题齐") }}</span>
+        <span class="metric-value">{{ assignment_staff_stats.students_fully_complete }} / {{ assignment_staff_stats.active_student_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Pending teacher review", "待教师确认") }}</div>
-        <div class="fs-5 fw-semibold {% if assignment_staff_stats.pending_teacher_review_count %}text-warning{% endif %}">{{ assignment_staff_stats.pending_teacher_review_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Pending teacher review", "待教师确认") }}</span>
+        <span class="metric-value {% if assignment_staff_stats.pending_teacher_review_count %}text-warning{% endif %}">{{ assignment_staff_stats.pending_teacher_review_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Evaluating", "评测中") }}</div>
-        <div class="fs-5 fw-semibold {% if assignment_staff_stats.stuck_evaluation_count %}text-info{% endif %}">{{ assignment_staff_stats.stuck_evaluation_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Evaluating", "评测中") }}</span>
+        <span class="metric-value {% if assignment_staff_stats.stuck_evaluation_count %}text-info{% endif %}">{{ assignment_staff_stats.stuck_evaluation_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Failed", "失败") }}</div>
-        <div class="fs-5 fw-semibold {% if assignment_staff_stats.failed_evaluation_count %}text-danger{% endif %}">{{ assignment_staff_stats.failed_evaluation_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Failed", "失败") }}</span>
+        <span class="metric-value {% if assignment_staff_stats.failed_evaluation_count %}text-danger{% endif %}">{{ assignment_staff_stats.failed_evaluation_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Late rows", "迟交条数") }}</div>
-        <div class="fs-5 fw-semibold">{{ assignment_staff_stats.late_submission_row_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Late submissions", "迟交记录") }}</span>
+        <span class="metric-value">{{ assignment_staff_stats.late_submission_row_count }}</span>
       </div>
     </div>
   </div>
@@ -132,18 +132,21 @@
   </div>
 
   <div class="col-lg-5">
-    <div class="card shadow-sm mb-4">
-      <div class="card-body">
-        <h2 class="h5 mb-3">{{ lx("Create question", "创建题目") }}</h2>
+    <details class="ux-disclosure mb-4" {% if not questions %}open{% endif %}>
+      <summary>{{ lx("Create question", "创建题目") }}</summary>
+      <div class="ux-disclosure-body">
         {% if can_manage_course %}
-        <div class="alert alert-info">
+        <div class="section-note mb-3">
           <strong>{{ lx("Question type guidance", "题型说明") }}:</strong>
           {{ lx(
-            "Use code questions for executable Python, C, or C++ submissions. For uploads graded by the LLM, pick allowed file formats (you may allow more than one, for example PDF and TeX together).",
-            "需要执行评测的编程题请使用代码题，可允许 Python、C 或 C++；需要上传并由 LLM 评分的题目请选择“允许提交的文件格式”（可多选，例如同时允许 PDF 与 TeX）。"
+            "Choose code questions for executable Python, C, or C++ tasks. Choose file upload / LLM-reviewed questions for reports, TeX, PDF, Markdown, or notebooks.",
+            "可执行编程任务请选择代码题；报告、TeX、PDF、Markdown 或 Notebook 提交请选择文件上传题（LLM 辅助评阅）。"
           ) }}
         </div>
         <form method="post" action="/teacher/assignments/{{ assignment.id }}/questions" enctype="multipart/form-data" class="row g-3" id="create-question-form">
+          <div class="col-12">
+            <h3 class="h6 mb-0">{{ lx("Basic information", "基础信息") }}</h3>
+          </div>
           <div class="col-12">
             <label class="form-label">{{ lx("Title", "标题") }}</label>
             <input class="form-control" name="title" required />
@@ -171,7 +174,28 @@
               <option value="highest">{{ lx("Highest", "最高分") }}</option>
             </select>
           </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Runtime image override", "运行镜像覆盖") }}</label>
+            <select class="form-select" name="runtime_image_id">
+              <option value="">{{ lx("Use assignment/course default", "使用作业/课程默认") }}</option>
+              {% for image in available_runtime_images %}
+              <option value="{{ image.id }}">{{ image.name }} · {{ image.image_tag }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("LLM group override", "LLM 组覆盖") }}</label>
+            <select class="form-select" name="llm_config_id">
+              <option value="">{{ lx("Use assignment/course default", "使用作业/课程默认") }}</option>
+              {% for config in available_llm_configs %}
+              <option value="{{ config.id }}">{{ config.name }} · {{ config.description or config.model_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
 
+          <div class="col-12 code-only">
+            <h3 class="h6 mb-0">{{ lx("Code runner settings", "代码评测设置") }}</h3>
+          </div>
           <div class="col-12 code-only">
             <div class="alert alert-info mb-0">
               <strong>{{ lx("Allowed libraries", "允许使用的库") }}:</strong>
@@ -276,6 +300,9 @@
           </div>
 
           <div class="col-12 llm-graded-only d-none">
+            <h3 class="h6 mb-0">{{ lx("LLM review settings", "LLM 评阅设置") }}</h3>
+          </div>
+          <div class="col-12 llm-graded-only d-none">
             <label class="form-label">{{ lx("Reference answer", "参考答案") }}</label>
             <textarea class="form-control" name="reference_answer" rows="4"></textarea>
           </div>
@@ -334,7 +361,7 @@
         </div>
         {% endif %}
       </div>
-    </div>
+    </details>
 
     <div class="card shadow-sm">
       <div class="card-body">

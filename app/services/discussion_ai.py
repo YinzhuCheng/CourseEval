@@ -20,7 +20,11 @@ from app.models import (
     Question,
     User,
 )
-from app.services.discussions import create_post
+from app.services.discussions import (
+    create_post,
+    get_root_post_for_topic,
+    list_posts_for_topic,
+)
 from app.services.llm import generate_text
 from app.services.llm_groups import (
     available_llm_groups_for_course,
@@ -37,6 +41,9 @@ if TYPE_CHECKING:
     pass
 
 _AI_MENTION_RE = re.compile(r"(?i)@AI\b")
+
+# Cap total chars from discussion transcript in prompts (remainder truncated once).
+_DISCUSSION_AI_THREAD_CONTEXT_MAX_CHARS = 100_000
 
 
 def strip_ai_mentions(body: str) -> str:
@@ -195,7 +202,99 @@ def _free_topic_context_text(db: Session, free_topic_id: int) -> str:
     return f"Open discussion topic title: {ft.title}\nTopic description:\n{desc}"
 
 
-def build_discussion_ai_prompts(db: Session, topic: DiscussionTopic, user_message: str) -> tuple[str, str]:
+def _course_card_text_for_ai(db: Session, course_id: int) -> str:
+    c = db.get(Course, course_id)
+    if c is None:
+        return ""
+    desc = (c.description or "").strip()
+    if len(desc) > 12000:
+        desc = desc[:12000] + "\n...[truncated]"
+    return f"Course card — name: {c.title}\nCourse code: {c.code}\nCourse description:\n{desc}"
+
+
+def _format_post_line_for_ai(p: DiscussionPost, index: int) -> str:
+    label = "AI" if getattr(p, "is_ai", False) else f"User #{p.author_id}"
+    body = (p.body_text or "").strip()
+    if len(body) > 8000:
+        body = body[:8000] + "\n...[truncated]"
+    return f"[{index}] ({label}, post id {p.id}):\n{body}"
+
+
+def _build_thread_context_text(
+    db: Session,
+    *,
+    topic_id: int,
+    mode: str,
+    k: int,
+    exclude_post_id: int | None,
+) -> str:
+    """mode: 'full' = all posts; 'recent_k' = main opener + last k non-root posts."""
+    all_posts = list_posts_for_topic(db, topic_id)
+    if exclude_post_id is not None:
+        all_posts = [p for p in all_posts if p.id != exclude_post_id]
+
+    root = get_root_post_for_topic(db, topic_id)
+    root_text = ""
+    if root is not None:
+        rb = (root.body_text or "").strip()
+        if len(rb) > 12000:
+            rb = rb[:12000] + "\n...[truncated]"
+        root_text = f"Main thread opener (first top-level post, post id {root.id}):\n{rb}"
+
+    if mode == "full":
+        lines: list[str] = []
+        for i, p in enumerate(all_posts, start=1):
+            lines.append(_format_post_line_for_ai(p, i))
+        block = "\n\n".join(lines)
+    else:
+        non_root = [p for p in all_posts if p.parent_post_id is not None]
+        k = max(1, k)
+        picked = non_root[-k:] if len(non_root) > k else non_root
+        lines = []
+        for i, p in enumerate(picked, start=1):
+            lines.append(_format_post_line_for_ai(p, i))
+        block = "\n\n".join(lines)
+
+    parts: list[str] = []
+    if root_text:
+        parts.append(root_text)
+    label = "Full thread (all posts, chronological)" if mode == "full" else f"Last {k} non-root posts (chronological subset)"
+    if block.strip():
+        parts.append(f"{label}:\n{block}")
+    out = "\n\n".join(parts)
+    if len(out) > _DISCUSSION_AI_THREAD_CONTEXT_MAX_CHARS:
+        out = out[:_DISCUSSION_AI_THREAD_CONTEXT_MAX_CHARS] + "\n...[truncated]"
+    return out
+
+
+def parse_ai_context_mode(
+    raw_mode: str | None,
+    raw_k: str | None,
+    *,
+    topic_post_count: int,
+) -> tuple[str, int]:
+    """Returns (mode, k) with mode 'full' or 'recent_k'; k clamped to [1, topic_post_count]."""
+    mode = (raw_mode or "recent_k").strip().lower()
+    if mode not in ("full", "recent_k"):
+        mode = "recent_k"
+    try:
+        k_val = int((raw_k or "1").strip() or "1")
+    except ValueError:
+        k_val = 1
+    top = max(1, int(topic_post_count))
+    k_val = max(1, min(k_val, top))
+    return mode, k_val
+
+
+def build_discussion_ai_prompts(
+    db: Session,
+    topic: DiscussionTopic,
+    user_message: str,
+    *,
+    ai_context_mode: str = "recent_k",
+    ai_context_k: int = 1,
+    exclude_user_post_id: int | None = None,
+) -> tuple[str, str]:
     ctx = ""
     if topic.kind == DiscussionTopicKind.QUESTION and topic.question_id:
         ctx = _question_context_text(db, topic.question_id)
@@ -204,6 +303,15 @@ def build_discussion_ai_prompts(db: Session, topic: DiscussionTopic, user_messag
     elif topic.kind == DiscussionTopicKind.FREE_DISCUSSION_TOPIC and topic.free_discussion_topic_id:
         ctx = _free_topic_context_text(db, topic.free_discussion_topic_id)
 
+    card = _course_card_text_for_ai(db, topic.course_id)
+    thread_ctx = _build_thread_context_text(
+        db,
+        topic_id=topic.id,
+        mode=ai_context_mode,
+        k=ai_context_k,
+        exclude_post_id=exclude_user_post_id,
+    )
+
     system = (
         "You are a helpful teaching assistant in a course discussion. "
         "Answer clearly and concisely. If the question is outside the provided course context, say so briefly. "
@@ -211,7 +319,12 @@ def build_discussion_ai_prompts(db: Session, topic: DiscussionTopic, user_messag
         "Do not include markdown images, raw URLs, or links in your reply (plain text and simple markdown only: "
         "bold, italic, lists, code fences)."
     )
-    user_block = f"Course context (for this thread):\n{ctx}\n\nStudent message:\n{user_message}"
+    user_block = (
+        f"Course card (text only):\n{card}\n\n"
+        f"Course context (for this thread):\n{ctx}\n\n"
+        f"Discussion context:\n{thread_ctx}\n\n"
+        f"Student message:\n{user_message}"
+    )
     return system, user_block
 
 
@@ -223,6 +336,9 @@ def run_discussion_ai_reply(
     user_message: str,
     parent_post_id: int | None,
     selected_group_id: int | None = None,
+    ai_context_mode: str = "recent_k",
+    ai_context_k: int = 1,
+    exclude_user_post_id: int | None = None,
 ) -> DiscussionPost | None:
     """Create AI reply post; charges requester's daily LLM quota. Returns None if no config or empty message."""
     user_message = (user_message or "").strip()
@@ -237,7 +353,14 @@ def run_discussion_ai_reply(
             "under Admin → LLM (Discussion AI defaults) or course-level overrides."
         )
 
-    system_prompt, prompt = build_discussion_ai_prompts(db, topic, user_message)
+    system_prompt, prompt = build_discussion_ai_prompts(
+        db,
+        topic,
+        user_message,
+        ai_context_mode=ai_context_mode,
+        ai_context_k=ai_context_k,
+        exclude_user_post_id=exclude_user_post_id,
+    )
     result = None
     last_exc: Exception | None = None
     for tested_only in (True, False):
@@ -288,11 +411,18 @@ def create_user_post_and_maybe_ai_reply(
     request_ai: bool,
     pending_image_uploads: bool = False,
     selected_llm_group_id: int | None = None,
+    ai_context_mode: str | None = None,
+    ai_context_k: str | None = None,
 ) -> tuple[DiscussionPost | None, str | None]:
     """Create user post when there is body; AI-only button with parent skips user post. Returns (user_post_or_none, ai_error_message)."""
+    from app.services.discussions import count_posts_for_topic
+
     raw = (body or "").strip()
     wants_ai = message_requests_discussion_ai(raw, request_ai)
     user_body = strip_ai_mentions(raw) if wants_ai else raw
+
+    topic_post_count = count_posts_for_topic(db, topic.id)
+    mode, k_eff = parse_ai_context_mode(ai_context_mode, ai_context_k, topic_post_count=topic_post_count)
 
     ai_err: str | None = None
     if wants_ai and not user_body and not pending_image_uploads and parent_post_id:
@@ -308,6 +438,9 @@ def create_user_post_and_maybe_ai_reply(
                 user_message=prompt,
                 parent_post_id=parent_post_id,
                 selected_group_id=selected_llm_group_id,
+                ai_context_mode=mode,
+                ai_context_k=k_eff,
+                exclude_user_post_id=None,
             )
         except ValueError as e:
             ai_err = str(e)
@@ -338,6 +471,9 @@ def create_user_post_and_maybe_ai_reply(
                 user_message=prompt,
                 parent_post_id=user_post.id,
                 selected_group_id=selected_llm_group_id,
+                ai_context_mode=mode,
+                ai_context_k=k_eff,
+                exclude_user_post_id=user_post.id,
             )
         except ValueError as e:
             ai_err = str(e)

@@ -8,7 +8,10 @@
     <h1 class="h3 mb-1">{{ material.title }}</h1>
     <p class="text-muted mb-0">{{ course.code }}</p>
   </div>
-  <a class="btn btn-outline-secondary" href="{% if back_to_course_url is defined and back_to_course_url %}{{ back_to_course_url }}{% elif is_teacher_view %}/teacher/courses/{{ course.id }}{% else %}/student/courses/{{ course.id }}{% endif %}">{% if back_to_course_label_en is defined %}{{ lx(back_to_course_label_en, back_to_course_label_zh) }}{% else %}{{ lx("Back to course", "返回课程") }}{% endif %}</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-warning" href="/reports/new?target_type=teaching_card&target_id={{ material.id }}&redirect_to={{ request.url.path|urlencode }}">{{ lx("Report", "举报") }}</a>
+    <a class="btn btn-outline-secondary" href="{% if back_to_course_url is defined and back_to_course_url %}{{ back_to_course_url }}{% elif is_teacher_view %}/teacher/courses/{{ course.id }}{% else %}/student/courses/{{ course.id }}{% endif %}">{% if back_to_course_label_en is defined %}{{ lx(back_to_course_label_en, back_to_course_label_zh) }}{% else %}{{ lx("Back to course", "返回课程") }}{% endif %}</a>
+  </div>
 </div>
 
 {% if material.external_url %}

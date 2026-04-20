@@ -132,6 +132,7 @@ def get_assignment_for_student(db: Session, assignment_id: int, user_id: int) ->
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
         .where(
             Assignment.id == assignment_id,
+            Assignment.status == AssignmentStatus.PUBLISHED,
             CourseMember.user_id == user_id,
             CourseMember.status == MembershipStatus.ACTIVE,
         )
@@ -150,6 +151,7 @@ def get_question_for_student(db: Session, question_id: int, user_id: int) -> Que
         .join(CourseMember, CourseMember.course_id == Assignment.course_id)
         .where(
             Question.id == question_id,
+            Assignment.status == AssignmentStatus.PUBLISHED,
             CourseMember.user_id == user_id,
             CourseMember.status == MembershipStatus.ACTIVE,
         )

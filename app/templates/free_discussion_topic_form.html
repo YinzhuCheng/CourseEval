@@ -14,6 +14,7 @@
 
 <div class="card shadow-sm mb-4">
   <div class="card-body row g-3">
+    <h2 class="h5 mb-2">{% if free_topic %}{{ lx("Edit topic card", "编辑话题卡片") }}{% else %}{{ lx("New topic card", "新建话题卡片") }}{% endif %}</h2>
     <form method="post" action="{% if free_topic %}/free-discussion/topics/{{ free_topic.id }}{% else %}/free-discussion/topics{% endif %}" class="row g-3">
       <div class="col-12">
         <label class="form-label">{{ lx("Title", "标题") }}</label>
@@ -40,7 +41,7 @@
 {% if free_topic %}
 <div class="card shadow-sm">
   <div class="card-body">
-    <h2 class="h6 mb-2">{{ lx("Topic cover image", "话题封面图") }}</h2>
+    <h2 class="h6 mb-2">{{ lx("Topic card cover image", "话题卡片封面图") }}</h2>
     <p class="small text-muted">{{ lx("Optional. Shown on topic cards.", "可选。显示在话题列表卡片上。") }}</p>
     <form method="post" action="/free-discussion/topics/{{ free_topic.id }}/cover" enctype="multipart/form-data" class="row g-2">
       <div class="col-md-8">

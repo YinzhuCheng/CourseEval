@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -198,6 +198,20 @@ def count_posts_for_topic(db: Session, topic_id: int) -> int:
     )
 
 
+def get_root_post_for_topic(db: Session, topic_id: int) -> DiscussionPost | None:
+    """Earliest top-level post in the topic (the 'first floor' / main thread opener)."""
+    return db.scalar(
+        select(DiscussionPost)
+        .where(
+            DiscussionPost.topic_id == topic_id,
+            DiscussionPost.parent_post_id.is_(None),
+            DiscussionPost.deleted_at.is_(None),
+        )
+        .order_by(DiscussionPost.created_at.asc())
+        .limit(1)
+    )
+
+
 def list_posts_for_topic(
     db: Session, topic_id: int, *, offset: int = 0, limit: int | None = None
 ) -> list[DiscussionPost]:
@@ -374,10 +388,16 @@ def unmute_user_in_course(db: Session, *, course_id: int, target_user_id: int, a
 
 
 def hard_delete_post(db: Session, post: DiscussionPost, *, actor: User, course_id: int) -> None:
+    from app.constants import StorageDeletionActor
     from app.services.discussion_attachments import delete_attachment_file
+    from app.services.user_storage import find_active_object_by_path, soft_delete_stored_row
 
     for att in list(post.attachments or []):
-        delete_attachment_file(att.relative_path)
+        row = find_active_object_by_path(db, att.relative_path)
+        if row is not None:
+            soft_delete_stored_row(db, row, actor=StorageDeletionActor.TEACHER, unlink=True)
+        else:
+            delete_attachment_file(att.relative_path)
         db.delete(att)
     _log_moderation(db, course_id=course_id, actor=actor, action="delete_post", post_id=post.id)
     db.delete(post)
@@ -449,11 +469,13 @@ def build_discussion_view_context(
     )
     topic = db.get(DiscussionTopic, topic_id)
     exts = ", ".join(sorted(s.replace(".", "").upper() for s in ALLOWED_IMAGE_EXTENSIONS))
+    topic_total_posts = count_posts_for_topic(db, topic_id)
     return {
         "discussion_thread": threaded,
         "discussion_pagination": pag,
         "can_moderate_discussion": staff,
         "discussion_ai_groups": discussion_ai_group_options(db, topic) if topic else [],
+        "discussion_topic_post_count": topic_total_posts,
         "discussion_image_rules_en": (
             f"Images: {exts}; max {human_upload_max_bytes()} per file after processing; "
             f"up to {DISCUSSION_MAX_IMAGES_PER_POST} images per post. No remote hotlinks."
@@ -506,18 +528,23 @@ def discussion_pagination_state(
     offset = 0
     current_page = 1
     if anchor_post_id is not None:
-        rank = db.scalar(
-            select(func.count())
-            .select_from(DiscussionPost)
-            .where(
-                DiscussionPost.topic_id == topic_id,
-                DiscussionPost.deleted_at.is_(None),
-                DiscussionPost.id < anchor_post_id,
+        anchor = db.get(DiscussionPost, anchor_post_id)
+        if anchor is not None and anchor.topic_id == topic_id and anchor.deleted_at is None:
+            rank = db.scalar(
+                select(func.count())
+                .select_from(DiscussionPost)
+                .where(
+                    DiscussionPost.topic_id == topic_id,
+                    DiscussionPost.deleted_at.is_(None),
+                    or_(
+                        DiscussionPost.created_at < anchor.created_at,
+                        (DiscussionPost.created_at == anchor.created_at) & (DiscussionPost.id < anchor.id),
+                    ),
+                )
             )
-        )
-        r = int(rank or 0)
-        current_page = min(total_pages, max(1, r // ps + 1))
-        offset = (current_page - 1) * ps
+            r = int(rank or 0)
+            current_page = min(total_pages, max(1, r // ps + 1))
+            offset = (current_page - 1) * ps
     elif page is not None:
         current_page = min(total_pages, max(1, int(page)))
         offset = (current_page - 1) * ps

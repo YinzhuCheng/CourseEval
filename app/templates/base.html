@@ -15,28 +15,39 @@
     <nav class="navbar navbar-expand-lg app-navbar mb-4">
       <div class="container">
         <a class="navbar-brand" href="/">{{ t("site.title") }}</a>
-        <div class="collapse navbar-collapse show">
+        <button
+          class="navbar-toggler app-navbar-toggler"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#mainNavbar"
+          aria-controls="mainNavbar"
+          aria-expanded="false"
+          aria-label="{{ lx('Toggle navigation', '展开或收起导航') }}"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="mainNavbar">
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             {% if current_user %}
             <li class="nav-item">
-              <a class="nav-link" href="/student/courses">{{ t("nav.learning") }}</a>
+              <a class="nav-link {% if current_section == 'learning' %}active{% endif %}" {% if current_section == 'learning' %}aria-current="page"{% endif %} href="/student/courses">{{ t("nav.learning") }}</a>
             </li>
             {% if can_use_teacher_features %}
             <li class="nav-item">
-              <a class="nav-link" href="/teacher/courses">{{ t("nav.teacher") }}</a>
+              <a class="nav-link {% if current_section == 'teacher' %}active{% endif %}" {% if current_section == 'teacher' %}aria-current="page"{% endif %} href="/teacher/courses">{{ t("nav.teacher") }}</a>
             </li>
             {% endif %}
             {% if can_access_admin_features %}
             <li class="nav-item">
-              <a class="nav-link" href="/admin">{{ t("nav.admin") }}</a>
+              <a class="nav-link {% if current_section == 'admin' %}active{% endif %}" {% if current_section == 'admin' %}aria-current="page"{% endif %} href="/admin">{{ t("nav.admin") }}</a>
             </li>
             {% endif %}
             <li class="nav-item">
-              <a class="nav-link" href="/free-discussion">{{ t("nav.free_discussion") }}</a>
+              <a class="nav-link {% if current_section == 'discussion' %}active{% endif %}" {% if current_section == 'discussion' %}aria-current="page"{% endif %} href="/discussion-groups">{{ t("nav.discussion_groups") }}</a>
             </li>
             {% endif %}
           </ul>
-          <div class="d-flex align-items-center gap-2 text-white flex-wrap">
+          <div class="d-flex align-items-center gap-2 text-white flex-wrap nav-actions">
             <div class="btn-group btn-group-sm" role="group" aria-label="Language switch">
               <a class="btn btn-outline-light {% if current_locale == 'en' %}active{% endif %}" href="/locale/en">{{ t("locale.switch_to_en") }}</a>
               <a class="btn btn-outline-light {% if current_locale == 'zh' %}active{% endif %}" href="/locale/zh">{{ t("locale.switch_to_zh") }}</a>
@@ -54,18 +65,29 @@
                 {% else %}
                 <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center fw-semibold" style="width:28px;height:28px;font-size:0.75rem;">{{ current_user.username[0]|upper }}</span>
                 {% endif %}
-                <span class="small d-none d-sm-inline">{{ current_user.username }}</span>
+                <span class="small">{{ current_user.username }}</span>
                 {% if current_user_role == "super_admin" %}
                 <span class="badge bg-danger">super</span>
                 {% elif current_user_role == "admin" %}
-                <span class="badge bg-warning text-dark">admin</span>
+                <span class="badge bg-warning text-dark">{{ lx("Admin", "管理员") }}</span>
                 {% elif current_user_role == "teacher" %}
-                <span class="badge bg-info text-dark">teacher</span>
+                <span class="badge bg-info text-dark">{{ lx("Teacher", "教师") }}</span>
                 {% endif %}
               </button>
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><a class="dropdown-item" href="/me/profile">{{ t("nav.profile") }}</a></li>
+                <li><a class="dropdown-item d-flex justify-content-between gap-3" href="/me/notifications">
+                  <span>{{ lx("Messages", "消息") }}</span>
+                  {% if unread_notification_count %}
+                  <span class="badge text-bg-danger">{{ unread_notification_count }}</span>
+                  {% endif %}
+                </a></li>
+                <li><a class="dropdown-item" href="/me/friends">{{ lx("Friends", "好友") }}</a></li>
+                <li><a class="dropdown-item" href="/me/messages">{{ lx("Private messages", "私信") }}</a></li>
+                <li><a class="dropdown-item" href="/me/invites">{{ lx("Invitations", "邀请") }}</a></li>
+                <li><a class="dropdown-item" href="/me/settings">{{ lx("Settings", "设置") }}</a></li>
                 <li><a class="dropdown-item" href="/me/profile/llm-usage">{{ t("student.llm_usage.title") }}</a></li>
+                <li><a class="dropdown-item" href="/me/reports">{{ lx("My reports", "我的举报") }}</a></li>
               </ul>
             </div>
             <form method="post" action="/logout" class="m-0">

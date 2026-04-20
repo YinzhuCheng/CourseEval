@@ -1,4 +1,5 @@
 import os
+import secrets
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -53,14 +54,16 @@ class Settings:
     smtp_from_name: str
     smtp_starttls: bool
     smtp_use_ssl: bool
+    session_https_only: bool
 
 
 @lru_cache
 def get_settings() -> Settings:
     data_dir = BASE_DIR / os.getenv("DATA_DIR", "data")
+    secret_key = os.getenv("SECRET_KEY", "").strip() or secrets.token_urlsafe(32)
     return Settings(
         app_name=os.getenv("APP_NAME", "CourseEval"),
-        secret_key=os.getenv("SECRET_KEY", "change-me-in-production"),
+        secret_key=secret_key,
         app_base_url=os.getenv("APP_BASE_URL", "").strip(),
         registration_invite_code=os.getenv("REGISTRATION_INVITE_CODE", "").strip(),
         internal_email_domain=os.getenv("INTERNAL_EMAIL_DOMAIN", "invite.local").strip() or "invite.local",
@@ -93,4 +96,5 @@ def get_settings() -> Settings:
         smtp_from_name=os.getenv("SMTP_FROM_NAME", "").strip(),
         smtp_starttls=_bool_env("SMTP_STARTTLS", True),
         smtp_use_ssl=_bool_env("SMTP_USE_SSL", False),
+        session_https_only=_bool_env("SESSION_HTTPS_ONLY", False),
     )

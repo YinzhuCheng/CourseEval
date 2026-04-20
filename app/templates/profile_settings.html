@@ -1,0 +1,28 @@
+{% extends "profile_layout.html" %}
+
+{% block title %}{{ lx("Settings", "设置") }} - {{ t("site.title") }}{% endblock %}
+
+{% block profile_body %}
+<h1 class="h4 mb-3">{{ lx("Settings", "设置") }}</h1>
+
+<section class="mb-4">
+  <h2 class="h6 mb-2">{{ lx("Privacy", "隐私") }}</h2>
+  <form method="post" action="/me/settings/privacy" class="vstack gap-3">
+    <div class="form-check">
+      <input
+        class="form-check-input"
+        type="checkbox"
+        id="onlyFriendsGroupInvites"
+        name="only_friends_can_invite_discussion_groups"
+        {% if profile_user.only_friends_can_invite_discussion_groups %}checked{% endif %}
+      />
+      <label class="form-check-label" for="onlyFriendsGroupInvites">
+        {{ lx("Only allow friends to invite me into discussion groups.", "仅允许好友邀请我进入讨论组。") }}
+      </label>
+    </div>
+    <div>
+      <button class="btn btn-primary" type="submit">{{ lx("Save settings", "保存设置") }}</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

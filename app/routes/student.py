@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.auth import push_flash
-from app.constants import CodeLanguage, CourseRole, QuestionType
+from app.constants import CodeLanguage, CourseRole, FeedbackSource, QuestionType
 from app.db import get_db
 from app.i18n import choose_text
+from app.models import FinalGradeSnapshot, Submission
 from app.runtime_support import (
     SUPPORTED_PYTHON_PACKAGES,
     SUPPORTED_PYTHON_VERSION,
@@ -47,6 +48,7 @@ from app.services.submissions import (
     list_submissions_for_question,
     read_student_safe_submission_artifact_text,
 )
+from app.services.upload_limits import read_upload_file_limited
 from app.services.user_storage import purge_submission_as_viewer
 from app.web import render_template
 
@@ -151,7 +153,43 @@ def student_assignment_detail(assignment_id: int, request: Request, db: Session 
         push_flash(request, choose_text(request, "Assignment not found.", "未找到作业。"), "danger")
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    return render_template(request, db, "student_assignment_detail.html", {"assignment": assignment})
+    questions = sorted(assignment.questions, key=lambda item: (item.order_index, item.id))
+    question_ids = [question.id for question in questions]
+    latest_by_question: dict[int, Submission] = {}
+    snapshots_by_question: dict[int, FinalGradeSnapshot] = {}
+    if question_ids:
+        submissions = (
+            db.query(Submission)
+            .filter(Submission.user_id == user.id, Submission.question_id.in_(question_ids))
+            .order_by(Submission.question_id.asc(), Submission.submitted_at.desc(), Submission.id.desc())
+            .all()
+        )
+        for submission in submissions:
+            latest_by_question.setdefault(submission.question_id, submission)
+
+        snapshots = (
+            db.query(FinalGradeSnapshot)
+            .filter(FinalGradeSnapshot.student_id == user.id, FinalGradeSnapshot.question_id.in_(question_ids))
+            .all()
+        )
+        snapshots_by_question = {snapshot.question_id: snapshot for snapshot in snapshots}
+
+    submitted_count = len(latest_by_question)
+    total_questions = len(questions)
+
+    return render_template(
+        request,
+        db,
+        "student_assignment_detail.html",
+        {
+            "assignment": assignment,
+            "ordered_questions": questions,
+            "latest_submission_by_question": latest_by_question,
+            "grade_snapshot_by_question": snapshots_by_question,
+            "submitted_question_count": submitted_count,
+            "total_question_count": total_questions,
+        },
+    )
 
 
 @router.get("/questions/{question_id}")
@@ -215,6 +253,8 @@ async def student_question_discuss(
     anonymous: str = Form(""),
     request_ai: str = Form(""),
     ai_group_id: str = Form(""),
+    ai_context_mode: str = Form("recent_k"),
+    ai_context_k: str = Form("1"),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -248,6 +288,8 @@ async def student_question_discuss(
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
             selected_llm_group_id=selected_group_id,
+            ai_context_mode=ai_context_mode,
+            ai_context_k=ai_context_k,
         )
         if _post is not None and image_files:
             try:
@@ -336,9 +378,9 @@ async def submit_code(
         )
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    file_bytes = await code_file.read()
     filename = code_file.filename or "solution.py"
     try:
+        file_bytes = await read_upload_file_limited(code_file)
         submission = create_code_submission(
             db,
             user_id=user.id,
@@ -359,10 +401,14 @@ async def submit_code(
         )
     except ValueError as exc:
         msg = str(exc)
-        if msg == "storage_quota_exceeded":
+        if msg in {"storage_quota_exceeded", "file_too_large"}:
             push_flash(
                 request,
-                choose_text(request, "Storage quota exceeded.", "存储空间已满，无法提交。"),
+                choose_text(
+                    request,
+                    "Upload is too large." if msg == "file_too_large" else "Storage quota exceeded.",
+                    "文件超过大小限制。" if msg == "file_too_large" else "存储空间已满，无法提交。",
+                ),
                 "danger",
             )
         else:
@@ -450,9 +496,9 @@ async def submit_file_question(
         )
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    file_bytes = await submission_file.read()
     filename = submission_file.filename or "submission.txt"
     try:
+        file_bytes = await read_upload_file_limited(submission_file)
         submission = create_file_submission(
             db,
             user_id=user.id,
@@ -471,10 +517,14 @@ async def submit_file_question(
         )
     except ValueError as exc:
         msg = str(exc)
-        if msg == "storage_quota_exceeded":
+        if msg in {"storage_quota_exceeded", "file_too_large"}:
             push_flash(
                 request,
-                choose_text(request, "Storage quota exceeded.", "存储空间已满，无法提交。"),
+                choose_text(
+                    request,
+                    "Upload is too large." if msg == "file_too_large" else "Storage quota exceeded.",
+                    "文件超过大小限制。" if msg == "file_too_large" else "存储空间已满，无法提交。",
+                ),
                 "danger",
             )
         else:
@@ -531,6 +581,8 @@ def student_submission_detail(submission_id: int, request: Request, db: Session 
     latest_result = submission.evaluation_results[-1] if submission.evaluation_results else None
     feedback = sorted(submission.feedback_items, key=lambda item: item.created_at)
     pending_teacher_review = is_submission_pending_teacher_review(submission)
+    if pending_teacher_review:
+        feedback = [item for item in feedback if item.source != FeedbackSource.LLM]
     return render_template(
         request,
         db,

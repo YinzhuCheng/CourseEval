@@ -1,0 +1,61 @@
+{% extends "profile_layout.html" %}
+
+{% block title %}{{ lx("Private messages", "私信") }} - {{ t("site.title") }}{% endblock %}
+
+{% block profile_body %}
+<h1 class="h4 mb-3">{{ lx("Private messages", "私信") }}</h1>
+
+<div class="row g-3">
+  <aside class="col-md-4">
+    <div class="list-group mb-3">
+      {% if threads %}
+      {% for row in threads %}
+      <a class="list-group-item list-group-item-action {% if active_thread and active_thread.id == row.thread.id %}active{% endif %}" href="/me/messages/threads/{{ row.thread.id }}">
+        <div class="d-flex justify-content-between gap-2">
+          <span>{{ row.other_user.username }}</span>
+          {% if row.unread_count %}
+          <span class="badge {% if active_thread and active_thread.id == row.thread.id %}text-bg-light{% else %}text-bg-danger{% endif %}">{{ row.unread_count }}</span>
+          {% endif %}
+        </div>
+        <div class="small {% if active_thread and active_thread.id == row.thread.id %}text-white-50{% else %}text-muted{% endif %}">{{ format_datetime(row.thread.last_message_at or row.thread.created_at) }}</div>
+      </a>
+      {% endfor %}
+      {% else %}
+      <div class="list-group-item text-muted">{{ lx("No conversations yet.", "暂无会话。") }}</div>
+      {% endif %}
+    </div>
+    <form method="post" action="/me/messages" class="vstack gap-2">
+      <label class="form-label mb-0">{{ lx("Start from a friend", "从好友开始私信") }}</label>
+      <select class="form-select" name="recipient_id" required>
+        {% for friend in friends %}
+        <option value="{{ friend.id }}">{{ friend.username }}</option>
+        {% endfor %}
+      </select>
+      <textarea class="form-control" name="body" rows="3" maxlength="5000" required></textarea>
+      <button class="btn btn-primary" type="submit">{{ lx("Send", "发送") }}</button>
+    </form>
+  </aside>
+
+  <section class="col-md-8">
+    {% if active_thread %}
+    <h2 class="h6 mb-3">{{ other_user.username }}</h2>
+    <div class="border rounded p-3 mb-3 message-thread">
+      {% for msg in active_thread.messages %}
+      <div class="mb-3 {% if msg.sender_id == current_user.id %}text-end{% endif %}">
+        <div class="small text-muted">{{ msg.sender.username }} · {{ format_datetime(msg.created_at) }}</div>
+        <div class="d-inline-block border rounded px-3 py-2 text-start">{{ format_discussion_body(msg.body) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <form method="post" action="/me/messages" class="vstack gap-2">
+      <input type="hidden" name="recipient_id" value="{{ other_user.id }}" />
+      <input type="hidden" name="thread_id" value="{{ active_thread.id }}" />
+      <textarea class="form-control" name="body" rows="3" maxlength="5000" required></textarea>
+      <button class="btn btn-primary align-self-start" type="submit">{{ lx("Send", "发送") }}</button>
+    </form>
+    {% else %}
+    <p class="text-muted">{{ lx("Choose a conversation or start one from your friend list.", "选择一个会话，或从好友列表发起私信。") }}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

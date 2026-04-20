@@ -20,7 +20,7 @@ from app.models import CourseDiscussionMute, CourseMember, DiscussionPost, Discu
 from app.services.course_materials import (
     create_material,
     get_material_for_course,
-    list_materials_for_course,
+    list_materials_for_free_topic,
     store_material_image,
     update_material,
 )
@@ -50,6 +50,7 @@ from app.services.markdown_sanitize import render_material_markdown
 from app.services.permissions import RedirectRequired, get_course_membership, require_user
 from app.services.redirects import safe_local_redirect
 from app.services.storage_paths import absolute_data_path
+from app.services.upload_limits import read_upload_file_limited
 from app.services.user_storage import QuotaExceededError, record_stored_object
 from app.web import render_template
 
@@ -71,6 +72,14 @@ def _require_oc_member(db: Session, user: User):
     if oc is None or get_course_membership(db, oc.id, user.id) is None:
         return None
     return oc
+
+
+def _free_chapter_belongs_to_topic(material, topic_id: int) -> bool:
+    if material is None:
+        return False
+    if getattr(material, "free_discussion_topic_id", None) is not None:
+        return material.free_discussion_topic_id == topic_id
+    return (material.sort_order or 0) // 100000 == topic_id
 
 
 @router.get("/free-discussion")
@@ -227,8 +236,8 @@ async def free_topic_cover_upload(
     if not can_manage_free_topic(db, user, ft):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
-    raw = await file.read()
     try:
+        raw = await read_upload_file_limited(file)
         rel = store_free_topic_cover_image(oc.id, ft.id, raw, file.filename or "cover.png")
         sz = absolute_data_path(rel).stat().st_size
         record_stored_object(
@@ -292,7 +301,7 @@ def free_topic_detail(topic_id: int, request: Request, db: Session = Depends(get
     root_body_html = render_material_markdown(root_post.body_text) if root_post else None
     if disc_ctx.get("discussion_thread") and root_post:
         disc_ctx["discussion_thread"] = [n for n in disc_ctx["discussion_thread"] if n["post"].id != root_post.id]
-    chapters = [m for m in list_materials_for_course(db, oc.id) if (m.sort_order or 0) // 100000 == ft.id]
+    chapters = list_materials_for_free_topic(db, oc.id, ft.id)
     mute_rows = list(db.scalars(select(CourseDiscussionMute).where(CourseDiscussionMute.course_id == oc.id)).all())
     discussion_mute_by_user = {m.user_id: m for m in mute_rows}
     cover_url = f"/data-files/{quote(str(ft.cover_image_path), safe='/')}" if ft.cover_image_path else None
@@ -339,6 +348,8 @@ async def free_topic_discuss(
     anonymous: str = Form(""),
     request_ai: str = Form(""),
     ai_group_id: str = Form(""),
+    ai_context_mode: str = Form("recent_k"),
+    ai_context_k: str = Form("1"),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -378,6 +389,8 @@ async def free_topic_discuss(
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
             selected_llm_group_id=selected_group_id,
+            ai_context_mode=ai_context_mode,
+            ai_context_k=ai_context_k,
         )
         if _u is not None and image_files:
             attachment_paths = attach_discussion_images_to_post(db, _u, oc.id, image_files)
@@ -511,11 +524,28 @@ def free_chapter_create(
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
     try:
-        m = create_material(db, course=oc, title=title, body_markdown=body_markdown, external_url=external_url, creator=user)
+        m = create_material(
+            db,
+            course=oc,
+            title=title,
+            body_markdown=body_markdown,
+            external_url=external_url,
+            creator=user,
+            free_discussion_topic_id=ft.id,
+        )
         m.sort_order = ft.id * 100000 + m.id
         db.commit()
-    except ValueError:
-        push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
+    except ValueError as exc:
+        msg = str(exc)
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "External URL must start with http:// or https://." if msg == "invalid_external_url" else "Title is required.",
+                "外部链接必须以 http:// 或 https:// 开头。" if msg == "invalid_external_url" else "标题不能为空。",
+            ),
+            "danger",
+        )
         return _redirect(f"/free-discussion/topics/{topic_id}/chapters/new")
     push_flash(request, choose_text(request, "Chapter saved.", "章节已保存。"), "success")
     return _redirect(f"/free-discussion/topics/{topic_id}/chapters/{m.id}")
@@ -530,7 +560,7 @@ def free_chapter_edit(topic_id: int, material_id: int, request: Request, db: Ses
     ft = get_free_topic(db, topic_id)
     oc = get_open_community_course(db)
     m = get_material_for_course(db, material_id, oc.id if oc else -1)
-    if ft is None or oc is None or m is None or ft.course_id != oc.id:
+    if ft is None or oc is None or m is None or ft.course_id != oc.id or not _free_chapter_belongs_to_topic(m, topic_id):
         return _redirect("/free-discussion")
     if not can_manage_free_topic(db, user, ft):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
@@ -566,7 +596,7 @@ def free_chapter_update(
     ft = get_free_topic(db, topic_id)
     oc = get_open_community_course(db)
     m = get_material_for_course(db, material_id, oc.id if oc else -1)
-    if ft is None or oc is None or m is None or ft.course_id != oc.id:
+    if ft is None or oc is None or m is None or ft.course_id != oc.id or not _free_chapter_belongs_to_topic(m, topic_id):
         return _redirect("/free-discussion")
     if not can_manage_free_topic(db, user, ft):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
@@ -574,8 +604,17 @@ def free_chapter_update(
     try:
         update_material(db, m, title=title, body_markdown=body_markdown, external_url=external_url)
         db.commit()
-    except ValueError:
-        push_flash(request, choose_text(request, "Title is required.", "标题不能为空。"), "danger")
+    except ValueError as exc:
+        msg = str(exc)
+        push_flash(
+            request,
+            choose_text(
+                request,
+                "External URL must start with http:// or https://." if msg == "invalid_external_url" else "Title is required.",
+                "外部链接必须以 http:// 或 https:// 开头。" if msg == "invalid_external_url" else "标题不能为空。",
+            ),
+            "danger",
+        )
         return _redirect(f"/free-discussion/topics/{topic_id}/chapters/{material_id}/edit")
     push_flash(request, choose_text(request, "Chapter updated.", "章节已更新。"), "success")
     return _redirect(f"/free-discussion/topics/{topic_id}/chapters/{material_id}")
@@ -596,12 +635,12 @@ async def free_chapter_upload_image(
     ft = get_free_topic(db, topic_id)
     oc = get_open_community_course(db)
     m = get_material_for_course(db, material_id, oc.id if oc else -1)
-    if ft is None or oc is None or m is None or ft.course_id != oc.id:
+    if ft is None or oc is None or m is None or ft.course_id != oc.id or not _free_chapter_belongs_to_topic(m, topic_id):
         return _redirect("/free-discussion")
     if not can_manage_free_topic(db, user, ft):
         return _redirect(f"/free-discussion/topics/{topic_id}")
-    raw = await file.read()
     try:
+        raw = await read_upload_file_limited(file)
         rel = store_material_image(oc.id, material_id, raw, file.filename or "image.png")
         sz = absolute_data_path(rel).stat().st_size
         record_stored_object(
@@ -688,6 +727,8 @@ async def free_chapter_discuss(
     anonymous: str = Form(""),
     request_ai: str = Form(""),
     ai_group_id: str = Form(""),
+    ai_context_mode: str = Form("recent_k"),
+    ai_context_k: str = Form("1"),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -729,6 +770,8 @@ async def free_chapter_discuss(
             request_ai=(request_ai == "on" or request_ai == "true"),
             pending_image_uploads=bool(image_files),
             selected_llm_group_id=selected_group_id,
+            ai_context_mode=ai_context_mode,
+            ai_context_k=ai_context_k,
         )
         if _u is not None and image_files:
             attachment_paths = attach_discussion_images_to_post(db, _u, oc.id, image_files)
@@ -789,7 +832,7 @@ def free_topic_mute_user(
     oc = get_open_community_course(db)
     if ft is None or oc is None or ft.course_id != oc.id:
         return _redirect("/free-discussion")
-    if not can_manage_free_topic(db, user, ft):
+    if not can_moderate_discussion(db, oc.id, user):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
     target = db.get(User, user_id)
@@ -826,7 +869,7 @@ def free_topic_unmute_user(
     oc = get_open_community_course(db)
     if ft is None or oc is None or ft.course_id != oc.id:
         return _redirect("/free-discussion")
-    if not can_manage_free_topic(db, user, ft):
+    if not can_moderate_discussion(db, oc.id, user):
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
     unmute_user_in_course(db, course_id=oc.id, target_user_id=user_id, actor=user)

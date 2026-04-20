@@ -135,6 +135,67 @@ class DiscussionTopicKind(str, Enum):
     COURSE_MATERIAL = "course_material"
     QUESTION = "question"
     FREE_DISCUSSION_TOPIC = "free_discussion_topic"
+    DISCUSSION_GROUP = "discussion_group"
+
+
+class DiscussionGroupVisibility(str, Enum):
+    PRIVATE = "private"
+    PUBLIC = "public"
+
+
+class DiscussionGroupMemberRole(str, Enum):
+    OWNER = "owner"
+    MEMBER = "member"
+
+
+class DiscussionGroupStatus(str, Enum):
+    ACTIVE = "active"
+    FROZEN = "frozen"
+
+
+class ReportTargetType(str, Enum):
+    USER = "user"
+    TEACHING_CARD = "teaching_card"
+    FREE_DISCUSSION_CARD = "free_discussion_card"
+    DISCUSSION_GROUP_CARD = "discussion_group_card"
+    DISCUSSION_POST = "discussion_post"
+
+
+class ReportStatus(str, Enum):
+    PENDING = "pending"
+    REVIEWING = "reviewing"
+    RESOLVED = "resolved"
+    REJECTED = "rejected"
+    DUPLICATE = "duplicate"
+
+
+class FriendRequestStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class SocialInviteType(str, Enum):
+    COURSE = "course"
+    FREE_DISCUSSION_TOPIC = "free_discussion_topic"
+    DISCUSSION_GROUP = "discussion_group"
+
+
+class SocialInviteStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class NotificationType(str, Enum):
+    FRIEND_REQUEST = "friend_request"
+    FRIEND_ACCEPTED = "friend_accepted"
+    DIRECT_MESSAGE = "direct_message"
+    COURSE_INVITE = "course_invite"
+    FREE_DISCUSSION_TOPIC_INVITE = "free_discussion_topic_invite"
+    DISCUSSION_GROUP_INVITE = "discussion_group_invite"
 
 
 class StorageDeletionActor(str, Enum):
