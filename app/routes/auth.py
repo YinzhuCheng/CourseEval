@@ -12,6 +12,7 @@ from app.auth import (
     can_send_email_verification,
     can_send_password_reset,
     clear_password_reset,
+    find_user_by_password_reset_token,
     generate_internal_email_address,
     generate_email_verification_token,
     initial_email_verification_state,
@@ -181,11 +182,7 @@ async def reset_password_page(
     token: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
 ):
-    token_hash = token_digest(token)
-    user = db.scalar(select(User).where(User.password_reset_token == token_hash))
-    if user is None:
-        users = list(db.scalars(select(User).where(User.password_reset_token.is_not(None))).all())
-        user = next((candidate for candidate in users if token_matches(candidate.password_reset_token, token)), None)
+    user = find_user_by_password_reset_token(db, token)
     if user is None or not can_reset_password_token(user):
         push_flash(request, t(request, "flash.password_reset_invalid"), "danger")
         return RedirectResponse(url="/forgot-password", status_code=303)
@@ -201,11 +198,7 @@ async def reset_password(
     db: Session = Depends(get_db),
 ):
     token = token.strip()
-    token_hash = token_digest(token)
-    user = db.scalar(select(User).where(User.password_reset_token == token_hash))
-    if user is None:
-        users = list(db.scalars(select(User).where(User.password_reset_token.is_not(None))).all())
-        user = next((candidate for candidate in users if token_matches(candidate.password_reset_token, token)), None)
+    user = find_user_by_password_reset_token(db, token)
     if user is None or not can_reset_password_token(user):
         push_flash(request, t(request, "flash.password_reset_invalid"), "danger")
         return RedirectResponse(url="/forgot-password", status_code=303)

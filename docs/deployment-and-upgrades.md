@@ -60,6 +60,7 @@ For invitation-code registration, set `REGISTRATION_INVITE_CODE`. Keep it server
 | `PDF_REVIEW_MAX_PAGES` | PDF pages sent to multimodal review | Tune for cost and provider limits. |
 | SMTP variables | Verification/reset email | Required if email-based registration or password reset should work. |
 | `REGISTRATION_INVITE_CODE` | Optional invite registration path | Keep private; do not expose in frontend or public docs. |
+| `CSRF_ALLOW_MISSING_ORIGIN_REFERER` | Allow POST without `Origin`/`Referer` | Default unset/false in production. Set to `1` only for API clients or automation that cannot send browser headers. |
 
 ## Runner image
 
@@ -136,7 +137,7 @@ Code rollback without data rollback can leave old code reading newer values afte
 - Put HTTPS in front of the app.
 - The current session middleware sets `https_only=False`; if deployed behind HTTPS, review cookie settings before hardening.
 - SQLite is intended for small single-node use.
-- **CSRF:** Unsafe HTTP methods (POST, PUT, PATCH, DELETE) require a matching `Origin` header, or else a `Referer` whose host matches the request (`app/csrf.py`). Same-origin form posts from the web UI satisfy this; API-style clients must send `Origin`. Requests with neither header are still allowed for compatibility (e.g. some tests and CLI).
+- **CSRF:** Unsafe HTTP methods (POST, PUT, PATCH, DELETE) require a matching `Origin` header, or else a `Referer` whose host matches the request (`app/csrf.py`). Same-origin browser forms send at least one of these. If neither header is present, the request is rejected unless `CSRF_ALLOW_MISSING_ORIGIN_REFERER=true`.
 - Docker isolation is basic and depends on the configured runner image and Docker flags.
 - Uploaded files and artifacts are not automatically cleaned up.
 

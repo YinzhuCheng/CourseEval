@@ -66,6 +66,10 @@ Grading uses `_resolve_llm_config_for_question` in `app/services/submissions.py`
 
 Within a selected group, calls start from priority #1 and only try later members when earlier members fail. A later task starts again from #1.
 
+### `/data-files` only serves whitelisted path prefixes
+
+`app/routes/uploads.py` allows specific under-`DATA_DIR` layouts (course materials, avatars, discussion uploads, etc.). Paths that do not match a branch fall through to a redirect—**not** a generic file server. Evaluation outputs under `outputs/` are intended to be read via route handlers and artifact helpers, not by guessing `/data-files/...` URLs.
+
 ### Data-path helpers are centralized
 
 `relative_to_data`, `absolute_data_path`, and writable-directory helpers live in `app/services/storage_paths.py`.

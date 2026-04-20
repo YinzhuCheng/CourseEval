@@ -8,6 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from app.config import get_settings
+
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
@@ -92,5 +94,10 @@ class CsrfProtectionMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "CSRF validation failed (referer)."}, status_code=403)
             return await call_next(request)
 
-        # No Origin and no Referer (e.g. some tests, curl, or privacy tools).
-        return await call_next(request)
+        if get_settings().csrf_allow_missing_origin_referer:
+            return await call_next(request)
+
+        return JSONResponse(
+            {"detail": "CSRF validation failed (missing origin and referer)."},
+            status_code=403,
+        )

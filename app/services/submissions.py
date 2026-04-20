@@ -27,6 +27,7 @@ from app.constants import (
     AssignmentStatus,
     CodeLanguage,
     CodeSubmissionMode,
+    CourseRole,
     MembershipStatus,
     QuestionType,
     ScoringRule,
@@ -682,7 +683,7 @@ def get_submission_for_teacher(db: Session, submission_id: int, teacher_id: int)
             and_(
                 CourseMember.course_id == Assignment.course_id,
                 CourseMember.user_id == teacher_id,
-                CourseMember.role.in_(["teacher", "ta"]),
+                CourseMember.role.in_({CourseRole.TEACHER, CourseRole.TA}),
             ),
         )
         .where(Submission.id == submission_id, CourseMember.status == MembershipStatus.ACTIVE)
