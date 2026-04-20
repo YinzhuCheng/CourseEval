@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import anyio
@@ -6,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config import reset_settings_cache
 from app.db import Base
 from app.main import app
 from app.routes.auth import get_db
@@ -31,6 +33,9 @@ class AsyncAsgiClient:
 
 class CsrfMiddlewareTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._prev_csrf_relaxed = os.environ.get("CSRF_ALLOW_MISSING_ORIGIN_REFERER")
+        os.environ["CSRF_ALLOW_MISSING_ORIGIN_REFERER"] = "0"
+        reset_settings_cache()
         self.engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -57,6 +62,11 @@ class CsrfMiddlewareTests(unittest.TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
         self.engine.dispose()
+        if self._prev_csrf_relaxed is None:
+            os.environ.pop("CSRF_ALLOW_MISSING_ORIGIN_REFERER", None)
+        else:
+            os.environ["CSRF_ALLOW_MISSING_ORIGIN_REFERER"] = self._prev_csrf_relaxed
+        reset_settings_cache()
 
     def test_post_rejects_mismatched_origin(self) -> None:
         response = self.client.post(
@@ -73,6 +83,13 @@ class CsrfMiddlewareTests(unittest.TestCase):
             headers={"origin": "http://testserver"},
         )
         self.assertEqual(response.status_code, 303)
+
+    def test_post_without_origin_or_referer_returns_403_when_strict(self) -> None:
+        response = self.client.post(
+            "/forgot-password",
+            data={"email": "nobody@example.com"},
+        )
+        self.assertEqual(response.status_code, 403)
 
     def test_locale_redirect_strips_cross_site_referer(self) -> None:
         response = self.client.get(

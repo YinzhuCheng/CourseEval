@@ -55,6 +55,7 @@ class Settings:
     smtp_starttls: bool
     smtp_use_ssl: bool
     session_https_only: bool
+    csrf_allow_missing_origin_referer: bool
 
 
 @lru_cache
@@ -97,4 +98,12 @@ def get_settings() -> Settings:
         smtp_starttls=_bool_env("SMTP_STARTTLS", True),
         smtp_use_ssl=_bool_env("SMTP_USE_SSL", False),
         session_https_only=_bool_env("SESSION_HTTPS_ONLY", False),
+        # When false (default), POST/PUT/PATCH/DELETE without Origin and Referer get 403 (stronger CSRF).
+        # Set to true for local scripts, curl, or test suites that do not send browser headers.
+        csrf_allow_missing_origin_referer=_bool_env("CSRF_ALLOW_MISSING_ORIGIN_REFERER", False),
     )
+
+
+def reset_settings_cache() -> None:
+    """Clear settings singleton (for tests after changing environment variables)."""
+    get_settings.cache_clear()

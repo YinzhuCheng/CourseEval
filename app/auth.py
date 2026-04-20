@@ -228,6 +228,22 @@ def clear_password_reset(user: User) -> None:
     user.password_reset_sent_at = None
 
 
+def find_user_by_password_reset_token(db: Session, raw_token: str) -> User | None:
+    """Resolve a user from the raw reset token. Uses digest lookup first, then O(k) compat scan for legacy rows."""
+    token = (raw_token or "").strip()
+    if not token:
+        return None
+    digest = token_digest(token)
+    user = db.scalar(select(User).where(User.password_reset_token == digest))
+    if user is not None:
+        return user
+    candidates = list(db.scalars(select(User).where(User.password_reset_token.is_not(None))).all())
+    for candidate in candidates:
+        if token_matches(candidate.password_reset_token, token):
+            return candidate
+    return None
+
+
 def assign_user_role(user: User, role: UserRole) -> None:
     if role == UserRole.SUPER_ADMIN:
         user.account_role = AccountRole.STUDENT
