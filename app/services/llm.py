@@ -140,9 +140,8 @@ def _response_language_instruction(course_override: str | None, student_submissi
     return "The student's submission appears to be primarily non-Chinese; use English (en)."
 
 
-def _parse_grading_json(raw: str, *, max_score: float) -> dict:
-    cleaned = strip_json_fence(raw)
-    parsed = json.loads(cleaned)
+def validate_grading_result_dict(parsed: dict, *, max_score: float) -> dict:
+    """Validate score_suggestion and comment_text when the payload is already a dict."""
     if "score_suggestion" not in parsed or "comment_text" not in parsed:
         raise ValueError("LLM JSON response must include score_suggestion and comment_text.")
     try:
@@ -152,8 +151,21 @@ def _parse_grading_json(raw: str, *, max_score: float) -> dict:
         raise ValueError("LLM score_suggestion must be a number.") from exc
     if score < 0 or score > max_score_decimal:
         raise ValueError(f"LLM score_suggestion must be between 0 and {max_score}.")
-    parsed["score_suggestion"] = str(score)
-    return parsed
+    out = dict(parsed)
+    out["score_suggestion"] = str(score)
+    if out.get("comment_text") is None:
+        out["comment_text"] = ""
+    else:
+        out["comment_text"] = str(out["comment_text"])
+    return out
+
+
+def _parse_grading_json(raw: str, *, max_score: float) -> dict:
+    cleaned = strip_json_fence(raw)
+    parsed = json.loads(cleaned)
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM JSON response must be an object.")
+    return validate_grading_result_dict(parsed, max_score=max_score)
 
 
 def _grading_system_preamble() -> str:

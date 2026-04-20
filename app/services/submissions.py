@@ -38,6 +38,7 @@ from app.services.llm import (
     ImageInput,
     generate_file_evaluation_from_images,
     generate_short_answer_evaluation,
+    validate_grading_result_dict,
 )
 from app.services.llm_groups import call_llm_group, group_has_callable_target, latest_platform_llm_group
 from app.services.notebook_multimodal import notebook_placeholder_alignment_block, sanitize_notebook_for_llm
@@ -967,7 +968,7 @@ def create_code_submission(
         code_submission_mode=submission_mode,
         submitted_at=utcnow(),
         is_late=_is_late(question),
-        counts_toward_limit=False,
+        counts_toward_limit=True,
         is_effective_submission=False,
         question_version_id=question.current_question_version_id,
     )
@@ -1216,13 +1217,32 @@ def enqueue_file_llm_evaluation(db: Session, submission_id: int) -> str:
     return rq_job.id
 
 
+def _running_recovery_cutoff() -> datetime:
+    """Do not treat short-lived RUNNING rows as stale (avoids false failures on worker restart)."""
+    buffer_minutes = max(30, settings.execution_timeout_seconds // 60 + 10)
+    return utcnow() - timedelta(minutes=buffer_minutes)
+
+
 def cleanup_stale_running_items() -> int:
     with SessionLocal() as db:
+        cutoff = _running_recovery_cutoff()
+        started_or_submitted = func.coalesce(Submission.started_at, Submission.submitted_at)
         running_submissions = list(
-            db.scalars(select(Submission).where(Submission.status == SubmissionStatus.RUNNING)).all()
+            db.scalars(
+                select(Submission).where(
+                    Submission.status == SubmissionStatus.RUNNING,
+                    started_or_submitted < cutoff,
+                )
+            ).all()
         )
+        task_started_or_created = func.coalesce(EvaluationTask.started_at, EvaluationTask.created_at)
         running_tasks = list(
-            db.scalars(select(EvaluationTask).where(EvaluationTask.status == EvaluationTaskStatus.RUNNING)).all()
+            db.scalars(
+                select(EvaluationTask).where(
+                    EvaluationTask.status == EvaluationTaskStatus.RUNNING,
+                    task_started_or_created < cutoff,
+                )
+            ).all()
         )
         stale_cutoff = utcnow() - timedelta(minutes=10)
         unqueued_tasks = list(
@@ -1260,7 +1280,7 @@ def cleanup_stale_running_items() -> int:
                 task.submission.failure_reason_code = "system_error"
 
         db.commit()
-        return len(running_submissions) + len(unqueued_tasks)
+        return len(running_submissions) + len(running_tasks) + len(unqueued_tasks)
 
 
 def cleanup_missing_queued_jobs() -> int:
@@ -1644,6 +1664,7 @@ def process_short_answer_llm_evaluation(submission_id: int, task_id: int) -> Non
             )
 
         result = call_llm_group(llm_group, _run_sa, label="short_answer_llm")
+        result = validate_grading_result_dict(result, max_score=float(submission.question.max_score))
         comment = result.get("comment_text") or ""
         if notices:
             comment = (
@@ -1771,6 +1792,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                 )
 
             result = call_llm_group(llm_group, _run_pdf, label="file_llm_pdf")
+            result = validate_grading_result_dict(result, max_score=float(submission.question.max_score))
         else:
             ans = _truncate_for_llm("Student answer", submission.answer_text or "", 24000, notices)
             if notices and not trunc_notice:
@@ -1807,6 +1829,7 @@ def process_file_llm_evaluation(submission_id: int, task_id: int) -> None:
                 )
 
             result = call_llm_group(llm_group, _run_text, label="file_llm_text")
+            result = validate_grading_result_dict(result, max_score=float(submission.question.max_score))
 
         comment = result.get("comment_text") or ""
         if notices:

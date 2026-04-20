@@ -549,13 +549,13 @@ Check:
 ## Current limitations
 
 - SQLite is suitable only for small single-node usage
-- No CSRF protection layer yet
+- CSRF mitigation: unsafe methods require a same-origin `Origin` or matching `Referer` host (`app/csrf.py`); requests without both headers are still accepted for compatibility
 - LLM connectivity testing is still a structural smoke test, not a live provider guarantee
 - Runtime image records exist, but per-course runtime enforcement is still basic
-- No per-user storage quota
+- Per-user storage quotas apply to tracked assets (for example profile and discussion uploads); defaults and per-user overrides are configurable via admin policy (`app/services/user_storage.py`). Plan `DATA_DIR` disk capacity for assignment submissions and evaluation outputs separately.
 - No automatic cleanup for old artifacts
 - No advanced sandbox hardening beyond Docker flags
-- Intended for a single worker process and small-scale deployments
+- Intended for small-scale deployments: `python worker.py` runs a **manager** that starts one RQ worker process for `CODE_QUEUE_NAME` and additional worker processes per enabled LLM group according to each group’s `queue_concurrency` (see `docs/deployment-and-upgrades.md`).
 
 ## Upgrade and migration policy
 

@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +10,7 @@ from starlette.responses import JSONResponse, RedirectResponse
 
 from app.auth import get_current_user, landing_path_for_user
 from app.config import get_settings
+from app.csrf import CsrfProtectionMiddleware
 from app.db import ensure_data_directories, get_db, init_database
 from app.routes.admin import router as admin_router
 from app.routes.auth import router as auth_router
@@ -28,13 +30,21 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title=settings.app_name)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    ensure_data_directories()
+    init_database()
+    yield
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     same_site="lax",
     https_only=settings.session_https_only,
 )
+app.add_middleware(CsrfProtectionMiddleware)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 app.include_router(auth_router)
 app.include_router(uploads_router)
@@ -46,12 +56,6 @@ app.include_router(reports_router)
 app.include_router(social_router)
 app.include_router(teacher_router)
 app.include_router(admin_router)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    ensure_data_directories()
-    init_database()
 
 
 @app.get("/healthz")

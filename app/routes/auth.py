@@ -39,6 +39,7 @@ from app.models import User
 from app.services.courses import bootstrap_sample_data, ensure_user_in_open_community_course
 from app.services.email import send_password_reset_email, send_verification_email
 from app.services.permissions import RedirectRequired, require_user
+from app.services.redirects import safe_referer_redirect
 from app.services.storage_paths import absolute_data_path
 from app.services.upload_limits import read_upload_file_limited
 from app.services.user_media import store_user_avatar
@@ -123,7 +124,12 @@ async def register_page(request: Request, db: Session = Depends(get_db)):
 @router.get("/locale/{locale}")
 async def change_locale(locale: str, request: Request):
     set_locale(request, locale)
-    redirect_to = request.headers.get("referer") or "/"
+    redirect_to = safe_referer_redirect(
+        request.headers.get("referer"),
+        "/",
+        request_host=(request.url.hostname or ""),
+        request_port=request.url.port,
+    )
     return RedirectResponse(url=redirect_to, status_code=303)
 
 

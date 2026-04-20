@@ -80,10 +80,10 @@ Then rebuild and redeploy the runner image.
 
 ## Worker queues
 
-`worker.py` starts:
+`worker.py` runs a **manager loop** that spawns and reconciles worker **processes** (each process runs one RQ `Worker` for a single queue name):
 
-- one worker for `CODE_QUEUE_NAME`
-- one or more workers per enabled LLM group, using `LLM_QUEUE_PREFIX-<group_id>`
+- one worker **process** for `CODE_QUEUE_NAME`
+- one or more worker **processes** per enabled LLM group, using `LLM_QUEUE_PREFIX-<group_id>`
 
 Each enabled LLM group's `queue_concurrency` controls how many worker processes are created for that group. Inside a group, the worker tries priority #1 first and only uses later LLM members after earlier members fail; the next task starts from #1 again.
 
@@ -136,7 +136,7 @@ Code rollback without data rollback can leave old code reading newer values afte
 - Put HTTPS in front of the app.
 - The current session middleware sets `https_only=False`; if deployed behind HTTPS, review cookie settings before hardening.
 - SQLite is intended for small single-node use.
-- There is no CSRF protection layer yet.
+- **CSRF:** Unsafe HTTP methods (POST, PUT, PATCH, DELETE) require a matching `Origin` header, or else a `Referer` whose host matches the request (`app/csrf.py`). Same-origin form posts from the web UI satisfy this; API-style clients must send `Origin`. Requests with neither header are still allowed for compatibility (e.g. some tests and CLI).
 - Docker isolation is basic and depends on the configured runner image and Docker flags.
 - Uploaded files and artifacts are not automatically cleaned up.
 
