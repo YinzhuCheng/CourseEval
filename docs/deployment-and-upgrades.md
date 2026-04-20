@@ -44,6 +44,23 @@ Minimum production-like values:
 
 For invitation-code registration, set `REGISTRATION_INVITE_CODE`. Keep it server-side only.
 
+### Configuration reference
+
+| Setting | Purpose | Production guidance |
+| --- | --- | --- |
+| `SECRET_KEY` | Session signing | Required. Use a long random value and keep it stable. |
+| `APP_BASE_URL` | Public origin for email links | Required for email verification and password reset. Use HTTPS. |
+| `DATABASE_URL` | SQLAlchemy database URL | Required. SQLite is fine for small single-node deployments. |
+| `DATA_DIR` | Uploaded files, outputs, default SQLite | Required. Put it on persistent storage and back it up. |
+| `REDIS_URL` | RQ backend | Required for code and LLM evaluation. Web and worker must share it. |
+| `CODE_QUEUE_NAME` | Code evaluation queue | Must match web and worker environments. |
+| `LLM_QUEUE_PREFIX` | Per-LLM-group queue prefix | Must match web and worker environments. |
+| `RUNNER_IMAGE` | Docker image for code questions | Build and deploy this image before accepting code submissions. |
+| `DOCKER_NETWORK_DISABLED` | Runner network policy | Keep `true` unless a reviewed runner image and assignment require network. |
+| `PDF_REVIEW_MAX_PAGES` | PDF pages sent to multimodal review | Tune for cost and provider limits. |
+| SMTP variables | Verification/reset email | Required if email-based registration or password reset should work. |
+| `REGISTRATION_INVITE_CODE` | Optional invite registration path | Keep private; do not expose in frontend or public docs. |
+
 ## Runner image
 
 Build the default runner image before accepting code submissions:
@@ -122,3 +139,27 @@ Code rollback without data rollback can leave old code reading newer values afte
 - There is no CSRF protection layer yet.
 - Docker isolation is basic and depends on the configured runner image and Docker flags.
 - Uploaded files and artifacts are not automatically cleaned up.
+
+## First-run checklist
+
+1. Create `.env` and set the production values above.
+2. Build `RUNNER_IMAGE`.
+3. Start Redis.
+4. Run `python scripts/init_db.py`.
+5. Create a super admin with the deployment bootstrap script or maintenance flow.
+6. Start `uvicorn app.main:app` and `python worker.py`.
+7. Open `/admin/system` and send an SMTP test if email is enabled.
+8. Add and test at least one LLM group if LLM review is enabled.
+9. Create a small course, code question, and file/LLM question to verify the full queue path.
+
+## Troubleshooting
+
+| Symptom | Likely cause | What to check |
+| --- | --- | --- |
+| Students cannot sign in after registration | Email verification is pending | SMTP settings, spam folder, resend verification link |
+| Reset or verification link points to the wrong host | `APP_BASE_URL` is wrong | Set it to the public HTTPS origin |
+| Code submissions stay queued | Worker is not consuming the same queue | Redis, `worker.py`, `CODE_QUEUE_NAME` |
+| Code submissions fail before tests run | Runner cannot start | Docker daemon, `RUNNER_IMAGE`, data-directory permissions |
+| LLM submissions stay submitted or fail quickly | No tested callable LLM group | Admin LLM test status, API key, provider URL |
+| Users hit quota despite low visible usage | Pre-call budget check blocks large requests | Raise user limit or reduce prompt/page size |
+| PDF review misses visual content | Provider is text-only or page cap is low | Multimodal model support, `PDF_REVIEW_MAX_PAGES` |

@@ -22,6 +22,7 @@
 <div class="card shadow-sm">
   <div class="card-body">
     {% if not course.is_open_community %}
+    {% set published_assignments = course.assignments|selectattr("status.value", "equalto", "published")|list %}
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
       <div>
         <h2 class="h5 mb-1">{{ lx("Assignments", "作业列表") }}</h2>
@@ -30,7 +31,7 @@
         </p>
       </div>
     </div>
-    {% if course.assignments %}
+    {% if published_assignments %}
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
@@ -43,7 +44,7 @@
           </tr>
         </thead>
         <tbody>
-            {% for assignment in course.assignments if assignment.status.value == "published" %}
+            {% for assignment in published_assignments %}
           <tr>
             <td>
               <div class="fw-semibold">{{ assignment.title }}</div>

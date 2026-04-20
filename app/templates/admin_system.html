@@ -42,12 +42,13 @@
     </div>
   </div>
   <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h2 class="h5 mb-3">{{ t("admin.system.raw_snapshot") }}</h2>
+    <details class="ux-disclosure">
+      <summary>{{ t("admin.system.raw_snapshot") }}</summary>
+      <div class="ux-disclosure-body">
+        <p class="small text-muted">{{ lx("Diagnostic JSON for operators. Most routine checks can use the quick stats on the left.", "供运维排查使用的诊断 JSON；日常检查优先看左侧快速统计。") }}</p>
         <pre class="artifact-block">{{ raw_stats_json }}</pre>
       </div>
-    </div>
+    </details>
     <div class="card shadow-sm mt-4">
       <div class="card-body">
         <h2 class="h5 mb-2">{{ t("admin.system.email_tools") }}</h2>

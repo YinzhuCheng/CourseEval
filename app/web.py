@@ -57,6 +57,17 @@ def render_template(
     status_code: int = 200,
 ):
     loc = get_locale(request)
+    path = request.url.path
+    if path.startswith("/teacher"):
+        current_section = "teacher"
+    elif path.startswith("/admin"):
+        current_section = "admin"
+    elif path.startswith("/free-discussion"):
+        current_section = "discussion"
+    elif path.startswith("/student") or path.startswith("/me"):
+        current_section = "learning"
+    else:
+        current_section = ""
 
     def elabel(category: str, value) -> str:
         raw = value.value if hasattr(value, "value") else value
@@ -64,6 +75,7 @@ def render_template(
 
     base_context = {
         "request": request,
+        "current_section": current_section,
         "current_user": get_current_user(request, db),
         "flashes": pop_flashes(request),
         "current_locale": loc,

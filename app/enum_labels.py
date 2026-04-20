@@ -15,7 +15,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "question_type": {
             "short_answer": "Short answer",
             "code": "Code question",
-            "file_llm": "File upload / LLM",
+            "file_llm": "File upload / LLM review",
         },
         "submission_status": {
             "submitted": "Submitted",
@@ -50,7 +50,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "question_type": {
             "short_answer": "简答题",
             "code": "代码题",
-            "file_llm": "文件上传 / LLM",
+            "file_llm": "文件上传（LLM 辅助评阅）",
         },
         "submission_status": {
             "submitted": "已提交",

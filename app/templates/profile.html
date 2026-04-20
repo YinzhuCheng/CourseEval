@@ -24,7 +24,7 @@
           {{ lx("Used", "已用") }}: {{ (storage_used_bytes / (1024 * 1024))|round(2) }} MiB
           · {{ lx("Quota", "额度") }}: {{ (storage_quota_bytes / (1024 * 1024))|round(2) }} MiB
         </p>
-        <div class="progress mb-4" style="height: 8px;">
+        <div class="progress quota-progress mb-4">
           {% set pct = (100 * storage_used_bytes / storage_quota_bytes) if storage_quota_bytes > 0 else 0 %}
           {% set pct_capped = pct if pct < 100 else 100 %}
           <div class="progress-bar" role="progressbar" style="width: {{ pct_capped }}%;" aria-valuenow="{{ pct|round(1) }}" aria-valuemin="0" aria-valuemax="100"></div>
@@ -44,7 +44,7 @@
               {% endif %}
             </div>
             {% if a.can_delete %}
-            <form method="post" action="/me/profile/assets/{{ a.id }}/delete" class="m-0" onsubmit="return confirm('Remove this file?');">
+            <form method="post" action="/me/profile/assets/{{ a.id }}/delete" class="m-0" onsubmit="return confirm('{{ lx('Remove this file?', '确定删除这个文件吗？') }}');">
               <button class="btn btn-sm btn-outline-danger" type="submit">{{ lx("Delete", "删除") }}</button>
             </form>
             {% endif %}

@@ -7,6 +7,7 @@ from app.auth import push_flash
 from app.constants import CodeLanguage, CourseRole, FeedbackSource, QuestionType
 from app.db import get_db
 from app.i18n import choose_text
+from app.models import FinalGradeSnapshot, Submission
 from app.runtime_support import (
     SUPPORTED_PYTHON_PACKAGES,
     SUPPORTED_PYTHON_VERSION,
@@ -152,7 +153,43 @@ def student_assignment_detail(assignment_id: int, request: Request, db: Session 
         push_flash(request, choose_text(request, "Assignment not found.", "未找到作业。"), "danger")
         return RedirectResponse(url="/student/courses", status_code=303)
 
-    return render_template(request, db, "student_assignment_detail.html", {"assignment": assignment})
+    questions = sorted(assignment.questions, key=lambda item: (item.order_index, item.id))
+    question_ids = [question.id for question in questions]
+    latest_by_question: dict[int, Submission] = {}
+    snapshots_by_question: dict[int, FinalGradeSnapshot] = {}
+    if question_ids:
+        submissions = (
+            db.query(Submission)
+            .filter(Submission.user_id == user.id, Submission.question_id.in_(question_ids))
+            .order_by(Submission.question_id.asc(), Submission.submitted_at.desc(), Submission.id.desc())
+            .all()
+        )
+        for submission in submissions:
+            latest_by_question.setdefault(submission.question_id, submission)
+
+        snapshots = (
+            db.query(FinalGradeSnapshot)
+            .filter(FinalGradeSnapshot.student_id == user.id, FinalGradeSnapshot.question_id.in_(question_ids))
+            .all()
+        )
+        snapshots_by_question = {snapshot.question_id: snapshot for snapshot in snapshots}
+
+    submitted_count = len(latest_by_question)
+    total_questions = len(questions)
+
+    return render_template(
+        request,
+        db,
+        "student_assignment_detail.html",
+        {
+            "assignment": assignment,
+            "ordered_questions": questions,
+            "latest_submission_by_question": latest_by_question,
+            "grade_snapshot_by_question": snapshots_by_question,
+            "submitted_question_count": submitted_count,
+            "total_question_count": total_questions,
+        },
+    )
 
 
 @router.get("/questions/{question_id}")

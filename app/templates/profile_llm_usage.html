@@ -7,14 +7,21 @@
   <div class="card-body">
     <h1 class="h4 mb-2">{{ t("student.llm_usage.title") }}</h1>
     <p class="text-muted mb-4">{{ t("student.llm_usage.subtitle") }}</p>
+    {% set quota_pct = (llm_usage.consumed_today * 100 / llm_usage.daily_limit)|round(0, 'floor') if llm_usage.daily_limit else 0 %}
+    {% if quota_pct > 100 %}{% set quota_pct = 100 %}{% endif %}
+    <div class="mb-4">
+      <div class="d-flex justify-content-between small mb-2">
+        <span>{{ t("student.llm_usage.used") }}</span>
+        <strong>{{ llm_usage.consumed_today }} / {{ llm_usage.daily_limit }}</strong>
+      </div>
+      <div class="progress quota-progress" role="progressbar" aria-valuenow="{{ quota_pct }}" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar {% if quota_pct >= 90 %}bg-danger{% elif quota_pct >= 70 %}bg-warning{% else %}bg-success{% endif %}" style="width: {{ quota_pct }}%"></div>
+      </div>
+      <div class="small text-muted mt-2">{{ t("student.llm_usage.used_help") }}</div>
+    </div>
     <dl class="row mb-0">
       <dt class="col-sm-5">{{ t("student.llm_usage.date_label") }}</dt>
       <dd class="col-sm-7">{{ llm_usage.usage_date }}</dd>
-      <dt class="col-sm-5">{{ t("student.llm_usage.used") }}</dt>
-      <dd class="col-sm-7">
-        {{ llm_usage.consumed_today }}
-        <div class="form-text mt-1 mb-0">{{ t("student.llm_usage.used_help") }}</div>
-      </dd>
       <dt class="col-sm-5">{{ t("student.llm_usage.limit") }}</dt>
       <dd class="col-sm-7">{{ llm_usage.daily_limit }}</dd>
       <dt class="col-sm-5">{{ t("student.llm_usage.remaining") }}</dt>

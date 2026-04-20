@@ -20,26 +20,26 @@
 {% if course_staff_overview and not course.is_open_community %}
 <div class="card shadow-sm mb-4">
   <div class="card-body py-3">
-    <div class="row g-3 small align-items-center">
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Active students", "活跃学生") }}</div>
-        <div class="fs-5 fw-semibold">{{ course_staff_overview.active_student_count }}</div>
+    <div class="metric-grid">
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Active students", "活跃学生") }}</span>
+        <span class="metric-value">{{ course_staff_overview.active_student_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Pending teacher review", "待教师确认") }}</div>
-        <div class="fs-5 fw-semibold {% if course_staff_overview.pending_teacher_review_count %}text-warning{% endif %}">{{ course_staff_overview.pending_teacher_review_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Pending teacher review", "待教师确认") }}</span>
+        <span class="metric-value {% if course_staff_overview.pending_teacher_review_count %}text-warning{% endif %}">{{ course_staff_overview.pending_teacher_review_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("In evaluation queue", "评测排队/运行中") }}</div>
-        <div class="fs-5 fw-semibold {% if course_staff_overview.stuck_evaluation_count %}text-info{% endif %}">{{ course_staff_overview.stuck_evaluation_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Evaluating", "评测中") }}</span>
+        <span class="metric-value {% if course_staff_overview.stuck_evaluation_count %}text-info{% endif %}">{{ course_staff_overview.stuck_evaluation_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Failed evaluations", "评测失败") }}</div>
-        <div class="fs-5 fw-semibold {% if course_staff_overview.failed_evaluation_count %}text-danger{% endif %}">{{ course_staff_overview.failed_evaluation_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Failed evaluations", "评测失败") }}</span>
+        <span class="metric-value {% if course_staff_overview.failed_evaluation_count %}text-danger{% endif %}">{{ course_staff_overview.failed_evaluation_count }}</span>
       </div>
-      <div class="col-6 col-md">
-        <div class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ lx("Late submission rows", "迟交记录条数") }}</div>
-        <div class="fs-5 fw-semibold">{{ course_staff_overview.late_submission_row_count }}</div>
+      <div class="metric-card">
+        <span class="metric-label">{{ lx("Late submissions", "迟交记录") }}</span>
+        <span class="metric-value">{{ course_staff_overview.late_submission_row_count }}</span>
       </div>
     </div>
     <p class="text-muted small mb-0 mt-2">
@@ -90,13 +90,15 @@
         {% endif %}
 
         {% if can_manage_course %}
-        <div class="section-note mb-3">
-          {{ lx(
-            "Use code questions for executable Python, C, or C++ programming tasks. Use file / LLM-reviewed questions for .pdf, .txt, .tex, or .ipynb submissions.",
-            "需要可执行编程评测时请使用代码题，可支持 Python、C 或 C++；需要提交 .pdf、.txt、.tex 或 .ipynb 时，请使用文件 / LLM 评测题。"
-          ) }}
-        </div>
-        <h3 class="h6 mb-3">{{ lx("Create assignment", "创建作业") }}</h3>
+        <details class="ux-disclosure" {% if not assignments %}open{% endif %}>
+          <summary>{{ lx("Create assignment", "创建作业") }}</summary>
+          <div class="ux-disclosure-body">
+            <div class="section-note mb-3">
+              {{ lx(
+                "Create the assignment shell first, then open it to add questions. Defaults can be overridden later on each question.",
+                "先创建作业框架，再进入作业添加题目。作业默认设置之后仍可在单题中覆盖。"
+              ) }}
+            </div>
         <form method="post" action="/teacher/courses/{{ course.id }}/assignments" class="row g-3">
           <div class="col-12">
             <label class="form-label">{{ lx("Title", "标题") }}</label>
@@ -174,6 +176,8 @@
             <button class="btn btn-primary" type="submit">{{ lx("Create assignment", "创建作业") }}</button>
           </div>
         </form>
+          </div>
+        </details>
         {% else %}
         <div class="alert alert-secondary mb-0">
           {{ lx(

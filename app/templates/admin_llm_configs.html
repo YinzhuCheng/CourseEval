@@ -32,7 +32,7 @@
           <div class="col-12">
             <label class="form-label">{{ t("admin.llm.provider") }}</label>
             <select class="form-select" name="provider_type">
-              <option value="openai_compatible">OpenAI compatible</option>
+              <option value="openai_compatible">{{ lx("OpenAI-compatible", "OpenAI 兼容") }}</option>
               <option value="gemini">Gemini</option>
               <option value="claude">Claude</option>
             </select>
@@ -121,9 +121,19 @@
             </thead>
             <tbody>
               {% for row in token_usage_rows %}
+              {% set usage_pct = (row.consumed_today * 100 / row.daily_limit)|round(0, 'floor') if row.daily_limit else 0 %}
+              {% if usage_pct > 100 %}{% set usage_pct = 100 %}{% endif %}
               <tr>
                 <td>{{ row.user.username }}</td>
-                <td>{{ row.consumed_today }}</td>
+                <td style="min-width: 12rem;">
+                  <div class="d-flex justify-content-between small">
+                    <span>{{ row.consumed_today }}</span>
+                    <span class="text-muted">{{ usage_pct }}%</span>
+                  </div>
+                  <div class="progress quota-progress mt-1" role="progressbar" aria-valuenow="{{ usage_pct }}" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar {% if usage_pct >= 90 %}bg-danger{% elif usage_pct >= 70 %}bg-warning{% else %}bg-success{% endif %}" style="width: {{ usage_pct }}%"></div>
+                  </div>
+                </td>
                 <td>{{ row.daily_limit }}</td>
                 <td>
                   <form method="post" action="/admin/llm-configs/user-token-limit" class="d-flex gap-1 flex-wrap">
@@ -167,11 +177,11 @@
             </thead>
             <tbody>
               {% for config in configs %}
-              <tr>
+              <tr class="table-light">
                 <td>
                   <strong>{{ config.name }}</strong>
                   <div class="small text-muted">{{ config.description or (config.model_name ~ " @ " ~ (config.base_url or "-")) }}</div>
-                  <div class="small text-muted">{{ lx("Priority", "序号") }} #1</div>
+                  <div class="small"><span class="badge text-bg-primary">{{ lx("Primary", "主模型") }}</span></div>
                 </td>
                 <td>{{ elabel("llm_provider", config.provider_type) }}</td>
                 <td>{{ config.model_name }}</td>
@@ -187,7 +197,10 @@
               </tr>
               <tr>
                 <td colspan="8" class="small text-muted">
-                  {{ config.last_test_message or t("admin.llm.no_test") }}
+                  <details>
+                    <summary class="text-primary" style="cursor:pointer;">{{ lx("Test message", "测试信息") }}</summary>
+                    <div class="mt-2">{{ config.last_test_message or t("admin.llm.no_test") }}</div>
+                  </details>
                 </td>
               </tr>
               {% for member in config.members %}
@@ -209,7 +222,10 @@
               </tr>
               <tr>
                 <td colspan="8" class="small text-muted">
-                  {{ member.last_test_message or t("admin.llm.no_test") }}
+                  <details>
+                    <summary class="text-primary" style="cursor:pointer;">{{ lx("Test message", "测试信息") }}</summary>
+                    <div class="mt-2">{{ member.last_test_message or t("admin.llm.no_test") }}</div>
+                  </details>
                 </td>
               </tr>
               {% endfor %}
@@ -225,7 +241,7 @@
                       <div class="col-md-3">
                         <label class="form-label small">{{ t("admin.llm.provider") }}</label>
                         <select class="form-select form-select-sm" name="provider_type">
-                          <option value="openai_compatible">OpenAI compatible</option>
+                          <option value="openai_compatible">{{ lx("OpenAI-compatible", "OpenAI 兼容") }}</option>
                           <option value="gemini">Gemini</option>
                           <option value="claude">Claude</option>
                         </select>

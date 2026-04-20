@@ -74,7 +74,7 @@
                 <button class="btn btn-link btn-sm p-0" type="submit">{{ lx("Unban", "解除") }}</button>
               </form>
               {% else %}
-              <form method="post" action="/admin/users/{{ user.id }}/avatar/ban" class="d-inline" onsubmit="return confirm('Ban avatar for this user?');">
+              <form method="post" action="/admin/users/{{ user.id }}/avatar/ban" class="d-inline" onsubmit="return confirm('{{ lx('Ban this user avatar?', '确定封禁该用户头像吗？') }}');">
                 <button class="btn btn-sm btn-outline-warning" type="submit">{{ lx("Ban avatar", "封禁头像") }}</button>
               </form>
               {% endif %}
