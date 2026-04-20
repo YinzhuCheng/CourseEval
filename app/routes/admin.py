@@ -366,7 +366,7 @@ def admin_delete_user_stored_object(user_id: int, object_id: int, request: Reque
 @router.get("/runtime-images")
 def admin_runtime_images(request: Request, db: Session = Depends(get_db)):
     try:
-        admin_user = require_admin(request, db)
+        require_admin(request, db)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
     except PermissionError:

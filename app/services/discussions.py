@@ -17,7 +17,6 @@ from app.models import (
     CourseMember,
     DiscussionModerationLog,
     DiscussionPost,
-    DiscussionPostAttachment,
     DiscussionTopic,
     PlatformLlmTokenPolicy,
     Question,

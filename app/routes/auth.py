@@ -12,6 +12,7 @@ from app.auth import (
     can_send_email_verification,
     can_send_password_reset,
     clear_password_reset,
+    find_user_by_email_verification_token,
     find_user_by_password_reset_token,
     generate_internal_email_address,
     generate_email_verification_token,
@@ -28,8 +29,6 @@ from app.auth import (
     push_flash,
     refresh_email_verification,
     refresh_password_reset,
-    token_digest,
-    token_matches,
     valid_registration_invite_code,
     verify_password,
 )
@@ -375,11 +374,7 @@ async def verify_email(
     token: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
 ):
-    token_hash = token_digest(token)
-    user = db.scalar(select(User).where(User.email_verification_token == token_hash))
-    if user is None:
-        users = list(db.scalars(select(User).where(User.email_verification_token.is_not(None))).all())
-        user = next((candidate for candidate in users if token_matches(candidate.email_verification_token, token)), None)
+    user = find_user_by_email_verification_token(db, token)
     if user is None:
         push_flash(request, t(request, "flash.email_verification_invalid"), "danger")
         return RedirectResponse(url="/login", status_code=303)

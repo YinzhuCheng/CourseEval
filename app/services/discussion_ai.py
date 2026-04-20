@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.constants import DiscussionTopicKind
 from app.models import (

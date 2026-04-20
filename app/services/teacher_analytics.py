@@ -334,7 +334,6 @@ def enrich_course_grade_matrix(db: Session, course_id: int, matrix: dict) -> dic
         return matrix
 
     student_ids = [int(r["student"]["id"]) for r in rows]
-    assignment_ids = [int(a["id"]) for a in assignments]
     q_counts = question_counts_by_assignment(db, course_id)
     dist = distinct_questions_submitted_by_pair(db, course_id, student_ids)
 

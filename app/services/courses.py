@@ -26,7 +26,6 @@ from app.models import (
     LLMConfig,
     CodeQuestionConfig,
     Question,
-    QuestionVersion,
     RuntimeImage,
     ShortAnswerQuestionConfig,
     Submission,

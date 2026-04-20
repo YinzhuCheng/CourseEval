@@ -62,7 +62,6 @@ from app.services.permissions import (
     COURSE_STAFF_ROLES,
     RedirectRequired,
     get_course_role,
-    require_login,
     require_teacher_account,
 )
 from app.services.discussion_ai import create_user_post_and_maybe_ai_reply

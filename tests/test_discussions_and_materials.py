@@ -14,7 +14,6 @@ from app.constants import (
     AssignmentStatus,
     CourseRole,
     CourseStatus,
-    FeedbackSource,
     MembershipStatus,
     PlatformRole,
     QuestionType,
