@@ -160,9 +160,13 @@ Changing copy: often **both** `i18n.py` and `enum_labels.py` (for enum-backed la
 | Role | Files |
 |------|--------|
 | Discussion threads | `app/services/discussions.py`, templates `partials/discussion_board.html` |
+| Discussion groups | `app/services/discussion_groups.py`, `app/routes/discussion_groups.py`, templates `discussion_group_*.html` |
+| Reports and evidence | `app/services/reports.py`, `app/routes/reports.py`, templates `report_form.html`, `admin_reports.html`, `my_reports.html` |
 | Optional AI reply | `app/services/discussion_ai.py` |
 | Learning materials CRUD/view | `app/services/course_materials.py`, `app/routes/course_content.py` |
 | Serving files from data dir | `app/routes/uploads.py` |
+
+Privacy note: members-only discussion groups are not visible to ordinary administrators. If a group member files a report with system evidence or attachments, super administrators may review the full private group for safety handling; that review is audited in `DiscussionGroupAuditLog`.
 
 ---
 

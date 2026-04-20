@@ -108,6 +108,26 @@ def _patch_sqlite_schema(conn) -> None:
                     "ON discussion_topics (free_discussion_topic_id)"
                 )
             )
+        if "discussion_group_id" not in cols:
+            conn.execute(text("ALTER TABLE discussion_topics ADD COLUMN discussion_group_id INTEGER"))
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_discussion_topics_discussion_group_id "
+                    "ON discussion_topics (discussion_group_id)"
+                )
+            )
+    if "discussion_posts" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("discussion_posts")}
+        if "visibility_snapshot" not in cols:
+            conn.execute(
+                text("ALTER TABLE discussion_posts ADD COLUMN visibility_snapshot VARCHAR(16) NOT NULL DEFAULT 'public'")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_discussion_posts_visibility_snapshot "
+                    "ON discussion_posts (visibility_snapshot)"
+                )
+            )
     if "course_materials" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("course_materials")}
         if "free_discussion_topic_id" not in cols:

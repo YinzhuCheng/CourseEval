@@ -43,7 +43,7 @@
             </li>
             {% endif %}
             <li class="nav-item">
-              <a class="nav-link {% if current_section == 'discussion' %}active{% endif %}" {% if current_section == 'discussion' %}aria-current="page"{% endif %} href="/free-discussion">{{ t("nav.free_discussion") }}</a>
+              <a class="nav-link {% if current_section == 'discussion' %}active{% endif %}" {% if current_section == 'discussion' %}aria-current="page"{% endif %} href="/discussion-groups">{{ t("nav.discussion_groups") }}</a>
             </li>
             {% endif %}
           </ul>
@@ -77,6 +77,7 @@
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><a class="dropdown-item" href="/me/profile">{{ t("nav.profile") }}</a></li>
                 <li><a class="dropdown-item" href="/me/profile/llm-usage">{{ t("student.llm_usage.title") }}</a></li>
+                <li><a class="dropdown-item" href="/me/reports">{{ lx("My reports", "我的举报") }}</a></li>
               </ul>
             </div>
             <form method="post" action="/logout" class="m-0">

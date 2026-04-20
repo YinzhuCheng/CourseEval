@@ -10,6 +10,9 @@ from app.constants import (
     CodeSubmissionMode,
     CourseRole,
     CourseStatus,
+    DiscussionGroupMemberRole,
+    DiscussionGroupStatus,
+    DiscussionGroupVisibility,
     DiscussionTopicKind,
     LLMResponseLanguage,
     EvaluationTaskStatus,
@@ -21,6 +24,8 @@ from app.constants import (
     MembershipStatus,
     PlatformRole,
     QuestionType,
+    ReportStatus,
+    ReportTargetType,
     RuntimeScope,
     ScoringRule,
     SubmissionLimitMode,
@@ -127,6 +132,10 @@ class User(Base):
     created_free_discussion_topics: Mapped[list["FreeDiscussionTopic"]] = relationship(
         back_populates="creator",
         foreign_keys="FreeDiscussionTopic.created_by",
+    )
+    created_discussion_groups: Mapped[list["DiscussionGroup"]] = relationship(
+        back_populates="creator",
+        foreign_keys="DiscussionGroup.created_by",
     )
     created_runtime_images: Mapped[list["RuntimeImage"]] = relationship(
         back_populates="creator",
@@ -952,6 +961,75 @@ class FreeDiscussionTopic(Base):
     )
 
 
+class DiscussionGroup(Base):
+    """User-created group discussion card with member-scoped private history."""
+
+    __tablename__ = "discussion_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_image_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    visibility: Mapped[DiscussionGroupVisibility] = mapped_column(
+        Enum(DiscussionGroupVisibility, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=DiscussionGroupVisibility.PRIVATE,
+        index=True,
+    )
+    status: Mapped[DiscussionGroupStatus] = mapped_column(
+        Enum(DiscussionGroupStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=DiscussionGroupStatus.ACTIVE,
+        index=True,
+    )
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    frozen_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    frozen_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    creator: Mapped["User"] = relationship(back_populates="created_discussion_groups", foreign_keys=[created_by])
+    frozen_by: Mapped["User | None"] = relationship(foreign_keys=[frozen_by_id])
+    members: Mapped[list["DiscussionGroupMember"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+        order_by="DiscussionGroupMember.joined_at.asc()",
+    )
+    discussion_topic: Mapped["DiscussionTopic | None"] = relationship(
+        back_populates="discussion_group",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class DiscussionGroupMember(Base):
+    __tablename__ = "discussion_group_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("discussion_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[DiscussionGroupMemberRole] = mapped_column(
+        Enum(DiscussionGroupMemberRole, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=DiscussionGroupMemberRole.MEMBER,
+        index=True,
+    )
+    status: Mapped[MembershipStatus] = mapped_column(
+        Enum(MembershipStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=MembershipStatus.ACTIVE,
+        index=True,
+    )
+    joined_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    muted_until: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    group: Mapped[DiscussionGroup] = relationship(back_populates="members")
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
+Index("ix_discussion_group_members_group_user", DiscussionGroupMember.group_id, DiscussionGroupMember.user_id, unique=True)
+
+
 class DiscussionTopic(Base):
     __tablename__ = "discussion_topics"
 
@@ -973,6 +1051,11 @@ class DiscussionTopic(Base):
         nullable=True,
         unique=True,
     )
+    discussion_group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("discussion_groups.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+    )
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     course: Mapped[Course] = relationship()
@@ -981,6 +1064,10 @@ class DiscussionTopic(Base):
     free_discussion_topic: Mapped["FreeDiscussionTopic | None"] = relationship(
         back_populates="discussion_topic",
         foreign_keys=[free_discussion_topic_id],
+    )
+    discussion_group: Mapped["DiscussionGroup | None"] = relationship(
+        back_populates="discussion_topic",
+        foreign_keys=[discussion_group_id],
     )
     posts: Mapped[list["DiscussionPost"]] = relationship(
         back_populates="topic",
@@ -1002,6 +1089,7 @@ class DiscussionPost(Base):
     body_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    visibility_snapshot: Mapped[str] = mapped_column(String(16), default=DiscussionGroupVisibility.PUBLIC.value, nullable=False, index=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
     deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     deleted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -1063,6 +1151,75 @@ class DiscussionModerationLog(Base):
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     post_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_type: Mapped[ReportTargetType] = mapped_column(
+        Enum(ReportTargetType, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        index=True,
+    )
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[ReportStatus] = mapped_column(
+        Enum(ReportStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=ReportStatus.PENDING,
+        index=True,
+    )
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    private_discussion_group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("discussion_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True)
+    handler_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    reporter: Mapped["User"] = relationship(foreign_keys=[reporter_id])
+    handler: Mapped["User | None"] = relationship(foreign_keys=[handler_id])
+    private_discussion_group: Mapped["DiscussionGroup | None"] = relationship(foreign_keys=[private_discussion_group_id])
+    attachments: Mapped[list["ReportAttachment"]] = relationship(
+        back_populates="report",
+        cascade="all, delete-orphan",
+        order_by="ReportAttachment.id.asc()",
+    )
+
+
+Index("ix_reports_target", Report.target_type, Report.target_id)
+
+
+class ReportAttachment(Base):
+    __tablename__ = "report_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    relative_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    report: Mapped[Report] = relationship(back_populates="attachments")
+
+
+class DiscussionGroupAuditLog(Base):
+    __tablename__ = "discussion_group_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("discussion_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_id: Mapped[int | None] = mapped_column(ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

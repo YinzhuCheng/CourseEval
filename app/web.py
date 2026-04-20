@@ -62,7 +62,7 @@ def render_template(
         current_section = "teacher"
     elif path.startswith("/admin"):
         current_section = "admin"
-    elif path.startswith("/free-discussion"):
+    elif path.startswith("/free-discussion") or path.startswith("/discussion-groups"):
         current_section = "discussion"
     elif path.startswith("/student") or path.startswith("/me"):
         current_section = "learning"

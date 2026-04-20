@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lx("My reports", "我的举报") }} - {{ t("site.title") }}{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-4">{{ lx("My reports", "我的举报") }}</h1>
+{% if reports %}
+<div class="list-group">
+  {% for r in reports %}
+  <div class="list-group-item">
+    <div class="d-flex justify-content-between gap-2">
+      <strong>#{{ r.id }} · {{ r.target_type.value }}</strong>
+      <span class="badge bg-secondary">{{ r.status.value }}</span>
+    </div>
+    <div class="small text-muted">{{ format_datetime(r.created_at) }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">{{ lx("No reports yet.", "还没有举报记录。") }}</p>
+{% endif %}
+{% endblock %}

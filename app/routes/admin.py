@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 
-from app.auth import push_flash
+from app.auth import is_super_admin, push_flash
 from app.constants import (
     LLMProvider,
     LLMScope,
@@ -57,6 +57,7 @@ from app.services.user_storage import (
 )
 from app.services.discussion_ai import parse_optional_tested_llm_config_id
 from app.services.discussions import hard_delete_post, mute_user_in_course, unmute_user_in_course
+from app.services.discussion_groups import can_super_admin_review_private_group
 from app.services.email import send_smtp_test_email
 from app.services.permissions import RedirectRequired, require_admin, require_super_admin
 from app.web import render_template
@@ -864,6 +865,13 @@ def admin_delete_discussion_post(
     topic = db.get(DiscussionTopic, post.topic_id)
     if topic is None:
         return _redirect(redirect_to or "/admin/system")
+    if topic.kind.value == "discussion_group" and topic.discussion_group is not None:
+        group = topic.discussion_group
+        if group.visibility.value == "private" and not (
+            is_super_admin(admin_user) and can_super_admin_review_private_group(db, group, admin_user)
+        ):
+            push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
+            return _redirect(redirect_to or "/admin/system")
     hard_delete_post(db, post, actor=admin_user, course_id=topic.course_id)
     db.commit()
     push_flash(request, choose_text(request, "Post deleted.", "帖子已删除。"), "success")

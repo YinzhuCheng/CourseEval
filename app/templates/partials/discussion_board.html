@@ -93,6 +93,9 @@
         <div>
           <div class="fw-semibold d-flex flex-wrap align-items-center gap-1">
             <span>{{ node.display_name }}</span>
+            {% if not node.post.is_ai %}
+            <a class="badge text-bg-light text-decoration-none" href="/reports/new?target_type=user&target_id={{ node.post.author_id }}&redirect_to={{ (discussion_redirect_to if discussion_redirect_to is defined else request.url.path)|urlencode }}">{{ lx("Report user", "举报用户") }}</a>
+            {% endif %}
             {% for b in node.role_badges %}
               {% if b == 'super_admin' %}<span class="badge bg-danger" style="font-size:0.65rem;">super</span>{% endif %}
               {% if b == 'admin' %}<span class="badge bg-warning text-dark" style="font-size:0.65rem;">admin</span>{% endif %}
@@ -108,6 +111,7 @@
         </div>
       </div>
       <div class="d-flex align-items-center gap-2">
+        <a class="btn btn-sm btn-outline-warning" href="/reports/new?target_type=discussion_post&target_id={{ node.post.id }}&redirect_to={{ (discussion_redirect_to if discussion_redirect_to is defined else request.url.path)|urlencode }}">{{ lx("Report", "举报") }}</a>
         {% if node.can_delete and discussion_delete_action is defined %}
         <form method="post" action="{{ discussion_delete_action }}" class="d-inline" onsubmit="return confirm('{{ lx('Delete this post?', '删除这条帖子？') }}');">
           <input type="hidden" name="post_id" value="{{ node.post.id }}" />

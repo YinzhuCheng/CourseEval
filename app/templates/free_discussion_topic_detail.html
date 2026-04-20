@@ -20,6 +20,7 @@
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-outline-secondary" href="/free-discussion">{{ lx("All topics", "全部话题") }}</a>
+    <a class="btn btn-outline-warning" href="/reports/new?target_type=free_discussion_card&target_id={{ free_topic.id }}&redirect_to=/free-discussion/topics/{{ free_topic.id }}">{{ lx("Report", "举报") }}</a>
     {% if can_manage_free_topic %}
     <a class="btn btn-outline-primary" href="/free-discussion/topics/{{ free_topic.id }}/edit">{{ lx("Edit topic", "编辑话题") }}</a>
     <a class="btn btn-primary" href="/free-discussion/topics/{{ free_topic.id }}/chapters/new">{{ lx("New chapter", "新建章节") }}</a>
