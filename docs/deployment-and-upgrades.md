@@ -136,7 +136,7 @@ Code rollback without data rollback can leave old code reading newer values afte
 - Put HTTPS in front of the app.
 - The current session middleware sets `https_only=False`; if deployed behind HTTPS, review cookie settings before hardening.
 - SQLite is intended for small single-node use.
-- There is no CSRF protection layer yet.
+- **CSRF:** Unsafe HTTP methods (POST, PUT, PATCH, DELETE) require a matching `Origin` header, or else a `Referer` whose host matches the request (`app/csrf.py`). Same-origin form posts from the web UI satisfy this; API-style clients must send `Origin`. Requests with neither header are still allowed for compatibility (e.g. some tests and CLI).
 - Docker isolation is basic and depends on the configured runner image and Docker flags.
 - Uploaded files and artifacts are not automatically cleaned up.
 
