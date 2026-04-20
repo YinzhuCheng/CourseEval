@@ -122,6 +122,6 @@ Task-oriented: **if you edit X, you likely must read Y** because of shared invar
 
 When a change spans **HTTP + service + template + worker**, run:
 
-`python3 -m pytest tests/ -q`
+`bash scripts/verify.sh`
 
-and manually hit the smallest route that exercises the path if tests do not cover it.
+and manually hit the smallest route that exercises the path if tests do not cover it (see [verification.md](verification.md) for environment-dependent gaps such as Redis, Docker, and live LLM).

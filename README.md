@@ -45,6 +45,7 @@ This repository includes **layered documentation for AI coding agents** (and for
 - **[AGENTS.md](AGENTS.md)** is the top-level map for agents: stack, subsystems, workflows, traps, validation commands.
 - **[docs/file-map.md](docs/file-map.md)** groups important files by responsibility (where to look first).
 - **[docs/change-guide.md](docs/change-guide.md)** explains common change couplings and failure modes.
+- **[docs/verification.md](docs/verification.md)** describes automated verification scope, gaps, and manual validation notes.
 - **[docs/known-issues.md](docs/known-issues.md)** records confirmed technical debt and review notes.
 - **[docs/deployment-and-upgrades.md](docs/deployment-and-upgrades.md)** summarizes deployment, persistence, queue, and migration/upgrade expectations.
 - **[docs/architecture/](docs/architecture/)** holds deeper, retrieval-friendly notes on submission flow, scoring, permissions, and the code runner.
@@ -269,7 +270,7 @@ python scripts/init_db.py
 bash scripts/verify.sh
 ```
 
-This is the standard verification entrypoint for local development, Codex, and other agents. It runs Python compilation checks and the pytest suite.
+This is the standard verification entrypoint for local development, Codex, and other agents. It runs Python compilation checks on `app`, `runner`, and `tests`, **ruff** checks for unused imports/locals (`F401`/`F841`), and the full **pytest** suite. See **[docs/verification.md](docs/verification.md)** for coverage limits (e.g. Redis, Docker, live LLM) and manual validation notes.
 
 ### 6. Start Redis
 
