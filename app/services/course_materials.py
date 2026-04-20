@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
+import re
+from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -38,6 +39,23 @@ def list_materials_for_course(db: Session, course_id: int) -> list[CourseMateria
     )
 
 
+def list_materials_for_free_topic(db: Session, course_id: int, free_topic_id: int) -> list[CourseMaterial]:
+    rows = list(
+        db.scalars(
+            select(CourseMaterial)
+            .where(CourseMaterial.course_id == course_id, CourseMaterial.free_discussion_topic_id == free_topic_id)
+            .order_by(CourseMaterial.sort_order.asc(), CourseMaterial.id.asc())
+        ).all()
+    )
+    if rows:
+        return rows
+    return [
+        item
+        for item in list_materials_for_course(db, course_id)
+        if item.free_discussion_topic_id is None and (item.sort_order or 0) // 100000 == free_topic_id
+    ]
+
+
 def get_material_for_course(db: Session, material_id: int, course_id: int) -> CourseMaterial | None:
     return db.scalar(
         select(CourseMaterial)
@@ -54,6 +72,7 @@ def create_material(
     body_markdown: str | None,
     external_url: str | None,
     creator: User,
+    free_discussion_topic_id: int | None = None,
 ) -> CourseMaterial:
     title = title.strip()
     if not title:
@@ -64,6 +83,7 @@ def create_material(
         body_markdown=(body_markdown or "").strip() or None,
         external_url=normalize_external_url(external_url),
         sort_order=0,
+        free_discussion_topic_id=free_discussion_topic_id,
         created_by=creator.id,
         updated_at=utcnow(),
     )
@@ -97,3 +117,16 @@ def store_material_image(course_id: int, material_id: int, file_bytes: bytes, or
     stored = upload_dir / f"{uuid4().hex}{ext}"
     stored.write_bytes(cleaned)
     return relative_to_data(stored)
+
+
+def remove_material_image_references(material: CourseMaterial, relative_path: str) -> None:
+    if not material.body_markdown:
+        return
+    public_url = f"/data-files/{quote(relative_path, safe='/')}"
+    escaped_url = re.escape(public_url)
+    body = material.body_markdown
+    body = re.sub(rf"!\[[^\]]*\]\(\s*{escaped_url}\s*\)", "", body)
+    body = re.sub(rf"\[[^\]]*\]\(\s*{escaped_url}\s*\)", "", body)
+    body = body.replace(public_url, "")
+    material.body_markdown = re.sub(r"\n{3,}", "\n\n", body).strip() or None
+    material.updated_at = utcnow()

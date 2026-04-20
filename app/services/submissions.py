@@ -13,7 +13,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import fitz
 from redis import Redis
 from rq import Queue
+from rq.exceptions import NoSuchJobError
+from rq.job import Job
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
@@ -791,6 +794,19 @@ def _check_submission_limit(db: Session, question: Question, user_id: int) -> tu
     return True, None
 
 
+def _begin_submission_limit_write_lock(db: Session) -> None:
+    bind = db.get_bind()
+    if bind.dialect.name != "sqlite":
+        return
+    if db.in_transaction():
+        db.commit()
+    try:
+        db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+    except OperationalError as exc:
+        if "cannot start a transaction within a transaction" not in str(exc).lower():
+            raise
+
+
 def create_short_answer_submission(
     db: Session,
     *,
@@ -802,6 +818,7 @@ def create_short_answer_submission(
     if not allowed:
         raise ValueError(message or "Submission window is closed.")
 
+    _begin_submission_limit_write_lock(db)
     allowed, message = _check_submission_limit(db, question, user_id)
     if not allowed:
         raise ValueError(message or "Submission limit reached.")
@@ -909,6 +926,7 @@ def create_code_submission(
     if not allowed:
         raise ValueError(message or "Submission window is closed.")
 
+    _begin_submission_limit_write_lock(db)
     allowed, message = _check_submission_limit(db, question, user_id)
     if not allowed:
         raise ValueError(message or "Submission limit reached.")
@@ -988,6 +1006,7 @@ def create_file_submission(
     if not allowed:
         raise ValueError(message or "Submission window is closed.")
 
+    _begin_submission_limit_write_lock(db)
     allowed, message = _check_submission_limit(db, question, user_id)
     if not allowed:
         raise ValueError(message or "Submission limit reached.")
@@ -1242,6 +1261,42 @@ def cleanup_stale_running_items() -> int:
 
         db.commit()
         return len(running_submissions) + len(unqueued_tasks)
+
+
+def cleanup_missing_queued_jobs() -> int:
+    with SessionLocal() as db:
+        tasks = list(
+            db.scalars(
+                select(EvaluationTask)
+                .options(joinedload(EvaluationTask.submission))
+                .where(
+                    EvaluationTask.status == EvaluationTaskStatus.QUEUED,
+                    EvaluationTask.backend_job_id.is_not(None),
+                )
+            ).unique()
+        )
+        if not tasks:
+            return 0
+        connection = redis_connection()
+        finished_at = utcnow()
+        changed = 0
+        for task in tasks:
+            try:
+                Job.fetch(str(task.backend_job_id), connection=connection)
+            except NoSuchJobError:
+                task.status = EvaluationTaskStatus.FAILED
+                task.finished_at = finished_at
+                task.error_message = "Queued backend job is missing from Redis."
+                if task.submission and task.submission.status in {SubmissionStatus.SUBMITTED, SubmissionStatus.QUEUED}:
+                    task.submission.status = SubmissionStatus.FAILED_SYSTEM
+                    task.submission.completed_at = finished_at
+                    task.submission.counts_toward_limit = False
+                    task.submission.is_effective_submission = False
+                    task.submission.failure_reason_code = "system_error"
+                changed += 1
+        if changed:
+            db.commit()
+        return changed
 
 
 def process_code_evaluation(submission_id: int, task_id: int) -> None:

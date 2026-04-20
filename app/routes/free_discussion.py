@@ -20,7 +20,7 @@ from app.models import CourseDiscussionMute, CourseMember, DiscussionPost, Discu
 from app.services.course_materials import (
     create_material,
     get_material_for_course,
-    list_materials_for_course,
+    list_materials_for_free_topic,
     store_material_image,
     update_material,
 )
@@ -75,7 +75,11 @@ def _require_oc_member(db: Session, user: User):
 
 
 def _free_chapter_belongs_to_topic(material, topic_id: int) -> bool:
-    return material is not None and (material.sort_order or 0) // 100000 == topic_id
+    if material is None:
+        return False
+    if getattr(material, "free_discussion_topic_id", None) is not None:
+        return material.free_discussion_topic_id == topic_id
+    return (material.sort_order or 0) // 100000 == topic_id
 
 
 @router.get("/free-discussion")
@@ -297,7 +301,7 @@ def free_topic_detail(topic_id: int, request: Request, db: Session = Depends(get
     root_body_html = render_material_markdown(root_post.body_text) if root_post else None
     if disc_ctx.get("discussion_thread") and root_post:
         disc_ctx["discussion_thread"] = [n for n in disc_ctx["discussion_thread"] if n["post"].id != root_post.id]
-    chapters = [m for m in list_materials_for_course(db, oc.id) if (m.sort_order or 0) // 100000 == ft.id]
+    chapters = list_materials_for_free_topic(db, oc.id, ft.id)
     mute_rows = list(db.scalars(select(CourseDiscussionMute).where(CourseDiscussionMute.course_id == oc.id)).all())
     discussion_mute_by_user = {m.user_id: m for m in mute_rows}
     cover_url = f"/data-files/{quote(str(ft.cover_image_path), safe='/')}" if ft.cover_image_path else None
@@ -520,7 +524,15 @@ def free_chapter_create(
         push_flash(request, choose_text(request, "Access denied.", "无权限。"), "danger")
         return _redirect(f"/free-discussion/topics/{topic_id}")
     try:
-        m = create_material(db, course=oc, title=title, body_markdown=body_markdown, external_url=external_url, creator=user)
+        m = create_material(
+            db,
+            course=oc,
+            title=title,
+            body_markdown=body_markdown,
+            external_url=external_url,
+            creator=user,
+            free_discussion_topic_id=ft.id,
+        )
         m.sort_order = ft.id * 100000 + m.id
         db.commit()
     except ValueError as exc:

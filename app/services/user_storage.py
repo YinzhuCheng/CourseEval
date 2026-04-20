@@ -610,6 +610,12 @@ def purge_user_asset(
     if actor is None:
         return "forbidden"
     if obj.category == "course_material_image":
+        if obj.ref_id:
+            mat = db.get(CourseMaterial, obj.ref_id)
+            if mat is not None:
+                from app.services.course_materials import remove_material_image_references
+
+                remove_material_image_references(mat, obj.relative_path)
         soft_delete_stored_row(db, obj, actor=actor, unlink=True)
         db.flush()
         return None

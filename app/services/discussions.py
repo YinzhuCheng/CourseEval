@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -528,18 +528,23 @@ def discussion_pagination_state(
     offset = 0
     current_page = 1
     if anchor_post_id is not None:
-        rank = db.scalar(
-            select(func.count())
-            .select_from(DiscussionPost)
-            .where(
-                DiscussionPost.topic_id == topic_id,
-                DiscussionPost.deleted_at.is_(None),
-                DiscussionPost.id < anchor_post_id,
+        anchor = db.get(DiscussionPost, anchor_post_id)
+        if anchor is not None and anchor.topic_id == topic_id and anchor.deleted_at is None:
+            rank = db.scalar(
+                select(func.count())
+                .select_from(DiscussionPost)
+                .where(
+                    DiscussionPost.topic_id == topic_id,
+                    DiscussionPost.deleted_at.is_(None),
+                    or_(
+                        DiscussionPost.created_at < anchor.created_at,
+                        (DiscussionPost.created_at == anchor.created_at) & (DiscussionPost.id < anchor.id),
+                    ),
+                )
             )
-        )
-        r = int(rank or 0)
-        current_page = min(total_pages, max(1, r // ps + 1))
-        offset = (current_page - 1) * ps
+            r = int(rank or 0)
+            current_page = min(total_pages, max(1, r // ps + 1))
+            offset = (current_page - 1) * ps
     elif page is not None:
         current_page = min(total_pages, max(1, int(page)))
         offset = (current_page - 1) * ps

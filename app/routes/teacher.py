@@ -54,6 +54,8 @@ from app.services.courses import (
     get_course_for_teacher,
     get_question_for_staff,
     get_question_for_teacher,
+    list_llm_configs,
+    list_runtime_images,
     summarize_course_grade_matrix,
 )
 from app.services.permissions import (
@@ -169,6 +171,33 @@ def _parse_optional_length(raw: str, field_label: str) -> int | None:
     if not (raw or "").strip():
         return None
     return _parse_int_input(raw, field_label, minimum=0, maximum=200000)
+
+
+def _parse_optional_resource_id(raw: str) -> int | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise ValueError("invalid_resource_id") from exc
+    if value <= 0:
+        raise ValueError("invalid_resource_id")
+    return value
+
+
+def _allowed_runtime_image_id(db: Session, raw: str, course_id: int) -> int | None:
+    image_id = _parse_optional_resource_id(raw)
+    if image_id is None:
+        return None
+    return image_id if any(item.id == image_id for item in list_runtime_images(db, course_id)) else None
+
+
+def _allowed_llm_config_id(db: Session, raw: str, course_id: int) -> int | None:
+    config_id = _parse_optional_resource_id(raw)
+    if config_id is None:
+        return None
+    return config_id if any(item.id == config_id and group_has_callable_target(item) for item in list_llm_configs(db, course_id)) else None
 
 
 @router.get("/courses")
@@ -392,6 +421,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
         .all()
     )
     available_llm_configs = [group for group in available_llm_configs if group_has_callable_target(group)]
+    available_runtime_images = list_runtime_images(db, course.id)
     course_role = get_course_role(db, course.id, user.id)
     grade_matrix = None
     course_staff_overview = None
@@ -417,6 +447,7 @@ def teacher_course_detail(course_id: int, request: Request, db: Session = Depend
             "course_role": course_role,
             "can_manage_course": course_role == CourseRole.TEACHER,
             "available_llm_configs": available_llm_configs,
+            "available_runtime_images": available_runtime_images,
             "grade_matrix": grade_matrix,
             "course_staff_overview": course_staff_overview,
             "can_moderate_discussion": staff_can_mod,
@@ -618,6 +649,8 @@ def create_assignment(
     default_scoring_rule: str = Form(ScoringRule.LATEST.value),
     submission_limit_mode: str = Form(SubmissionLimitMode.UNLIMITED.value),
     submission_limit_value: str = Form(""),
+    runtime_image_id: str = Form(""),
+    llm_config_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -664,6 +697,18 @@ def create_assignment(
         limit_value = None
     elif limit_mode in {SubmissionLimitMode.DAILY, SubmissionLimitMode.TOTAL} and limit_value is None:
         limit_mode = SubmissionLimitMode.UNLIMITED
+    try:
+        parsed_runtime_image_id = _allowed_runtime_image_id(db, runtime_image_id, course.id)
+        parsed_llm_config_id = _allowed_llm_config_id(db, llm_config_id, course.id)
+    except ValueError:
+        push_flash(request, choose_text(request, "Assignment override settings are invalid.", "作业覆盖配置无效。"), "danger")
+        return _redirect(f"/teacher/courses/{course.id}")
+    if runtime_image_id.strip() and parsed_runtime_image_id is None:
+        push_flash(request, choose_text(request, "Runtime image is not available for this course.", "该运行镜像不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/courses/{course.id}")
+    if llm_config_id.strip() and parsed_llm_config_id is None:
+        push_flash(request, choose_text(request, "LLM group is not available for this course.", "该 LLM 组不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/courses/{course.id}")
 
     assignment = Assignment(
         course_id=course.id,
@@ -677,6 +722,8 @@ def create_assignment(
         default_scoring_rule=scoring_rule,
         submission_limit_mode=limit_mode,
         submission_limit_value=limit_value,
+        runtime_image_id=parsed_runtime_image_id,
+        llm_config_id=parsed_llm_config_id,
         published_at=utcnow() if assignment_status == AssignmentStatus.PUBLISHED else None,
     )
     db.add(assignment)
@@ -738,6 +785,10 @@ def teacher_assignment_detail(assignment_id: int, request: Request, db: Session 
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
             "assignment_staff_stats": assignment_staff_stats,
+            "available_runtime_images": list_runtime_images(db, assignment.course_id),
+            "available_llm_configs": [
+                group for group in list_llm_configs(db, assignment.course_id) if group_has_callable_target(group)
+            ],
         },
     )
 
@@ -778,6 +829,8 @@ async def create_question(
     require_teacher_confirmation: str = Form("false"),
     min_length: str = Form(""),
     max_length: str = Form(""),
+    runtime_image_id: str = Form(""),
+    llm_config_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -817,6 +870,18 @@ async def create_question(
         return _redirect(f"/teacher/assignments/{assignment.id}")
     order_index = len(assignment.questions) + 1
     teacher_confirmation_required = require_teacher_confirmation == "true"
+    try:
+        parsed_runtime_image_id = _allowed_runtime_image_id(db, runtime_image_id, assignment.course_id)
+        parsed_llm_config_id = _allowed_llm_config_id(db, llm_config_id, assignment.course_id)
+    except ValueError:
+        push_flash(request, choose_text(request, "Question override settings are invalid.", "题目覆盖配置无效。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
+    if runtime_image_id.strip() and parsed_runtime_image_id is None:
+        push_flash(request, choose_text(request, "Runtime image is not available for this course.", "该运行镜像不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
+    if llm_config_id.strip() and parsed_llm_config_id is None:
+        push_flash(request, choose_text(request, "LLM group is not available for this course.", "该 LLM 组不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/assignments/{assignment.id}")
     question = Question(
         assignment_id=assignment.id,
         order_index=order_index,
@@ -825,6 +890,8 @@ async def create_question(
         question_type=q_type,
         max_score=max_score_decimal,
         scoring_rule_override=ScoringRule(scoring_rule_override) if scoring_rule_override else None,
+        runtime_image_id=parsed_runtime_image_id,
+        llm_config_id=parsed_llm_config_id,
     )
     db.add(question)
     db.flush()
@@ -1074,6 +1141,10 @@ def teacher_question_detail(question_id: int, request: Request, db: Session = De
             "can_manage_course": course_role == CourseRole.TEACHER,
             "default_allowed_code_libraries": default_allowed_code_libraries_text(get_locale(request)),
             "question_class_stats": question_class_stats,
+            "available_runtime_images": list_runtime_images(db, question.assignment.course_id),
+            "available_llm_configs": [
+                group for group in list_llm_configs(db, question.assignment.course_id) if group_has_callable_target(group)
+            ],
             "topic_id": topic.id,
             **disc_ctx,
             "can_post_discussion": can_discuss,
@@ -1453,6 +1524,8 @@ async def update_question(
     require_teacher_confirmation: str = Form("false"),
     min_length: str = Form(""),
     max_length: str = Form(""),
+    runtime_image_id: str = Form(""),
+    llm_config_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -1484,6 +1557,20 @@ async def update_question(
     question.description = description.strip() or None
     question.max_score = max_score_decimal
     question.scoring_rule_override = scoring_rule_value
+    try:
+        parsed_runtime_image_id = _allowed_runtime_image_id(db, runtime_image_id, question.assignment.course_id)
+        parsed_llm_config_id = _allowed_llm_config_id(db, llm_config_id, question.assignment.course_id)
+    except ValueError:
+        push_flash(request, choose_text(request, "Question override settings are invalid.", "题目覆盖配置无效。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+    if runtime_image_id.strip() and parsed_runtime_image_id is None:
+        push_flash(request, choose_text(request, "Runtime image is not available for this course.", "该运行镜像不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+    if llm_config_id.strip() and parsed_llm_config_id is None:
+        push_flash(request, choose_text(request, "LLM group is not available for this course.", "该 LLM 组不可用于本课程。"), "danger")
+        return _redirect(f"/teacher/questions/{question.id}")
+    question.runtime_image_id = parsed_runtime_image_id
+    question.llm_config_id = parsed_llm_config_id
     question.updated_at = utcnow()
     teacher_confirmation_required = require_teacher_confirmation == "true"
 

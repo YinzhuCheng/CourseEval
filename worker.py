@@ -10,7 +10,13 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import LLMConfig
 from app.services.llm_groups import group_has_callable_target
-from app.services.submissions import cleanup_stale_running_items, get_code_queue_name, llm_queue_name_for_config, redis_connection
+from app.services.submissions import (
+    cleanup_missing_queued_jobs,
+    cleanup_stale_running_items,
+    get_code_queue_name,
+    llm_queue_name_for_config,
+    redis_connection,
+)
 
 
 settings = get_settings()
@@ -54,6 +60,7 @@ def _stop_process(process: multiprocessing.Process) -> None:
 
 def main() -> None:
     recovered_items = cleanup_stale_running_items()
+    recovered_items += cleanup_missing_queued_jobs()
     if recovered_items:
         logger.warning(
             "Marked %s stale submissions or evaluation tasks as failed during worker startup.",
@@ -64,6 +71,9 @@ def main() -> None:
     try:
         while True:
             desired_layout = _desired_worker_layout()
+            recovered = cleanup_missing_queued_jobs()
+            if recovered:
+                logger.warning("Marked %s queued tasks as failed because their Redis jobs are missing.", recovered)
 
             for queue_name in list(processes):
                 live_processes = [process for process in processes[queue_name] if process.is_alive()]

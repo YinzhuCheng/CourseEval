@@ -108,6 +108,16 @@ def _patch_sqlite_schema(conn) -> None:
                     "ON discussion_topics (free_discussion_topic_id)"
                 )
             )
+    if "course_materials" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("course_materials")}
+        if "free_discussion_topic_id" not in cols:
+            conn.execute(text("ALTER TABLE course_materials ADD COLUMN free_discussion_topic_id INTEGER"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_course_materials_free_discussion_topic_id "
+                    "ON course_materials (free_discussion_topic_id)"
+                )
+            )
 
 
 def init_database() -> None:
@@ -119,6 +129,7 @@ def init_database() -> None:
             _patch_sqlite_schema(conn)
     _ensure_open_community_course()
     _backfill_user_storage()
+    _repair_existing_state()
 
 
 def _backfill_user_storage() -> None:
@@ -127,6 +138,17 @@ def _backfill_user_storage() -> None:
     with SessionLocal() as db:
         try:
             backfill_stored_objects_from_disk(db)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
+def _repair_existing_state() -> None:
+    from app.services.maintenance import repair_existing_state
+
+    with SessionLocal() as db:
+        try:
+            repair_existing_state(db)
             db.commit()
         except Exception:
             db.rollback()

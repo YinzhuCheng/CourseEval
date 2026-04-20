@@ -152,6 +152,24 @@
             <input class="form-control" name="submission_limit_value" type="number" min="1" />
             <div class="form-text">{{ lx("Leave empty for no submission cap.", "留空表示不限制提交次数。") }}</div>
           </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Runtime image override", "运行镜像覆盖") }}</label>
+            <select class="form-select" name="runtime_image_id">
+              <option value="">{{ lx("Use course default", "使用课程默认") }}</option>
+              {% for image in available_runtime_images %}
+              <option value="{{ image.id }}">{{ image.name }} · {{ image.image_tag }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("LLM group override", "LLM 组覆盖") }}</label>
+            <select class="form-select" name="llm_config_id">
+              <option value="">{{ lx("Use course/default resolution", "使用课程/平台默认") }}</option>
+              {% for config in available_llm_configs %}
+              <option value="{{ config.id }}">{{ config.name }} · {{ config.description or config.model_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
           <div class="col-12 d-grid">
             <button class="btn btn-primary" type="submit">{{ lx("Create assignment", "创建作业") }}</button>
           </div>

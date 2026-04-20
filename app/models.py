@@ -909,12 +909,18 @@ class CourseMaterial(Base):
     body_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    free_discussion_topic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("free_discussion_topics.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     course: Mapped[Course] = relationship(back_populates="materials")
     creator: Mapped[User | None] = relationship(foreign_keys=[created_by])
+    free_discussion_topic: Mapped["FreeDiscussionTopic | None"] = relationship(foreign_keys=[free_discussion_topic_id])
     discussion_topic: Mapped["DiscussionTopic | None"] = relationship(
         back_populates="course_material",
         uselist=False,

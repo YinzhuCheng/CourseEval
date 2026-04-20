@@ -168,6 +168,24 @@
               <option value="highest" {% if question.scoring_rule_override and question.scoring_rule_override.value == 'highest' %}selected{% endif %}>{{ elabel("scoring_rule", "highest") }}</option>
             </select>
           </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("Runtime image override", "运行镜像覆盖") }}</label>
+            <select class="form-select" name="runtime_image_id">
+              <option value="">{{ lx("Use assignment/course default", "使用作业/课程默认") }}</option>
+              {% for image in available_runtime_images %}
+              <option value="{{ image.id }}" {% if question.runtime_image_id == image.id %}selected{% endif %}>{{ image.name }} · {{ image.image_tag }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">{{ lx("LLM group override", "LLM 组覆盖") }}</label>
+            <select class="form-select" name="llm_config_id">
+              <option value="">{{ lx("Use assignment/course default", "使用作业/课程默认") }}</option>
+              {% for config in available_llm_configs %}
+              <option value="{{ config.id }}" {% if question.llm_config_id == config.id %}selected{% endif %}>{{ config.name }} · {{ config.description or config.model_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
 
           {% if question.question_type.value == 'short_answer' and question.short_answer_config %}
           {% set sac = question.short_answer_config %}
