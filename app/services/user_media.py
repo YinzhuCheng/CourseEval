@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import User

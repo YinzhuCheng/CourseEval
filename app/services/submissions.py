@@ -44,7 +44,6 @@ from app.services.llm import (
 from app.services.llm_groups import call_llm_group, group_has_callable_target, latest_platform_llm_group
 from app.services.notebook_multimodal import notebook_placeholder_alignment_block, sanitize_notebook_for_llm
 from app.services.scoring import (
-    is_submission_pending_teacher_review,
     resolve_submission_score,
     submission_eligible_for_gradebook,
     submission_requires_teacher_confirmation,
@@ -74,7 +73,6 @@ from app.models import (
     CodeQuestionConfig,
     LLMConfig,
     Question,
-    QuestionVersion,
     RuntimeImage,
     Submission,
 )

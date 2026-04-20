@@ -9,11 +9,9 @@ from app.auth import push_flash
 from app.constants import CourseRole
 from app.db import get_db
 from app.i18n import choose_text
-from app.models import CourseMaterial
 from app.services.course_materials import (
     create_material,
     get_material_for_course,
-    list_materials_for_course,
     store_material_image,
     update_material,
 )

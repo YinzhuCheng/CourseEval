@@ -15,18 +15,15 @@ from app.constants import (
     CourseRole,
     DiscussionGroupVisibility,
     DiscussionTopicKind,
-    MembershipStatus,
     ReportStatus,
     ReportTargetType,
 )
 from app.db import utcnow
 from app.models import (
     CourseMaterial,
-    CourseMember,
     DiscussionGroup,
     DiscussionPost,
     FreeDiscussionTopic,
-    Question,
     Report,
     ReportAttachment,
     User,

@@ -72,7 +72,7 @@ def student_courses(request: Request, db: Session = Depends(get_db)):
 @router.get("/llm-usage")
 def student_llm_usage(request: Request, db: Session = Depends(get_db)):
     try:
-        user = require_user(request, db)
+        require_user(request, db)
     except RedirectRequired as redirect:
         return RedirectResponse(url=redirect.location, status_code=303)
 

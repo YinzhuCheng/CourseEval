@@ -105,7 +105,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
                     email="pending@example.com",
                     password_hash=hash_password("password123"),
                     email_verified=False,
-                    email_verification_token="pending-token",
+                    email_verification_token=token_digest("pending-token"),
                     is_active=True,
                 )
             )
@@ -128,7 +128,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
                     email="verifyme@example.com",
                     password_hash=hash_password("password123"),
                     email_verified=False,
-                    email_verification_token="verify-token",
+                    email_verification_token=token_digest("verify-token"),
                     email_verification_sent_at=utcnow(),
                     is_active=True,
                 )
@@ -154,7 +154,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
                     email="rotate@example.com",
                     password_hash=hash_password("password123"),
                     email_verified=False,
-                    email_verification_token="old-token",
+                    email_verification_token=token_digest("old-token"),
                     is_active=True,
                 )
             )
@@ -172,7 +172,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
         user = self._db_user("rotate@example.com")
         self.assertIsNotNone(user)
         assert user is not None
-        self.assertNotEqual(user.email_verification_token, "old-token")
+        self.assertNotEqual(user.email_verification_token, token_digest("old-token"))
         self.assertFalse(user.email_verified)
 
     def test_login_page_prefills_email_for_resend_form(self) -> None:
@@ -219,7 +219,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
                     email="limited@example.com",
                     password_hash=hash_password("password123"),
                     email_verified=False,
-                    email_verification_token="old-token",
+                    email_verification_token=token_digest("old-token"),
                     email_verification_sent_at=utcnow(),
                     email_verification_last_send_at=utcnow(),
                     is_active=True,
@@ -237,7 +237,7 @@ class AuthEmailVerificationTests(unittest.TestCase):
         user = self._db_user("limited@example.com")
         self.assertIsNotNone(user)
         assert user is not None
-        self.assertEqual(user.email_verification_token, "old-token")
+        self.assertEqual(user.email_verification_token, token_digest("old-token"))
 
     def test_password_reset_updates_password_and_clears_token(self) -> None:
         with self.session_factory() as db:

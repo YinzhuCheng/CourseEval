@@ -6,7 +6,7 @@ import random
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.constants import QuestionType
 from app.models import FinalGradeSnapshot, Question, Submission

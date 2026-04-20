@@ -26,12 +26,11 @@ from app.models import Assignment, Course, CourseMember, Feedback, FinalGradeSna
 from app.auth import assign_user_role, has_super_admin, resolve_registration_roles
 from app.services.courses import bootstrap_sample_data, get_assignment_for_student, get_question_for_student
 from app.services.permissions import can_manage_course, can_staff_course
+from app.services.scoring import is_submission_pending_teacher_review, resolve_submission_score
 from app.services.submissions import (
     _resolve_llm_config_for_question,
     _strip_hidden_output_sections,
     create_short_answer_submission,
-    is_submission_pending_teacher_review,
-    resolve_submission_score,
     update_final_grade_snapshot,
 )
 

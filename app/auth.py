@@ -131,13 +131,6 @@ def token_digest(token: str) -> str:
     return hmac.new(get_settings().secret_key.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def token_matches(stored_token: str | None, candidate_token: str) -> bool:
-    if not stored_token or not candidate_token:
-        return False
-    candidate_digest = token_digest(candidate_token)
-    return hmac.compare_digest(stored_token, candidate_digest) or hmac.compare_digest(stored_token, candidate_token)
-
-
 def invite_registration_enabled() -> bool:
     return bool(get_settings().registration_invite_code)
 
@@ -229,19 +222,21 @@ def clear_password_reset(user: User) -> None:
 
 
 def find_user_by_password_reset_token(db: Session, raw_token: str) -> User | None:
-    """Resolve a user from the raw reset token. Uses digest lookup first, then O(k) compat scan for legacy rows."""
+    """Resolve a user from the raw reset token (HMAC digest stored in DB)."""
     token = (raw_token or "").strip()
     if not token:
         return None
     digest = token_digest(token)
-    user = db.scalar(select(User).where(User.password_reset_token == digest))
-    if user is not None:
-        return user
-    candidates = list(db.scalars(select(User).where(User.password_reset_token.is_not(None))).all())
-    for candidate in candidates:
-        if token_matches(candidate.password_reset_token, token):
-            return candidate
-    return None
+    return db.scalar(select(User).where(User.password_reset_token == digest))
+
+
+def find_user_by_email_verification_token(db: Session, raw_token: str) -> User | None:
+    """Resolve a user from the raw email verification token (HMAC digest stored in DB)."""
+    token = (raw_token or "").strip()
+    if not token:
+        return None
+    digest = token_digest(token)
+    return db.scalar(select(User).where(User.email_verification_token == digest))
 
 
 def assign_user_role(user: User, role: UserRole) -> None:
