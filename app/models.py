@@ -18,16 +18,20 @@ from app.constants import (
     EvaluationTaskStatus,
     EvaluationTaskType,
     FeedbackSource,
+    FriendRequestStatus,
     LLMProvider,
     LLMScope,
     LLMTestStatus,
     MembershipStatus,
+    NotificationType,
     PlatformRole,
     QuestionType,
     ReportStatus,
     ReportTargetType,
     RuntimeScope,
     ScoringRule,
+    SocialInviteStatus,
+    SocialInviteType,
     SubmissionLimitMode,
     SubmissionStatus,
     UserRole,
@@ -107,6 +111,7 @@ class User(Base):
     avatar_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     avatar_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     storage_quota_override_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    only_friends_can_invite_discussion_groups: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -172,6 +177,11 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="UserStoredObject.user_id",
     )
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="Notification.user_id",
+    )
 
     @property
     def effective_role(self) -> UserRole:
@@ -182,6 +192,137 @@ class User(Base):
         if self.account_role == AccountRole.TEACHER:
             return UserRole.TEACHER
         return UserRole.STUDENT
+
+
+class FriendRequest(Base):
+    __tablename__ = "friend_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[FriendRequestStatus] = mapped_column(
+        Enum(FriendRequestStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=FriendRequestStatus.PENDING,
+        index=True,
+    )
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    responded_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
+    recipient: Mapped["User"] = relationship(foreign_keys=[recipient_id])
+
+
+Index("ix_friend_requests_requester_recipient_status", FriendRequest.requester_id, FriendRequest.recipient_id, FriendRequest.status)
+
+
+class Friendship(Base):
+    __tablename__ = "friendships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_low_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_high_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user_low: Mapped["User"] = relationship(foreign_keys=[user_low_id])
+    user_high: Mapped["User"] = relationship(foreign_keys=[user_high_id])
+
+
+Index("ix_friendships_pair", Friendship.user_low_id, Friendship.user_high_id, unique=True)
+
+
+class DirectMessageThread(Base):
+    __tablename__ = "direct_message_threads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_low_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_high_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_low_read_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    user_high_read_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_message_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user_low: Mapped["User"] = relationship(foreign_keys=[user_low_id])
+    user_high: Mapped["User"] = relationship(foreign_keys=[user_high_id])
+    messages: Mapped[list["DirectMessage"]] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="DirectMessage.created_at.asc()",
+    )
+
+
+Index("ix_direct_message_threads_pair", DirectMessageThread.user_low_id, DirectMessageThread.user_high_id, unique=True)
+
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("direct_message_threads.id", ondelete="CASCADE"), nullable=False, index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+    thread: Mapped["DirectMessageThread"] = relationship(back_populates="messages")
+    sender: Mapped["User"] = relationship(foreign_keys=[sender_id])
+
+
+class SocialInvite(Base):
+    __tablename__ = "social_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    invitee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    invite_type: Mapped[SocialInviteType] = mapped_column(
+        Enum(SocialInviteType, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        index=True,
+    )
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[SocialInviteStatus] = mapped_column(
+        Enum(SocialInviteStatus, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        default=SocialInviteStatus.PENDING,
+        index=True,
+    )
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    responded_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    inviter: Mapped["User"] = relationship(foreign_keys=[inviter_id])
+    invitee: Mapped["User"] = relationship(foreign_keys=[invitee_id])
+
+
+Index("ix_social_invites_pending_target", SocialInvite.invitee_id, SocialInvite.invite_type, SocialInvite.target_id, SocialInvite.status)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    notification_type: Mapped[NotificationType] = mapped_column(
+        Enum(NotificationType, native_enum=False, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        nullable=False,
+        index=True,
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    link_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    read_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+    user: Mapped["User"] = relationship(back_populates="notifications", foreign_keys=[user_id])
+    actor: Mapped["User | None"] = relationship(foreign_keys=[actor_id])
+
+
+Index("ix_notifications_user_read_created", Notification.user_id, Notification.read_at, Notification.created_at)
 
 
 class Course(Base):

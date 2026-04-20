@@ -1,0 +1,67 @@
+{% extends "profile_layout.html" %}
+
+{% block title %}{{ lx("Friends", "好友") }} - {{ t("site.title") }}{% endblock %}
+
+{% block profile_body %}
+<h1 class="h4 mb-3">{{ lx("Friends", "好友") }}</h1>
+
+<div class="list-group list-group-horizontal-md mb-4">
+  <a class="list-group-item list-group-item-action {% if friend_subsection == 'list' %}active{% endif %}" href="/me/friends">{{ lx("My friends", "我的好友") }}</a>
+  <a class="list-group-item list-group-item-action {% if friend_subsection == 'requests' %}active{% endif %}" href="/me/friends/requests">{{ lx("Requests", "申请") }}</a>
+</div>
+
+<form method="get" action="/me/friends" class="row g-2 mb-3">
+  <div class="col-md-8">
+    <input class="form-control" type="search" name="q" value="{{ query }}" placeholder="{{ lx('Search username or email', '搜索用户名或邮箱') }}" />
+  </div>
+  <div class="col-md-4">
+    <button class="btn btn-primary w-100" type="submit">{{ lx("Search", "搜索") }}</button>
+  </div>
+</form>
+
+{% if search_results %}
+<h2 class="h6 mb-2">{{ lx("Search results", "搜索结果") }}</h2>
+<div class="list-group mb-4">
+  {% for u in search_results %}
+  <div class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+    <div>
+      <div class="fw-semibold">{{ u.username }}</div>
+      <div class="small text-muted">{{ u.email }}</div>
+    </div>
+    <form method="post" action="/me/friends/requests" class="d-flex gap-2">
+      <input type="hidden" name="username" value="{{ u.username }}" />
+      <input class="form-control form-control-sm" name="message" maxlength="500" placeholder="{{ lx('Optional note', '可选留言') }}" />
+      <button class="btn btn-sm btn-outline-primary" type="submit">{{ lx("Add", "添加") }}</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2 class="h6 mb-2">{{ lx("My friends", "我的好友") }}</h2>
+{% if friends %}
+<div class="list-group">
+  {% for friend in friends %}
+  <div class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+    <div>
+      <div class="fw-semibold">{{ friend.username }}</div>
+      <div class="small text-muted">{{ friend.email }}</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <form method="post" action="/me/messages" class="d-flex gap-2">
+        <input type="hidden" name="recipient_id" value="{{ friend.id }}" />
+        <input class="form-control form-control-sm" name="body" maxlength="5000" placeholder="{{ lx('Say something', '发送私信') }}" required />
+        <button class="btn btn-sm btn-outline-primary" type="submit">{{ lx("Send", "发送") }}</button>
+      </form>
+      <form method="post" action="/me/friends/remove" onsubmit="return confirm('{{ lx('Remove this friend?', '确定删除这个好友吗？') }}');">
+        <input type="hidden" name="friend_id" value="{{ friend.id }}" />
+        <button class="btn btn-sm btn-outline-danger" type="submit">{{ lx("Remove", "删除") }}</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">{{ lx("No friends yet.", "还没有好友。") }}</p>
+{% endif %}
+{% endblock %}

@@ -40,6 +40,24 @@
 <div class="alert alert-info small">{{ lx("Earlier members-only posts are hidden from non-members.", "更早的仅组内可见发言不会展示给非组员。") }}</div>
 {% endif %}
 
+{% if can_post_discussion or can_manage_group %}
+<section class="mb-3">
+  <h2 class="h6 mb-2">{{ lx("Invite a friend", "邀请好友") }}</h2>
+  <form method="post" action="/discussion-groups/{{ group.id }}/invite" class="row g-2">
+    <input type="hidden" name="redirect_to" value="{{ request.url.path }}" />
+    <div class="col-md-4">
+      <input class="form-control" name="username" placeholder="{{ lx('Friend username', '好友用户名') }}" required />
+    </div>
+    <div class="col-md-5">
+      <input class="form-control" name="message" maxlength="500" placeholder="{{ lx('Optional note', '可选留言') }}" />
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary w-100" type="submit">{{ lx("Invite", "邀请") }}</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
 {% if can_manage_group %}
 <div class="card shadow-sm mb-3">
   <div class="card-body">

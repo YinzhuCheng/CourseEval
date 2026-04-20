@@ -169,6 +169,35 @@ class ReportStatus(str, Enum):
     DUPLICATE = "duplicate"
 
 
+class FriendRequestStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class SocialInviteType(str, Enum):
+    COURSE = "course"
+    FREE_DISCUSSION_TOPIC = "free_discussion_topic"
+    DISCUSSION_GROUP = "discussion_group"
+
+
+class SocialInviteStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class NotificationType(str, Enum):
+    FRIEND_REQUEST = "friend_request"
+    FRIEND_ACCEPTED = "friend_accepted"
+    DIRECT_MESSAGE = "direct_message"
+    COURSE_INVITE = "course_invite"
+    FREE_DISCUSSION_TOPIC_INVITE = "free_discussion_topic_invite"
+    DISCUSSION_GROUP_INVITE = "discussion_group_invite"
+
+
 class StorageDeletionActor(str, Enum):
     """Who removed a stored asset (shown to viewers without personal names)."""
 

@@ -1,0 +1,48 @@
+{% extends "profile_layout.html" %}
+
+{% block title %}{{ lx("Messages", "消息") }} - {{ t("site.title") }}{% endblock %}
+
+{% block profile_body %}
+<div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">{{ lx("Messages", "消息") }}</h1>
+    <p class="text-muted mb-0">{{ lx("Notifications grouped by where they came from.", "按来源分类查看通知。") }}</p>
+  </div>
+  <form method="post" action="/me/notifications/read">
+    <input type="hidden" name="category" value="{{ notification_category }}" />
+    <button class="btn btn-outline-secondary" type="submit">{{ lx("Mark all read", "全部标为已读") }}</button>
+  </form>
+</div>
+
+<div class="list-group list-group-horizontal-md mb-3">
+  {% set cats = [
+    ("all", lx("All", "全部")),
+    ("friends", lx("Friends", "好友")),
+    ("messages", lx("Private messages", "私信")),
+    ("courses", lx("Courses", "课程")),
+    ("discussion", lx("Discussions", "讨论"))
+  ] %}
+  {% for key, label in cats %}
+  <a class="list-group-item list-group-item-action {% if notification_category == key %}active{% endif %}" href="/me/notifications?category={{ key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if notifications %}
+<div class="list-group">
+  {% for n in notifications %}
+  <a class="list-group-item list-group-item-action {% if not n.read_at %}fw-semibold{% endif %}" href="{{ n.link_url or '/me/notifications' }}">
+    <div class="d-flex justify-content-between gap-3">
+      <span>{{ n.title }}</span>
+      <span class="small text-muted">{{ format_datetime(n.created_at) }}</span>
+    </div>
+    {% if n.body %}
+    <div class="small text-muted mt-1">{{ n.body }}</div>
+    {% endif %}
+    <div class="small text-muted mt-1">{{ n.notification_type.value }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">{{ lx("No notifications in this category.", "这个分类下暂无消息。") }}</p>
+{% endif %}
+{% endblock %}

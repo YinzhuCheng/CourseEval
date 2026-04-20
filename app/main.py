@@ -16,6 +16,7 @@ from app.routes.course_content import router as course_content_router
 from app.routes.discussion_groups import router as discussion_groups_router
 from app.routes.free_discussion import router as free_discussion_router
 from app.routes.reports import router as reports_router
+from app.routes.social import router as social_router
 from app.routes.student import router as student_router
 from app.routes.teacher import router as teacher_router
 from app.routes.uploads import router as uploads_router
@@ -42,6 +43,7 @@ app.include_router(course_content_router)
 app.include_router(free_discussion_router)
 app.include_router(discussion_groups_router)
 app.include_router(reports_router)
+app.include_router(social_router)
 app.include_router(teacher_router)
 app.include_router(admin_router)
 

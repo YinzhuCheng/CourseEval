@@ -76,6 +76,16 @@
               </button>
               <ul class="dropdown-menu dropdown-menu-end">
                 <li><a class="dropdown-item" href="/me/profile">{{ t("nav.profile") }}</a></li>
+                <li><a class="dropdown-item d-flex justify-content-between gap-3" href="/me/notifications">
+                  <span>{{ lx("Messages", "消息") }}</span>
+                  {% if unread_notification_count %}
+                  <span class="badge text-bg-danger">{{ unread_notification_count }}</span>
+                  {% endif %}
+                </a></li>
+                <li><a class="dropdown-item" href="/me/friends">{{ lx("Friends", "好友") }}</a></li>
+                <li><a class="dropdown-item" href="/me/messages">{{ lx("Private messages", "私信") }}</a></li>
+                <li><a class="dropdown-item" href="/me/invites">{{ lx("Invitations", "邀请") }}</a></li>
+                <li><a class="dropdown-item" href="/me/settings">{{ lx("Settings", "设置") }}</a></li>
                 <li><a class="dropdown-item" href="/me/profile/llm-usage">{{ t("student.llm_usage.title") }}</a></li>
                 <li><a class="dropdown-item" href="/me/reports">{{ lx("My reports", "我的举报") }}</a></li>
               </ul>

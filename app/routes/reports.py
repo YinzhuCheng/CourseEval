@@ -122,7 +122,12 @@ def my_reports(request: Request, db: Session = Depends(get_db)):
         user = require_user(request, db)
     except RedirectRequired as redirect:
         return _redirect(redirect.location)
-    return render_template(request, db, "my_reports.html", {"reports": list_reports_by_user(db, user)})
+    return render_template(
+        request,
+        db,
+        "my_reports.html",
+        {"reports": list_reports_by_user(db, user), "profile_section": "reports"},
+    )
 
 
 @router.get("/admin/reports")

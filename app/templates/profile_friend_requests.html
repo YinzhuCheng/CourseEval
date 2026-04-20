@@ -1,0 +1,52 @@
+{% extends "profile_layout.html" %}
+
+{% block title %}{{ lx("Friend requests", "好友申请") }} - {{ t("site.title") }}{% endblock %}
+
+{% block profile_body %}
+<h1 class="h4 mb-3">{{ lx("Friends", "好友") }}</h1>
+
+<div class="list-group list-group-horizontal-md mb-4">
+  <a class="list-group-item list-group-item-action {% if friend_subsection == 'list' %}active{% endif %}" href="/me/friends">{{ lx("My friends", "我的好友") }}</a>
+  <a class="list-group-item list-group-item-action {% if friend_subsection == 'requests' %}active{% endif %}" href="/me/friends/requests">{{ lx("Requests", "申请") }}</a>
+</div>
+
+<h2 class="h6 mb-2">{{ lx("Received requests", "收到的申请") }}</h2>
+{% if received_requests %}
+<div class="list-group mb-4">
+  {% for req in received_requests %}
+  <div class="list-group-item">
+    <div class="d-flex flex-column flex-md-row justify-content-between gap-2">
+      <div>
+        <div class="fw-semibold">{{ req.requester.username }}</div>
+        <div class="small text-muted">{{ format_datetime(req.created_at) }}</div>
+        {% if req.message %}<div class="mt-2">{{ req.message }}</div>{% endif %}
+      </div>
+      <form method="post" action="/me/friends/requests/{{ req.id }}" class="d-flex gap-2 align-items-start">
+        <button class="btn btn-sm btn-primary" name="action" value="accept" type="submit">{{ lx("Accept", "接受") }}</button>
+        <button class="btn btn-sm btn-outline-secondary" name="action" value="reject" type="submit">{{ lx("Reject", "拒绝") }}</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">{{ lx("No received requests.", "暂无收到的申请。") }}</p>
+{% endif %}
+
+<h2 class="h6 mb-2">{{ lx("Sent requests", "发出的申请") }}</h2>
+{% if sent_requests %}
+<div class="list-group">
+  {% for req in sent_requests %}
+  <div class="list-group-item d-flex justify-content-between gap-2">
+    <div>
+      <div class="fw-semibold">{{ req.recipient.username }}</div>
+      <div class="small text-muted">{{ format_datetime(req.created_at) }}</div>
+    </div>
+    <span class="badge text-bg-secondary align-self-start">{{ req.status.value }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">{{ lx("No sent requests.", "暂无发出的申请。") }}</p>
+{% endif %}
+{% endblock %}

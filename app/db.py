@@ -70,6 +70,13 @@ def _patch_sqlite_schema(conn) -> None:
         cols = {c["name"] for c in insp.get_columns("users")}
         if "storage_quota_override_bytes" not in cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN storage_quota_override_bytes INTEGER"))
+        if "only_friends_can_invite_discussion_groups" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE users "
+                    "ADD COLUMN only_friends_can_invite_discussion_groups BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
     if "platform_llm_token_policy" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("platform_llm_token_policy")}
         if "default_student_storage_bytes" not in cols:
