@@ -199,6 +199,8 @@ From repository root, prefer the shared verification script:
 bash scripts/verify.sh
 ```
 
+This runs (in order): `compileall` on `app`, `runner`, and `tests`; **ruff** checks for unused imports and unused locals (`F401`, `F841`); then **pytest** for the full suite. See **[docs/verification.md](docs/verification.md)** for scope, gaps (Redis, Docker, live LLM), and manual checks.
+
 For a fresh local environment:
 
 ```bash
@@ -214,8 +216,6 @@ Agent-friendly validation convention:
 - For documentation-only changes, run at least `python3 -m compileall app runner -q`, or explicitly state why pytest was not run.
 - Do not modify unrelated files while chasing validation failures unless the task explicitly asks for cleanup.
 
-There is **no dedicated lint script** in-repo; rely on the verification script unless the host environment adds ruff/mypy.
-
 ---
 
 ## 9. Deeper documentation index
@@ -224,6 +224,7 @@ There is **no dedicated lint script** in-repo; rely on the verification script u
 |----------|-----------|
 | `docs/file-map.md` | You need “which file owns X?” grouped by responsibility |
 | `docs/change-guide.md` | You are modifying behavior and need coupling / failure-mode hints |
+| `docs/verification.md` | You need what automated verification covers, what it does not, and manual validation hints |
 | `docs/known-issues.md` | You are reviewing technical debt, maintenance traps, or doc/code inconsistencies |
 | `docs/deployment-and-upgrades.md` | You need deployment, persistence, queue, or migration/upgrade expectations |
 | `docs/architecture/submission-lifecycle.md` | Submission + task + worker state flow |

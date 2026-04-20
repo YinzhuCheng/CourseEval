@@ -200,4 +200,4 @@ Privacy note: members-only discussion groups are not visible to ordinary adminis
 | Assignment visibility | `tests/test_assignment_visibility.py` |
 | Discussions / materials | `tests/test_discussions_and_materials.py` |
 
-Run all: `python3 -m pytest tests/ -q`.
+Run the full check: `bash scripts/verify.sh` (includes compileall, ruff `F401`/`F841`, pytest). See [verification.md](verification.md) for what is and is not covered automatically.
